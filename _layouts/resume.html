@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+
+  {% include head.html %}
+
+  <body class="theme-{% if site.resume_theme %}{{ site.resume_theme }}{% endif %}">
+
+    <div class="wrapper" itemscope itemtype="http://schema.org/Person">
+
+      <header class="page-header">
+
+        <!-- You can turn off the avatar in _config.yml by setting to false -->
+        {% if site.resume_avatar == 'true' %}
+        <img src="images/avatar.jpg" alt="my photo" class="avatar" itemprop="image">
+        {% endif %}
+
+        <!-- Your name is defined in the _config.yml file -->
+        <h1 class="header-name" itemprop="name">{{ site.resume_name }}</h1>
+
+        <div class="title-bar">
+
+          <!-- Your title is also defined in the _config.yml file -->
+          <h2 class="header-title" itemprop="jobTitle">{{ site.resume_title }}</h2>
+
+          <!-- This is the markup for the icon links; moved out to an include because it's very verbose, and you shouldn't ever need to edit the markup (unless you want to re-order the icons); if you want to customize which links appear, define them in the _config.yml file -->
+          {% include icon-links.html %}
+        </div>
+
+        <div class="executive-summary" itemprop="description">
+          <p align="justify">Hello world! I am a Ph.D. candidate in the Stellar Ages & Galactic Evolution (SAGE) group at the Max Planck Institute for Solar System Research and the Department of Astronomy at Yale University, where I am advised by Saskia Hekker and Sarbani Basu.</p>
+          <p align="justify">My research focuses on measuring fundamental aspects of our universe, such as its age and its size, through the study of variable stars. </p>
+          <p align="justify">My interests are focused around asteroseismology, machine learning, and the history and philosophy of science. I am an advocate for open source and open science.</p>
+          <p align="justify">I enjoy teaching and have had the privilege to assist in teaching courses at SUNY Oswego, Indiana University, and the University of Göttingen. In my free time, I like to compose music and play the guitar and drums.</p>
+          <p><a href="http://cs.oswego.edu/~ebelling/vitae.pdf">PDF version of my cv</a></p>
+        </div>
+
+        {% if site.resume_looking_for_work == 'yes' %}
+        <a href="mailto:{{ site.resume_contact_email }}" class="contact-button" itemprop="email">Contact me</a>
+        {% elsif site.resume_looking_for_work == 'no' %}
+        <a class="contact-button not-looking">I'm not looking for work right now.</a>
+        {% else %}
+        {% endif %}
+
+      </header>
+
+      {% if site.resume_section_education %}
+      <!-- begin Education -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Education</h2>
+        </header>
+
+        <div class="resume-item" itemscope itemprop="alumniOf" itemtype="http://schema.org/CollegeOrUniversity">
+          <h3 class="resume-item-title" itemprop="name">Georg-August-Universität Göttingen, Germany</h3>
+          <h4 class="resume-item-details" itemprop="description">Ph.D., Computer Science &bull; 2015 &mdash; present</h4>
+          <p class="resume-item-copy">Advised by Dr. ir. Saskia Hekker and Prof. Dr. Sarbani Basu<br />
+                                	    Thesis Topic: <i>Asteroseismic Inversions of Solar-like Oscillators</i></p>
+        </div>
+
+        <div class="resume-item" itemscope itemprop="alumniOf" itemtype="http://schema.org/CollegeOrUniversity">
+          <h3 class="resume-item-title" itemprop="name">Indiana University, Bloomington, IN, USA</h3>
+          <h4 class="resume-item-details" itemprop="description">M.Sc. Computer Science &bull; 2012 &mdash; 2014</h4>
+          <p class="resume-item-copy">Advised by Prof. Dr. Predrag Radivojac and Prof. Dr. Haixu Tang<br />
+                                	    Fellow of the National Physical Science Consortium<br />
+                                      GPA: 3.94/4.0</p>
+        </div>
+
+        <div class="resume-item" itemscope itemprop="alumniOf" itemtype="http://schema.org/CollegeOrUniversity">
+          <h3 class="resume-item-title" itemprop="name">State University of New York at Oswego, USA</h3>
+          <h4 class="resume-item-details" itemprop="description">B.Sc. Computer Science &bull; 2008 &mdash; 2012</h4>
+          <h4 class="resume-item-details" itemprop="description">B.Sc. Applied Mathematics &bull; 2008 &mdash; 2012</h4>
+          <p class="resume-item-copy">Advised by Prof. Dr. Shashi Kanbur and Prof. Dr. Steven Reyner<br />
+                                	    Honors Thesis: <i>Multiphase Relations of Magellanic Cloud Cepheids</i><br />
+                                      GPA: 3.81/4.0 (<i>summa cum laude</i>, Outstanding Computer Science Senior)</p>
+        </div>
+
+      </section>
+      <!-- end Education -->
+      {% endif %}
+
+
+      {% if site.resume_section_experience %}
+      <!-- begin Experience -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Experience</h2>
+        </header>
+
+        <!-- Duplicate these resume-item elements and edit accordingly for each job you want to add here -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">Yale University</h3>
+          <h4 class="resume-item-details" itemprop="description">Department of Astronomy, New Haven, CT, USA &bull; 2016 &mdash; present</h4>
+          <p class="resume-item-copy">Asteroseismic inversions of solar-like stars</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">Max Planck Institute for Solar System Research</h3>
+          <h4 class="resume-item-details" itemprop="description">Stellar Ages & Galactic Evolution Group, Göttingen, Germany &bull; 2015 &mdash; present</h4>
+          <p class="resume-item-copy">Fundamental stellar parameters in an instant with machine learning</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">Indiana University Bloomington</h3>
+          <h4 class="resume-item-details" itemprop="description">Proteomics Laboratory, Bloomington, IN, USA &bull; 2013 &mdash; 2015</h4>
+          <p class="resume-item-copy">Protein inference and quantification from tandem mass spectrometry</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">National Institute of Standards and Technology (NIST)</h3>
+          <h4 class="resume-item-details" itemprop="description">Information Technology Laboratory, Gaithersburg, MD, USA &bull; 2013, 2014</h4>
+          <p class="resume-item-copy">HydratiCA Information Discoverer (HIDE), a data mining tool for 3D chemical simulations</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">National Center of Sciences</h3>
+          <h4 class="resume-item-details" itemprop="description">National Institute of Informatics, Tokyo, Japan &bull; Spring 2013</h4>
+          <p class="resume-item-copy">Asynchronous updating in elementary cellular automata with stochastic perturbations</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">National Aeronautics and Space Administration (NASA)</h3>
+          <h4 class="resume-item-details" itemprop="description">Jet Propulsion Laboratory, Pasadena, CA, USA &bull; Summer 2012</h4>
+          <p class="resume-item-copy">CASSIUS, a communication tool for the Cassini mission to Saturn</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">Federal University of Alagoas</h3>
+          <h4 class="resume-item-details" itemprop="description">Physics Institute, Maceió, Brazil &bull; Summer 2011</h4>
+          <p class="resume-item-copy">Dynamics of interacting electrons in disordered systems</p>
+        </div><!-- end of resume-item -->
+
+        <!-- another resume item -->
+        <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+          <h3 class="resume-item-title" itemprop="name">National Laboratory of Astrophysics</h3>
+          <h4 class="resume-item-details" itemprop="description">Itajubá, Brazil &bull; Summer 2010</h4>
+          <p class="resume-item-copy">Chimera: an automated observatory system</p>
+        </div><!-- end of resume-item -->
+
+      </section>
+      <!-- end Experience -->
+      {% endif %}
+
+
+      {% if site.resume_section_teaching %}
+      <!-- begin Teaching -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Teaching</h2>
+        </header>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title">Yale University</h3>
+          <h4 class="resume-item-details">Teaching Assistant, Department of Astronomy &bull; Spring 2016</h4>
+          <p class="resume-item-copy">ASTR 550 &mdash; Stellar Astrophysics</p>
+        </div>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title">Georg-August-Universität Göttingen</h3>
+          <h4 class="resume-item-details">Assistant, Fakultät Physik &bull; Summer 2016 </h4>
+          <p class="resume-item-copy">M.Phy.55x.3C &mdash; Numerical Experiments in Stellar Physics</p>
+        </div>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title">Indiana University Bloomington</h3>
+          <h4 class="resume-item-details">Associate Instructor, School of Informatics and Computing &bull; Fall 2012 </h4>
+          <p class="resume-item-copy">CSCI-C211/A591 &mdash; Introduction to Computer Science</p>
+        </div>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title">SUNY Oswego</h3>
+          <h4 class="resume-item-details">Seminar Leader, Honors Program &bull; Fall 2010 </h4>
+          <p class="resume-item-copy">HON 150 &mdash; Introduction to Honors</p>
+        </div>
+
+      </section>
+      <!-- end Teaching -->
+      {% endif %}
+
+
+      {% if site.resume_section_publications %}
+      <!-- begin Publications -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Publications</h2>
+        </header>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title">Refereed Articles</h3>
+          <!--<h4 class="resume-item-details">Refereed Articles</h4>-->
+          <p class="resume-item-copy">
+            <ol reversed>
+              <li><b>Bellinger, E. P.</b>, Angelou, G., Hekker, S., Basu, S., Ball, W., Guggenberger, E. (2016). Fundamental Parameters of Main-Sequence Stars in an Instant with Machine Learning. <i>The Astrophysical Journal</i>, accepted.</li>
+              <li>Guggenberger, E., Hekker, S., Basu, S., <b>Bellinger, E. P.</b> (2016). Significantly improving stellar mass and radius estimates: A new reference function for the Δν scaling relation. <i>Monthly Notices of the Royal Astronomical Society</i>, 461 (2), doi: 10.1093/mnras/stw1326.</li>
+              <li>Glover, M., <b>Bellinger, E. P.</b>, Radivojac, P., Clemmer, D. (2015). Penultimate Proline in Neuropeptides. <i>Analytic Chemistry</i>, 87 (16), 8466–8472, doi: 10.1021/acs.analchem.5b01889.</li>
+              <li>Ji, C., Li, Y. F., <b>Bellinger, E. P.</b>, Li, S., Arnold, R. J., Radivojac, P., Tang, H. (2015, September). A maximum-likelihood approach to absolute protein quantification in mass spectrometry. In <i>Proceedings of the 6th ACM Conference on Bioinformatics, Computational Biology and Health Informatics</i> (pp. 296-305).</li>
+              <li>Ngeow, C. C., Kanbur, S. M., <b>Bellinger, E. P.</b>, Marconi, M., Musella, I., Cignoni, M., & Lin, Y. H. (2012). Period-luminosity relations for Cepheid variables: from mid-infrared to multi-phase. <i>Astrophysics and Space Science</i>, 341(1), 105-113, doi: 10.1007/s10509-012-1018-5.</li>
+            </ol>
+          </p>
+
+          <h3 class="resume-item-title">Conference Proceedings</h3>
+          <!--<h4 class="resume-item-details">Conference Proceedings</h4>-->
+          <p class="resume-item-copy">
+            <ol reversed>
+              <li><b>Bellinger, E. P.</b>, Wysocki, D., Kanbur, S. M. (2015). Measuring amplitudes of harmonics and combination frequencies in variable stars. <i>Communications from the Konkoly Observatory of the Hungarian Academy of Sciences</i>, 105.</li>
+              <li><b>Bellinger, E. P.</b>, Kanbur, S. M., & Ngeow, C. C. (2012). New insights into the Cepheid PL Relation through the use of multiphase relations. <i>Proceedings of the 20th Stellar Pulsations Conference</i>.</li>
+              <li>Reyner, S., <b>Bellinger, E. P.</b>, & Kanbur, S. M. (2012). The approximation of RR Lyrae and eclipsing binary light curves using cubic polynomials. <i>Proceedings of the 20th Stellar Pulsations Conference</i>.</li>
+              <li><b>Bellinger, E. P.</b> (2012). Multiphase Relations of Magellanic Cloud Cepheids. <i>Proceedings of the 2012 National Conference on Undergraduate Research</i>.</li>
+              <li><b>Bellinger, E. P.</b>, Kanbur, S. M., & Ngeow, C. C. (2011). Multiphase Comparison of Period-Luminosity Relations for Magellanic Cloud Cepheids. <i>Proceedings of the 9th Pacific Rim Conference on Stellar Astrophysics</i> (Vol. 451, p. 311).</li>
+            </ol>
+          </p>
+
+          <h3 class="resume-item-title">Technical Reports</h3>
+          <!--<h4 class="resume-item-details">Conference Proceedings</h4>-->
+          <p class="resume-item-copy">
+            <ol reversed>
+              <li><b>Bellinger, E. P.</b>, Conner, D., Mittman, D., Magee, K., & Heventhal, B. (2012). CASSIUS: the Cassini Uplink Scheduler. <i>Jet Propulsion Laboratory: National Aeronautics and Space Administration</i>, hdl:2014/43122.</li>
+            </ol>
+          </p>
+        </div>
+
+        <div class="resume-item">
+          <!--<h3 class="resume-item-title"></h3>
+          <h4 class="resume-item-details"></h4>-->
+          <p class="resume-item-copy"></p>
+        </div>
+
+      </section>
+      <!-- end Publications -->
+      {% endif %}
+
+      {% if site.resume_section_skills %}
+      <!-- begin Skills -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Skills</h2>
+        </header>
+
+        <div class="resume-item">
+          <h4 class="resume-item-details">Donut design</h4>
+          <p class="resume-item-copy">Sprinkle art, icing design, eclair management, taste testing, donut/coffee pairing research</p>
+        </div>
+
+        <div class="resume-item">
+          <h4 class="resume-item-details">Craft beer brewing</h4>
+          <p class="resume-item-copy">Hops inspection, brew testing, distribution management, bottle label design, festival and event management</p>
+        </div>
+
+        <div class="resume-item">
+          <h4 class="resume-item-details">Family leadership</h4>
+          <p class="resume-item-copy">Bread winning, conflict resolution, couch inspection, TV longevity testing</p>
+        </div>
+
+      </section>
+      <!-- end Skills -->
+      {% endif %}
+
+      {% if site.resume_section_recognition %}
+      <!-- begin Recognition -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Recognition</h2>
+        </header>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title" itemprop="award">Springfield Nuclear Power Plant</h3>
+          <h4 class="resume-item-details">Outstanding Achievement &bull; 2010</h4>
+          <p class="resume-item-copy">Awarded for stopping a nuclear meltdown, even though I also started it.</p>
+        </div>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title" itemprop="award">Duff Beer Customer of the year</h3>
+          <h4 class="resume-item-details">1997 &mdash; 2001, 2003, 2008 &mdash; 2012</h4>
+          <p class="resume-item-copy">Honored by <a href="https://en.wikipedia.org/wiki/Duff_Beer">Duff Beer</a> for being an outstanding customer several years straight. Qualifications included most beer consumed at a bar, most beer purchased, and most beer ralphed.</p>
+        </div>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title" itemprop="award">Moe's Patron of the Month</h3>
+          <h4 class="resume-item-details">12/2001, 8/2004</h4>
+          <p class="resume-item-copy">Specifically this prestigious awarded twice for stopping a robber with my belly.</p>
+        </div>
+
+      </section>
+      <!-- end Recognition -->
+      {% endif %}
+
+      {% if site.resume_section_associations %}
+      <!-- begin Associations -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Associations</h2>
+        </header>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title"><a href="http://beerfortheworld.com">Beer for the World</a></h3>
+          <h4 class="resume-item-details">Volunteer &bull; 2008 &mdash; Present</h4>
+          <p class="resume-item-copy">Organized fund drives and participated in fundraising events for the benefit of families in third world countries without proper access to malt beverages.</p>
+        </div>
+
+        <div class="resume-item">
+          <h3 class="resume-item-title">Springfield Nuclear Workers Labor Union</h3>
+          <h4 class="resume-item-details">Member in Good Standin &bull; 1994 &mdash; Present</h4>
+          <p class="resume-item-copy">Founding member of the local nuclear workers labor union.</p>
+        </div>
+
+      </section>
+      <!-- end Associations -->
+      {% endif %}
+
+      {% if site.resume_section_links %}
+      <!-- begin Links -->
+      <section class="content-section">
+
+        <header class="section-header">
+          <h2>Additional Links</h2>
+        </header>
+
+        <div class="resume-item">
+          <ul class="resume-item-list">
+            <li><a href="#">Springfield Poker Club</a></li>
+            <li><a href="#">Springfield Donut Eater's User Group</a></li>
+          </ul>
+        </div>
+
+      </section>
+      <!-- end Links -->
+      {% endif %}
+
+      <footer class="page-footer">
+        <p class="footer-line">Earl Patrick Bellinger</p>
+        <p class="footer-line">Ph.D. Candidate</p>
+      </footer>
+
+    </div>
+
+  </body>
+
+</html>
