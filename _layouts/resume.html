@@ -31,15 +31,23 @@
           <p align="justify">My research focuses on measuring fundamental aspects of our universe, such as its age and its size, through the study of variable stars. </p>
           <p align="justify">My interests are focused around asteroseismology, machine learning, and the history and philosophy of science. I am an advocate for open source and open science.</p>
           <p align="justify">I enjoy teaching and have had the privilege to assist in teaching courses at SUNY Oswego, Indiana University, and the University of Göttingen. In my free time, I like to compose music and play the guitar and drums.</p>
-          <p><a href="http://cs.oswego.edu/~ebelling/vitae.pdf">PDF version of my cv</a></p>
         </div>
 
-        {% if site.resume_looking_for_work == 'yes' %}
-        <a href="mailto:{{ site.resume_contact_email }}" class="contact-button" itemprop="email">Contact me</a>
-        {% elsif site.resume_looking_for_work == 'no' %}
-        <a class="contact-button not-looking">I'm not looking for work right now.</a>
-        {% else %}
-        {% endif %}
+        <div align="center">
+          <table>
+            <tr>
+              <td>
+                <a href="http://cs.oswego.edu/~ebelling/vitae.pdf" class="contact-button" target="new">PDF cv</a>
+              </td>
+              <td>
+                &nbsp;&nbsp;&nbsp;
+              </td>
+              <td>
+                <a href="mailto:{{ site.resume_contact_email }}" class="contact-button" itemprop="email">Contact me</a>
+              </td>
+            </tr>
+          </table>
+        </div>
 
       </header>
 
