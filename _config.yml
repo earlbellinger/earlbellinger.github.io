@@ -9,7 +9,7 @@ sass:
   style: compressed
 
 # Resume settings
-resume_avatar:                  "false"
+resume_avatar:                  "true"
 resume_name:                    "Earl Patrick Bellinger"
 resume_title:                   "Ph.D. Candidate – MPS & Yale"
 resume_contact_email:           "earl.bellinger@yale.edu"
