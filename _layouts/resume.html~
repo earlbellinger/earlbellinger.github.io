@@ -214,7 +214,7 @@
           <!--<h4 class="resume-item-details">Refereed Articles</h4>-->
           <p class="resume-item-copy">
             <ol reversed>
-              <li><b>Bellinger, E. P.</b>, Angelou, G., Hekker, S., Basu, S., Ball, W., Guggenberger, E. (2016). <a href="https://arxiv.org/abs/1607.02137">Fundamental Parameters of Main-Sequence Stars in an Instant with Machine Learning</a>. <i>The Astrophysical Journal</i>, accepted.</li>
+              <li><b>Bellinger, E. P.</b>, Angelou, G., Hekker, S., Basu, S., Ball, W., Guggenberger, E. (2016). <a href="https://arxiv.org/abs/1607.02137">Fundamental Parameters of Main-Sequence Stars in an Instant with Machine Learning</a>. <i>The Astrophysical Journal</i>, 830 (1), 20.</li>
               <li>Guggenberger, E., Hekker, S., Basu, S., <b>Bellinger, E. P.</b> (2016). <a href="http://arxiv.org/abs/1606.01917">Significantly improving stellar mass and radius estimates: A new reference function for the Δν scaling relation</a>. <i>Monthly Notices of the Royal Astronomical Society</i>, 461 (2), doi: 10.1093/mnras/stw1326.</li>
               <li>Glover, M., <b>Bellinger, E. P.</b>, Radivojac, P., Clemmer, D. (2015). <a href="http://www.ncbi.nlm.nih.gov/pubmed/26192015">Penultimate Proline in Neuropeptides</a>. <i>Analytic Chemistry</i>, 87 (16), 8466–8472, doi: 10.1021/acs.analchem.5b01889.</li>
               <li>Ji, C., Li, Y. F., <b>Bellinger, E. P.</b>, Li, S., Arnold, R. J., Radivojac, P., Tang, H. (2015, September). <a href="http://dl.acm.org/citation.cfm?id=2808750">A maximum-likelihood approach to absolute protein quantification in mass spectrometry</a>. In <i>Proceedings of the 6th ACM Conference on Bioinformatics, Computational Biology and Health Informatics</i> (pp. 296-305).</li>
@@ -461,8 +461,8 @@ Oswego Global Laboratory Scholarship &bull; 2010, 2011 <i>(awarded twice)</i></p
       <footer class="page-footer">
         <p class="footer-line">Earl Patrick Bellinger</p>
         <p class="footer-line"><i>Site made with <a href="https://jekyllrb.com/">Jekyll</a></i></p>
-        <p class="footer-line"><i>Photo credit to <a href="https://www.facebook.com/JakubOstrowskiPhotography">Jakub Ostrowski</a></i></p>
-        <p class="footer-line"><i>Last updated: September 2016</i></p>
+        <!--<p class="footer-line"><i>Photo credit to <a href="https://www.facebook.com/JakubOstrowskiPhotography">Jakub Ostrowski</a></i></p>-->
+        <p class="footer-line"><i>Last updated: October 2016</i></p>
       </footer>
 
     </div>
