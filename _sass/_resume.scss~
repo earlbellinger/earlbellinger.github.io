@@ -21,7 +21,7 @@
 .page-header { padding: 1.5rem 0;
 
   .avatar {
-    width: 125px;
+    width: 105px;
     max-width: 100%;
     overflow: hidden;
     @include border-radius(100px);
@@ -175,4 +175,13 @@
       color: #333;
     }
   }
+}
+
+// hyperlinks
+
+
+  
+a:visited, a:link, a:active
+{
+    text-decoration: none;
 }
