@@ -1,6 +1,7 @@
 # Site settings
 title: "Earl Bellinger"
 description: "Earl Bellinger's homepage"
+baseurl: /
 
 # Build settings
 markdown: kramdown
