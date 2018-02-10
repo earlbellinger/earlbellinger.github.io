@@ -51,7 +51,7 @@
 // type utilities
 
 @mixin sans {
-  font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Helvetica Neue", "Open Sans", Helvetica, Arial, sans-serif;
 }
 
 @mixin sans_light {
@@ -75,7 +75,7 @@
 }
 
 @mixin serif {
-  font-family: "Lora", "Minion Pro", Palatino, Georgia, serif;
+  font-family: Palatino, "Lora", "Minion Pro", Georgia, serif;
 }
 
 @mixin serif_regular {
