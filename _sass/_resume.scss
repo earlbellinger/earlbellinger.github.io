@@ -204,4 +204,11 @@ a:hover
         color: #9c9c9c;
       }
     }
+  
+  li {
+    display:inline-block;
+    border-left:4px solid;
+    padding:10px;
+    border-color: #9c9c9c;
   }
+}
