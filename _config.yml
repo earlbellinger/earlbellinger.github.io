@@ -27,7 +27,7 @@ resume_section_education:       true
 resume_section_experience:      true
 resume_section_teaching:        true
 resume_section_publications:    true
-resume_section_skills:          true
+resume_section_skills:          false
 resume_section_talks:           true
 resume_section_posters:         true
 resume_section_misc:            true
