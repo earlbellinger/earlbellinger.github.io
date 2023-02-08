@@ -18,7 +18,7 @@
 
 // page header styles
 
-.page-header { padding: 1.5rem 0;
+.page-header { padding: 3rem 0;
 
   .avatar {
     width: 105px;
@@ -30,31 +30,32 @@
   }
 
   .header-name {
-    @include sans;
-    font-size: 3rem;
-    font-weight: 900;
+    @include title_serif;
+    font-size: 2.5rem;
+    //font-weight: 800;
     text-align: center;
-    letter-spacing: -.15rem;
-    line-height: 1;
-    margin: 1rem 0 2rem;
+    //letter-spacing: -.15rem;
+    //line-height: 1;
+    margin: 0.5rem 0 0rem;
   }
 
   .title-bar {
-    @include section_border;
-    padding: .4rem 0;
+    //@include section_border;
+    padding: .2rem 0;
     @include clearfix;
 
     .header-title {
-      @include sans;
-      font-weight: 300;
-      font-size: 1.75rem;
-      line-height: 2rem;
+      @include subtitle_serif;
+      color: #555;
+      font-weight: lighter;
+      font-size: 1.66rem;
+      //line-height: 2rem;
       letter-spacing: -.05rem;
       text-align: center;
-      margin: 0 0 .5rem;
+      margin: 0 0 0rem;
 
       @include media_larger_than_mobile {
-        float: left;
+        //float: left;
         margin: 0;
       }
     }
@@ -83,17 +84,19 @@
   top: 4px;
   text-align: center;
   border-top: 2px solid #c7c7c7;
-  padding-top: .4rem;
+  padding-top: 2.5rem;
+  padding-bottom: 2rem;//.4rem;
 
   @include media_larger_than_mobile {
-    float: right;
+    //float: right;
     border-top: none;
-    padding-top: 0;
+    //padding-top: 0;
   }
 
   .icon-link-item {
     display: inline-block;
     margin-left: 5px;
+    margin-right: 5px;
   }
 
   .icon-link { display: inline-block;
