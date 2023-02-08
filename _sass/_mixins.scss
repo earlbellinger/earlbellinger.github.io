@@ -88,6 +88,14 @@
   font-weight: 700;
 }
 
+@mixin title_serif {
+  font-family: "Noto Serif", "Lora", "Minion Pro", Palatino, Georgia, serif;
+}
+
+@mixin subtitle_serif {
+  font-family: "Noto Serif", "Lora", "Minion Pro", Palatino, Georgia, serif;
+}
+
 // layout
 
 @mixin section_border {
