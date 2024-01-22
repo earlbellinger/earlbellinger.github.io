@@ -9,11 +9,7 @@
 
     <header class="page-header">
 
-      <!-- You can turn off the avatar in _config.yml by setting to false -->
       {% if site.resume_avatar == 'true' %}
-      <!--<a href="images/avatar.jpg"><img src="images/avatar-small.jpg" alt="my photo" class="avatar" itemprop="image"></a>-->
-      <!--<img src="images/avatar2.jpg" alt="my photo" class="avatar" itemprop="image">-->
-      <!--<img src="images/avatar3.jpg" alt="my photo" class="avatar" itemprop="image">-->
       <img src="images/avatar.png" alt="my photo" class="avatar" itemprop="image">
       {% endif %}
 
@@ -50,7 +46,6 @@
         <table>
           <tr>
             <td>
-              <!-- <a href="https://github.com/earlbellinger/earlbellinger.github.io/blob/master/Bellinger-resume-2017-07.pdf" class="contact-button" target="new">Résumé</a> -->
               <a href="{{ site.baseurl }}/resume.pdf" class="contact-button"
                 target="_blank">Vitae</a>
             </td>
@@ -71,6 +66,16 @@
     <!-- begin Experience -->
     <section class="content-section">
 
+    <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
+
+        <p class="resume-item-copy">
+          <b>Assistant Professor</b> (2024 &mdash;) <br />
+          Yale University<br />
+          New Haven, CT, USA <br />
+        </p>
+
+      </div>
+      
       <header class="section-header">
         <h2>Postdoctoral Fellowships</h2>
       </header>
@@ -79,7 +84,7 @@
       <div class="resume-item" itemscope itemprop="worksFor" itemtype="http://schema.org/Organization">
 
         <p class="resume-item-copy">
-          <b>MPA Fellowship</b> (2021 &mdash; present; 5 years) <br />
+          <b>MPA Fellowship</b> (2021 &mdash; 2023; 5 year fellowship) <br />
           Max Planck Institute for Astrophysics<br />
           Garching, Munich, Germany <br />
         </p>
