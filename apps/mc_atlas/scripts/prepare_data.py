@@ -29,6 +29,18 @@ SUN_V_MINUS_I = 0.69
 BLACKBODY_V_NM = 550.0
 BLACKBODY_I_NM = 806.0
 PLANCK_HC_OVER_K_M = 0.01438776877
+V_MINUS_I_TEMPERATURE_ANCHORS = (
+    (-0.15, 12000.0),
+    (0.05, 9500.0),
+    (0.25, 7600.0),
+    (0.45, 6500.0),
+    (0.75, 5600.0),
+    (1.15, 4500.0),
+    (1.8, 3400.0),
+    (2.4, 3000.0),
+    (3.2, 2600.0),
+    (4.2, 2200.0),
+)
 
 EQ_TO_GAL = (
     (-0.0548755604162154, -0.8734370902348850, -0.4838350155487132),
@@ -241,6 +253,12 @@ MIST_CLUSTER_ISOCHRONE_CACHE = PROCESSED / "mist_cluster_isochrones_v1.npz"
 CLUSTER_SYNTHETIC_MASS_CUTOFF = 0.5
 CLUSTER_POINT_LUMINOSITY_CUTOFF = 1.0
 CLUSTER_GLOW_BIN_COUNT = 12
+CLUSTER_HR_COLOR_MIN = -0.5
+CLUSTER_HR_COLOR_MAX = 3.2
+CLUSTER_HR_COLOR_BIN_COUNT = 64
+CLUSTER_HR_LOG_LUMINOSITY_MIN = -2.0
+CLUSTER_HR_LOG_LUMINOSITY_MAX = 6.0
+CLUSTER_HR_LOG_LUMINOSITY_BIN_COUNT = 72
 CLUSTER_IMF_MIN_MASS = 0.1
 CLUSTER_IMF_MAX_MASS = 100.0
 CLUSTER_IMF_GRID_SIZE = 18000
@@ -490,21 +508,15 @@ def luminosity_from_i(i_mag: float, distance_kpc: float) -> float:
 def effective_temperature_from_v_minus_i(v_minus_i: float) -> float:
     # Approximate display temperature from intrinsic V-I; this is still only a
     # visual radius estimate, not a physical stellar-parameter fit.
-    anchors = [
-        (-0.15, 12000),
-        (0.05, 9500),
-        (0.25, 7600),
-        (0.45, 6500),
-        (0.75, 5600),
-        (1.15, 4500),
-        (1.8, 3400),
-    ]
+    anchors = V_MINUS_I_TEMPERATURE_ANCHORS
     if v_minus_i <= anchors[0][0]:
         return anchors[0][1]
     for (left_color, left_temp), (right_color, right_temp) in zip(anchors, anchors[1:]):
         if v_minus_i <= right_color:
             fraction = (v_minus_i - left_color) / (right_color - left_color)
-            return left_temp + fraction * (right_temp - left_temp)
+            log_left = math.log(left_temp)
+            log_right = math.log(right_temp)
+            return math.exp(log_left + fraction * (log_right - log_left))
     return anchors[-1][1]
 
 
@@ -5121,6 +5133,7 @@ def serialize_synthetic_clusters(
     list[list[float | int | str | bool | None]],
     list[list[float | int]],
     list[list[float | int]],
+    list[list[float | int]],
     dict[str, int | float],
 ]:
     mist_files = available_mist_files()
@@ -5135,6 +5148,7 @@ def serialize_synthetic_clusters(
     cluster_rows: list[list[float | int | str | bool | None]] = []
     star_rows: list[list[float | int]] = []
     glow_bin_rows: list[list[float | int]] = []
+    hr_bin_rows: list[list[float | int]] = []
     total_expected = 0.0
     total_synthetic_stars = 0
     total_unresolved_stars = 0
@@ -5164,6 +5178,13 @@ def serialize_synthetic_clusters(
         unresolved_color_luminosity = 0.0
         glow_luminosity_bins = np.zeros(CLUSTER_GLOW_BIN_COUNT, dtype=float)
         glow_color_bins = np.zeros(CLUSTER_GLOW_BIN_COUNT, dtype=float)
+        hr_count_bins = np.zeros(
+            (CLUSTER_HR_COLOR_BIN_COUNT, CLUSTER_HR_LOG_LUMINOSITY_BIN_COUNT),
+            dtype=np.int32,
+        )
+        hr_color_bins = np.zeros_like(hr_count_bins, dtype=float)
+        hr_log_luminosity_bins = np.zeros_like(hr_count_bins, dtype=float)
+        hr_luminosity_bins = np.zeros_like(hr_count_bins, dtype=float)
         radius_kpc = max(cluster.radius_pc, 0.5) / 1000
 
         if star_count and cluster_isochrones:
@@ -5212,6 +5233,17 @@ def serialize_synthetic_clusters(
                         glow_bin = min(CLUSTER_GLOW_BIN_COUNT - 1, int(radius_fraction * CLUSTER_GLOW_BIN_COUNT))
                         glow_luminosity_bins[glow_bin] += luminosity
                         glow_color_bins[glow_bin] += luminosity * v_minus_i
+                        log_luminosity = math.log10(max(luminosity, 1e-9))
+                        color_fraction = (v_minus_i - CLUSTER_HR_COLOR_MIN) / (CLUSTER_HR_COLOR_MAX - CLUSTER_HR_COLOR_MIN)
+                        luminosity_fraction = (log_luminosity - CLUSTER_HR_LOG_LUMINOSITY_MIN) / (
+                            CLUSTER_HR_LOG_LUMINOSITY_MAX - CLUSTER_HR_LOG_LUMINOSITY_MIN
+                        )
+                        color_bin = int(np.clip(color_fraction, 0, 0.999999) * CLUSTER_HR_COLOR_BIN_COUNT)
+                        luminosity_bin = int(np.clip(luminosity_fraction, 0, 0.999999) * CLUSTER_HR_LOG_LUMINOSITY_BIN_COUNT)
+                        hr_count_bins[color_bin, luminosity_bin] += 1
+                        hr_color_bins[color_bin, luminosity_bin] += v_minus_i
+                        hr_log_luminosity_bins[color_bin, luminosity_bin] += log_luminosity
+                        hr_luminosity_bins[color_bin, luminosity_bin] += luminosity
                         continue
 
                     rendered_count += 1
@@ -5255,6 +5287,18 @@ def serialize_synthetic_clusters(
                     round_number(float(glow_color_bins[bin_index] / bin_luminosity), 3),
                 ]
             )
+        hr_bin_indexes = np.argwhere(hr_count_bins > 0)
+        for color_bin, luminosity_bin in hr_bin_indexes:
+            count = int(hr_count_bins[color_bin, luminosity_bin])
+            hr_bin_rows.append(
+                [
+                    cluster_index,
+                    round_number(float(hr_color_bins[color_bin, luminosity_bin] / count), 3),
+                    round_number(float(hr_log_luminosity_bins[color_bin, luminosity_bin] / count), 3),
+                    count,
+                    round_luminosity(float(hr_luminosity_bins[color_bin, luminosity_bin])),
+                ]
+            )
 
         cluster_rows.append(
             [
@@ -5294,13 +5338,14 @@ def serialize_synthetic_clusters(
             ]
         )
 
-    return cluster_rows, star_rows, glow_bin_rows, {
+    return cluster_rows, star_rows, glow_bin_rows, hr_bin_rows, {
         "clusters": len(clusters),
         "clusterSyntheticStars": total_synthetic_stars,
         "clusterRenderedStars": len(star_rows),
         "clusterUnresolvedStars": total_unresolved_stars,
         "clusterUnresolvedLuminositySolar": round_luminosity(total_unresolved_luminosity),
         "clusterGlowBins": len(glow_bin_rows),
+        "clusterHrBins": len(hr_bin_rows),
         "clusterGlowBinCount": CLUSTER_GLOW_BIN_COUNT,
         "clusterSyntheticExpectedStars": round_number(total_expected, 1),
         "clusterSyntheticMassCutoffSolar": CLUSTER_SYNTHETIC_MASS_CUTOFF,
@@ -5636,7 +5681,7 @@ def main() -> None:
     red_clump_density_counts, red_clump_density_meta = load_red_clump_density_counts(XMC_DENSITY_COUNTS)
     red_clump_density_summary = attach_red_clump_density(red_clump, red_clump_density_counts)
     clusters = parse_perren_clusters(PERREN_CLUSTER_TABLE, PERREN_ASTECA_TABLE)
-    cluster_rows, cluster_stars, cluster_glow_bins, cluster_summary = serialize_synthetic_clusters(clusters, origin, basis)
+    cluster_rows, cluster_stars, cluster_glow_bins, cluster_hr_bins, cluster_summary = serialize_synthetic_clusters(clusters, origin, basis)
 
     payload = {
         "meta": {
@@ -5788,6 +5833,13 @@ def main() -> None:
                 "luminositySolar",
                 "vMinusI0",
             ],
+            "clusterHrBins": [
+                "clusterIndex",
+                "vMinusI0",
+                "logLuminosity",
+                "starCount",
+                "luminositySolar",
+            ],
         },
         "locations": ["LMC", "SMC", "Bridge", "Outer"],
         "spectralClasses": SPECTRAL_CLASSES,
@@ -5797,6 +5849,7 @@ def main() -> None:
             "clusters": cluster_rows,
             "clusterStars": cluster_stars,
             "clusterGlowBins": cluster_glow_bins,
+            "clusterHrBins": cluster_hr_bins,
         },
         "counts": {
             "cepheids": len(cepheids),

@@ -1,4 +1,4 @@
-const DATA_VERSION = "20260508-mira-v-priors-sky-grid-uniform-color-caps";
+const DATA_VERSION = "20260509-cluster-hr-diagram-mist-teff";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
 const DATA_DOWNLOAD_PROGRESS_MAX = 0.88;
 const ZOOM_BASE_SCALE = 1.62;
@@ -30,6 +30,8 @@ const VIEWPORT_PAGE_STEP_PX = 220;
 const VIEWPORT_ZOOM_STEP_GAIN = 1.16;
 const VIEWPORT_YAW_STEP_DEGREES = 5;
 const VIEWPORT_KEY_FAST_MULTIPLIER = 2.5;
+const TARGET_NAVIGATION_HILBERT_BITS = 10;
+const TARGET_NAVIGATION_VIEWPORT_MARGIN = 24;
 const ORBIT_DRAG_ZOOM_DAMPING = 0.5;
 const ORBIT_DRAG_MIN_SENSITIVITY = 0.18;
 const PULSATOR_RADIUS_BASE_SCALE = 0.31752;
@@ -228,6 +230,14 @@ const CG = {
   outerRadius: 1,
   lum: 2,
   vMinusI0: 3,
+};
+
+const CHR = {
+  cluster: 0,
+  vMinusI0: 1,
+  logLum: 2,
+  count: 3,
+  lum: 4,
 };
 
 const COORDINATE_FRAMES = [
@@ -1033,6 +1043,7 @@ const scene = {
   redClumpSurface: [],
   clusters: [],
   clusterStars: [],
+  clusterStarsByCluster: new Map(),
   activeCatalog: [],
   activeRedClump: [],
   activeClusters: [],
@@ -2066,7 +2077,9 @@ function effectiveTemperatureFromVMinusI(vMinusI) {
     const right = anchors[index];
     if (vMinusI <= right.vMinusI) {
       const amount = (vMinusI - left.vMinusI) / (right.vMinusI - left.vMinusI);
-      return left.temperature + (right.temperature - left.temperature) * amount;
+      const logLeft = Math.log(left.temperature);
+      const logRight = Math.log(right.temperature);
+      return Math.exp(logLeft + (logRight - logLeft) * amount);
     }
   }
 
@@ -3023,6 +3036,221 @@ function updateLightcurveInset() {
     phaseDots[cycle].setAttribute("cy", y.toFixed(2));
     phaseDots[cycle].style.fill = currentPulse.color;
   }
+}
+
+function clusterHrExpandedRange(min, max, minSpan, hardMin, hardMax) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return [hardMin, hardMax];
+  }
+  let low = Math.min(min, max);
+  let high = Math.max(min, max);
+  const span = Math.max(high - low, minSpan);
+  low -= span * 0.08;
+  high += span * 0.08;
+  if (high - low < minSpan) {
+    const center = (low + high) / 2;
+    low = center - minSpan / 2;
+    high = center + minSpan / 2;
+  }
+  if (low < hardMin) {
+    high += hardMin - low;
+    low = hardMin;
+  }
+  if (high > hardMax) {
+    low -= high - hardMax;
+    high = hardMax;
+  }
+  return [Math.max(hardMin, low), Math.min(hardMax, high)];
+}
+
+function clusterHrTicks(min, max, count) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || count <= 1) return [];
+  const ticks = [];
+  for (let index = 0; index < count; index += 1) {
+    ticks.push(min + ((max - min) * index) / (count - 1));
+  }
+  return ticks;
+}
+
+function clusterHrTickLabel(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function clusterHrStarsForTarget(target) {
+  if (!target) return [];
+  if (Array.isArray(target.clusterStars)) return target.clusterStars;
+  const stars = scene.clusterStarsByCluster.get(target.index) || [];
+  target.clusterStars = stars;
+  return stars;
+}
+
+function sampledClusterHrStars(stars, limit = 1600) {
+  if (stars.length <= limit) return stars;
+  const brightLimit = Math.min(320, Math.floor(limit * 0.25));
+  const selected = new Set(
+    [...stars]
+      .sort((left, right) => (right.row[CS.logLum] || 0) - (left.row[CS.logLum] || 0))
+      .slice(0, brightLimit),
+  );
+  const remaining = Math.max(1, limit - selected.size);
+  const stride = Math.max(1, Math.ceil(stars.length / remaining));
+  for (let index = 0; index < stars.length && selected.size < limit; index += stride) {
+    selected.add(stars[index]);
+  }
+  return [...selected];
+}
+
+function createClusterHrDiagram(target) {
+  const stars = clusterHrStarsForTarget(target);
+  const hrBins = target.hrBins || [];
+  let colorMin = Infinity;
+  let colorMax = -Infinity;
+  let logLumMin = Infinity;
+  let logLumMax = -Infinity;
+
+  for (const star of stars) {
+    const color = star.row[CS.vMinusI0];
+    const logLum = star.row[CS.logLum];
+    if (!Number.isFinite(color) || !Number.isFinite(logLum)) continue;
+    colorMin = Math.min(colorMin, color);
+    colorMax = Math.max(colorMax, color);
+    logLumMin = Math.min(logLumMin, logLum);
+    logLumMax = Math.max(logLumMax, logLum);
+  }
+  for (const bin of hrBins) {
+    if (!Number.isFinite(bin.vMinusI0) || !Number.isFinite(bin.logLum)) continue;
+    colorMin = Math.min(colorMin, bin.vMinusI0);
+    colorMax = Math.max(colorMax, bin.vMinusI0);
+    logLumMin = Math.min(logLumMin, bin.logLum);
+    logLumMax = Math.max(logLumMax, bin.logLum);
+  }
+
+  if (!Number.isFinite(colorMin) || !Number.isFinite(logLumMin)) return null;
+
+  const width = 278;
+  const height = 184;
+  const padLeft = 34;
+  const padRight = 10;
+  const padTop = 12;
+  const padBottom = 28;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+  const [xMin, xMax] = clusterHrExpandedRange(colorMin, colorMax, 0.9, -0.6, 3.25);
+  const [yMin, yMax] = clusterHrExpandedRange(logLumMin, logLumMax, 1.6, -2.1, 6.2);
+  const xForColor = (color) => padLeft + ((color - xMin) / (xMax - xMin)) * plotWidth;
+  const yForLogLum = (logLum) => padTop + (1 - (logLum - yMin) / (yMax - yMin)) * plotHeight;
+
+  const diagram = document.createElement("div");
+  diagram.className = "clusterHrDiagram";
+
+  const svg = createSvgElement("svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Synthetic cluster HR diagram");
+
+  const plot = createSvgElement("rect");
+  plot.classList.add("clusterHrPlot");
+  plot.setAttribute("x", String(padLeft));
+  plot.setAttribute("y", String(padTop));
+  plot.setAttribute("width", String(plotWidth));
+  plot.setAttribute("height", String(plotHeight));
+
+  const gridGroup = createSvgElement("g");
+  const axisGroup = createSvgElement("g");
+  const xTicks = clusterHrTicks(xMin, xMax, 4);
+  const yTicks = clusterHrTicks(yMin, yMax, 4);
+  for (const tick of xTicks) {
+    const x = xForColor(tick);
+    const line = createSvgElement("line");
+    line.classList.add("clusterHrGrid");
+    line.setAttribute("x1", x.toFixed(2));
+    line.setAttribute("x2", x.toFixed(2));
+    line.setAttribute("y1", String(padTop));
+    line.setAttribute("y2", String(padTop + plotHeight));
+    gridGroup.append(line);
+
+    const label = createSvgElement("text");
+    label.classList.add("clusterHrTick");
+    label.setAttribute("x", x.toFixed(2));
+    label.setAttribute("y", String(height - 13));
+    label.setAttribute("text-anchor", "middle");
+    label.textContent = clusterHrTickLabel(tick);
+    axisGroup.append(label);
+  }
+  for (const tick of yTicks) {
+    const y = yForLogLum(tick);
+    const line = createSvgElement("line");
+    line.classList.add("clusterHrGrid");
+    line.setAttribute("x1", String(padLeft));
+    line.setAttribute("x2", String(padLeft + plotWidth));
+    line.setAttribute("y1", y.toFixed(2));
+    line.setAttribute("y2", y.toFixed(2));
+    gridGroup.append(line);
+
+    const label = createSvgElement("text");
+    label.classList.add("clusterHrTick");
+    label.setAttribute("x", String(padLeft - 6));
+    label.setAttribute("y", (y + 3).toFixed(2));
+    label.setAttribute("text-anchor", "end");
+    label.textContent = clusterHrTickLabel(tick);
+    axisGroup.append(label);
+  }
+
+  const xLabel = createSvgElement("text");
+  xLabel.classList.add("clusterHrLabel");
+  xLabel.setAttribute("x", String(padLeft + plotWidth / 2));
+  xLabel.setAttribute("y", String(height - 2));
+  xLabel.setAttribute("text-anchor", "middle");
+  xLabel.textContent = "V-I0";
+
+  const yLabel = createSvgElement("text");
+  yLabel.classList.add("clusterHrLabel");
+  yLabel.setAttribute("x", "9");
+  yLabel.setAttribute("y", String(padTop + plotHeight / 2));
+  yLabel.setAttribute("text-anchor", "middle");
+  yLabel.setAttribute("transform", `rotate(-90 9 ${padTop + plotHeight / 2})`);
+  yLabel.textContent = "log L";
+  axisGroup.append(xLabel, yLabel);
+
+  const binGroup = createSvgElement("g");
+  const maxBinCount = Math.max(1, ...hrBins.map((bin) => bin.count || 0));
+  for (const bin of hrBins) {
+    if (!Number.isFinite(bin.vMinusI0) || !Number.isFinite(bin.logLum)) continue;
+    const x = xForColor(bin.vMinusI0);
+    const y = yForLogLum(bin.logLum);
+    const countLevel = Math.log1p(bin.count || 1) / Math.log1p(maxBinCount);
+    const circle = createSvgElement("circle");
+    circle.classList.add("clusterHrBin");
+    circle.setAttribute("cx", x.toFixed(2));
+    circle.setAttribute("cy", y.toFixed(2));
+    circle.setAttribute("r", (1.2 + countLevel * 5.3).toFixed(2));
+    circle.style.fill = bin.color;
+    circle.style.opacity = String(0.16 + countLevel * 0.36);
+    binGroup.append(circle);
+  }
+
+  const starGroup = createSvgElement("g");
+  const displayStars = sampledClusterHrStars(stars);
+  const starOpacity = displayStars.length > 900 ? 0.62 : 0.78;
+  for (const star of displayStars) {
+    const color = star.row[CS.vMinusI0];
+    const logLum = star.row[CS.logLum];
+    if (!Number.isFinite(color) || !Number.isFinite(logLum)) continue;
+    const lumLevel = clamp((logLum - yMin) / (yMax - yMin), 0, 1);
+    const circle = createSvgElement("circle");
+    circle.classList.add("clusterHrStar");
+    circle.setAttribute("cx", xForColor(color).toFixed(2));
+    circle.setAttribute("cy", yForLogLum(logLum).toFixed(2));
+    circle.setAttribute("r", (0.85 + lumLevel * 1.8).toFixed(2));
+    circle.style.fill = star.color;
+    circle.style.opacity = String(starOpacity);
+    starGroup.append(circle);
+  }
+
+  svg.append(plot, gridGroup, binGroup, starGroup, axisGroup);
+  diagram.append(svg);
+  return diagram;
 }
 
 function luminosityDisplayLevel(luminositySolar) {
@@ -6580,6 +6808,14 @@ function handleViewportKeydown(event) {
     case "PageDown":
       moveViewportByScreenDelta(0, pageStep);
       break;
+    case "[":
+    case "{":
+      stepTargetNavigation(-1);
+      break;
+    case "]":
+    case "}":
+      stepTargetNavigation(1);
+      break;
     case "q":
       yawViewportByDegrees(-yawStep);
       break;
@@ -6909,6 +7145,10 @@ function setTarget(target) {
     dl.append(dt, dd);
   }
   elements.target.append(dl);
+  if (current.kind === "cluster") {
+    const hrDiagram = createClusterHrDiagram(current);
+    if (hrDiagram) elements.target.append(hrDiagram);
+  }
   updateCoordinateReadout();
 }
 
@@ -7099,6 +7339,149 @@ function targetRowsForCluster(target) {
     );
   }
   return details;
+}
+
+function targetNavigationIncludesRedClump() {
+  const current = state.locked || state.hovered;
+  return committedDatasetPresetForPicking() === "redclump" || current?.kind === "redclump";
+}
+
+function targetNavigationSortLabel(target) {
+  if (target.kind === "catalog") return String(target.row[IDX.id]);
+  if (target.kind === "cluster") return String(target.row[CL.name]);
+  if (target.kind === "redclump") {
+    const row = target.row;
+    return `${formatNumber(row[RC.lon], 4)},${formatNumber(row[RC.lat], 4)},${formatNumber(row[RC.distance], 3)}`;
+  }
+  return "";
+}
+
+function targetNavigationHilbertIndex(x, y) {
+  let xi = x;
+  let yi = y;
+  let index = 0;
+  const side = 1 << TARGET_NAVIGATION_HILBERT_BITS;
+  const last = side - 1;
+
+  for (let step = side >> 1; step > 0; step >>= 1) {
+    const rx = (xi & step) > 0 ? 1 : 0;
+    const ry = (yi & step) > 0 ? 1 : 0;
+    index += step * step * ((3 * rx) ^ ry);
+    if (ry === 0) {
+      if (rx === 1) {
+        xi = last - xi;
+        yi = last - yi;
+      }
+      const nextX = xi;
+      xi = yi;
+      yi = nextX;
+    }
+  }
+
+  return index;
+}
+
+function buildTargetNavigationCandidates() {
+  if (projectionDirty) rebuildProjectionCache();
+  if (scene.width <= 0 || scene.height <= 0) return [];
+
+  const candidates = [];
+  const seen = new Set();
+  const includeRedClump = targetNavigationIncludesRedClump();
+  const maxHilbertCoordinate = (1 << TARGET_NAVIGATION_HILBERT_BITS) - 1;
+  const centerX = scene.width * 0.5;
+  const centerY = scene.height * 0.5;
+  const minX = -TARGET_NAVIGATION_VIEWPORT_MARGIN;
+  const maxX = scene.width + TARGET_NAVIGATION_VIEWPORT_MARGIN;
+  const minY = -TARGET_NAVIGATION_VIEWPORT_MARGIN;
+  const maxY = scene.height + TARGET_NAVIGATION_VIEWPORT_MARGIN;
+
+  const append = (item, kindWeight) => {
+    const target = item?.point;
+    if (!target || seen.has(target) || !targetIsPickable(target)) return;
+    if (target.kind === "redclump" && !includeRedClump) return;
+    if (target.kind !== "catalog" && target.kind !== "cluster" && target.kind !== "redclump") return;
+
+    const projected = item.projected || target.activeProjected || target.projected;
+    if (!projected || !Number.isFinite(projected.x) || !Number.isFinite(projected.y)) return;
+    if (projected.x < minX || projected.x > maxX || projected.y < minY || projected.y > maxY) return;
+
+    const hilbertX = Math.round((clamp(projected.x, 0, scene.width) / scene.width) * maxHilbertCoordinate);
+    const hilbertY = Math.round((clamp(projected.y, 0, scene.height) / scene.height) * maxHilbertCoordinate);
+    const dx = projected.x - centerX;
+    const dy = projected.y - centerY;
+    seen.add(target);
+    candidates.push({
+      target,
+      key: targetNavigationHilbertIndex(hilbertX, hilbertY),
+      kindWeight,
+      centerDistance2: dx * dx + dy * dy,
+      depth: Number.isFinite(projected.z) ? projected.z : 0,
+      label: targetNavigationSortLabel(target),
+    });
+  };
+
+  for (const item of scene.catalogDrawList) {
+    if (item.point?.kind === "catalog") append(item, 0);
+  }
+  for (const item of scene.clusterTargetDrawList) append(item, 1);
+  if (includeRedClump) {
+    for (const item of scene.redClumpDrawList) append(item, 2);
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.key - right.key ||
+      left.kindWeight - right.kindWeight ||
+      left.depth - right.depth ||
+      left.label.localeCompare(right.label),
+  );
+  return candidates;
+}
+
+function nearestTargetNavigationCandidateIndex(candidates) {
+  let bestIndex = -1;
+  let bestDistance = Infinity;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const distance = candidates[index].centerDistance2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function selectNavigationTarget(target) {
+  if (!target) return;
+  cancelIntroRotation();
+  cancelAxisSpinAnimation();
+  markOrientationGridActive();
+
+  if (state.cameraLocked) {
+    setCameraLock(true, target);
+    return;
+  }
+
+  state.locked = target;
+  state.hovered = null;
+  setTarget(target);
+  updateCoordinateReadout();
+  queueRender();
+}
+
+function stepTargetNavigation(direction) {
+  const candidates = buildTargetNavigationCandidates();
+  if (!candidates.length) return;
+
+  const current = state.locked || state.hovered;
+  const currentIndex = current ? candidates.findIndex((candidate) => candidate.target === current) : -1;
+  const nextIndex =
+    currentIndex >= 0
+      ? positiveModulo(currentIndex + direction, candidates.length)
+      : nearestTargetNavigationCandidateIndex(candidates);
+
+  selectNavigationTarget(candidates[nextIndex]?.target);
 }
 
 function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
@@ -7858,21 +8241,51 @@ function preparePoints(payload) {
   for (const bins of clusterGlowBinsByIndex.values()) {
     bins.sort((left, right) => left.outerRadius - right.outerRadius);
   }
+  const clusterHrBinsByIndex = new Map();
+  for (const row of payload.datasets.clusterHrBins || []) {
+    const clusterIndex = row[CHR.cluster];
+    let bins = clusterHrBinsByIndex.get(clusterIndex);
+    if (!bins) {
+      bins = [];
+      clusterHrBinsByIndex.set(clusterIndex, bins);
+    }
+    bins.push({
+      vMinusI0: row[CHR.vMinusI0],
+      logLum: row[CHR.logLum],
+      count: row[CHR.count],
+      luminosity: row[CHR.lum],
+      color: colorForVMinusI(row[CHR.vMinusI0], 5),
+    });
+  }
+  for (const bins of clusterHrBinsByIndex.values()) {
+    bins.sort((left, right) => left.logLum - right.logLum);
+  }
+  scene.clusterStarsByCluster = new Map();
   scene.clusterStars = (payload.datasets.clusterStars || []).map((row, index) => {
+    const clusterIndex = row[CS.cluster];
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const point = {
       kind: "clusterStar",
       row,
+      clusterIndex,
       coordinates: clusterStarCoordinates(row),
       activeCoordinates: null,
       projected,
       radiusUnit: pointRadiusUnitFromStellarRadius(row[CS.radius]),
       alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CS.lum]),
       vMinusI0: Number.isFinite(row[CS.vMinusI0]) ? row[CS.vMinusI0] : null,
-      color: colorForVMinusI(row[CS.vMinusI0], row[CS.spectral]),
+      color: Number.isFinite(row[CS.temperature])
+        ? colorForTemperature(row[CS.temperature])
+        : colorForVMinusI(row[CS.vMinusI0], row[CS.spectral]),
       sample: hashString(`cs-${row[CS.cluster]}-${index}`) % 100,
       lightCurve: null,
     };
+    let clusterStars = scene.clusterStarsByCluster.get(clusterIndex);
+    if (!clusterStars) {
+      clusterStars = [];
+      scene.clusterStarsByCluster.set(clusterIndex, clusterStars);
+    }
+    clusterStars.push(point);
     point.drawItem = {
       point,
       projected,
@@ -7895,6 +8308,7 @@ function preparePoints(payload) {
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const point = {
       kind: "cluster",
+      index,
       row,
       coordinates: clusterCoordinates(row),
       activeCoordinates: null,
@@ -7903,6 +8317,7 @@ function preparePoints(payload) {
       radiusPc: row[CL.radiusPc],
       glowAlphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CL.unresolvedLum] || 0),
       glowBins: clusterGlowBinsByIndex.get(index) || [],
+      hrBins: clusterHrBinsByIndex.get(index) || [],
       sample: hashString(`cluster-${row[CL.name]}-${index}`) % 100,
       searchText: clusterSearchTextForRow(row),
     };

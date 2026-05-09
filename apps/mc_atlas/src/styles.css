@@ -936,6 +936,56 @@ h2 {
   vector-effect: non-scaling-stroke;
 }
 
+.clusterHrDiagram {
+  width: 100%;
+  margin-top: 2px;
+  border: 1px solid rgba(229, 229, 229, 0.16);
+  border-radius: 6px;
+  background: rgba(8, 14, 27, 0.5);
+  padding: 5px;
+}
+
+.clusterHrDiagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.clusterHrPlot {
+  fill: rgba(0, 0, 0, 0.22);
+  stroke: rgba(229, 229, 229, 0.18);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.clusterHrGrid {
+  stroke: rgba(229, 229, 229, 0.12);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.clusterHrTick,
+.clusterHrLabel {
+  fill: rgba(229, 229, 229, 0.62);
+  font-size: 8px;
+}
+
+.clusterHrLabel {
+  fill: rgba(229, 229, 229, 0.72);
+  font-weight: 700;
+}
+
+.clusterHrBin {
+  stroke: none;
+  mix-blend-mode: screen;
+}
+
+.clusterHrStar {
+  stroke: rgba(0, 0, 0, 0.52);
+  stroke-width: 0.35;
+  vector-effect: non-scaling-stroke;
+}
+
 .buttonRow {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
