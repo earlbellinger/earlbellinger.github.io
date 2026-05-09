@@ -4,6 +4,7 @@ import json
 import math
 import struct
 import base64
+import bisect
 import csv
 import gzip
 import hashlib
@@ -266,6 +267,7 @@ CLUSTER_ISOCHRONE_AGE_MIN = 5.0
 CLUSTER_ISOCHRONE_AGE_STEP = 0.05
 CLUSTER_ISOCHRONE_AGE_COUNT = 107
 CLUSTER_ISOCHRONE_SAMPLE_OFFSETS = (-1.0, -0.5, 0.0, 0.5, 1.0)
+CLUSTER_ISOCHRONE_UNCERTAINTY_SIGMA = 1.0
 CLUSTER_RENDER_PHASE_MAX = 5
 
 PHOTOMETRY_ARCHIVES = {
@@ -4870,39 +4872,75 @@ def nearest_mist_file(files: list[tuple[float, Path, str]], target_feh: float) -
     return min(files, key=lambda item: abs(item[0] - target_feh))
 
 
+def bracketing_grid_values(values: list[float] | tuple[float, ...], target: float) -> tuple[float, float]:
+    if target <= values[0]:
+        return values[0], values[0]
+    if target >= values[-1]:
+        return values[-1], values[-1]
+    right_index = bisect.bisect_left(values, target)
+    if values[right_index] == target:
+        return values[right_index], values[right_index]
+    return values[right_index - 1], values[right_index]
+
+
+def bracketing_mist_files(
+    files: list[tuple[float, Path, str]],
+    target_feh: float,
+) -> tuple[tuple[float, Path, str], tuple[float, Path, str]]:
+    if target_feh <= files[0][0]:
+        return files[0], files[0]
+    if target_feh >= files[-1][0]:
+        return files[-1], files[-1]
+    feh_values = [item[0] for item in files]
+    right_index = bisect.bisect_left(feh_values, target_feh)
+    if feh_values[right_index] == target_feh:
+        return files[right_index], files[right_index]
+    return files[right_index - 1], files[right_index]
+
+
+def cluster_uncertainty_range(center: float, error: float, minimum: float, maximum: float) -> tuple[float, float]:
+    sigma = max(float(error or 0), 0.0) * CLUSTER_ISOCHRONE_UNCERTAINTY_SIGMA
+    low = center - sigma
+    high = center + sigma
+    if sigma <= 0:
+        low = high = center
+    low = clamp_float(low, (minimum, maximum))
+    high = clamp_float(high, (minimum, maximum))
+    if low > high:
+        low, high = high, low
+    return low, high
+
+
+def support_grid_values(values: list[float] | tuple[float, ...], low: float, high: float) -> list[float]:
+    left, _ = bracketing_grid_values(values, low)
+    _, right = bracketing_grid_values(values, high)
+    left_index = values.index(left)
+    right_index = values.index(right)
+    return list(values[left_index : right_index + 1])
+
+
+def support_mist_files(
+    files: list[tuple[float, Path, str]],
+    low: float,
+    high: float,
+) -> list[tuple[float, Path, str]]:
+    left, _ = bracketing_mist_files(files, low)
+    _, right = bracketing_mist_files(files, high)
+    left_index = files.index(left)
+    right_index = files.index(right)
+    return files[left_index : right_index + 1]
+
+
 def choose_cluster_isochrone_specs(
     cluster: ClusterParameters,
     mist_files: list[tuple[float, Path, str]],
 ) -> list[tuple[float, float, str]]:
     age_grid = mist_log_age_grid()
-    feh_low = cluster.feh - max(cluster.e_feh, 0.0)
-    feh_high = cluster.feh + max(cluster.e_feh, 0.0)
-    age_low = cluster.log_age - max(cluster.e_log_age, 0.0)
-    age_high = cluster.log_age + max(cluster.e_log_age, 0.0)
-    file_candidates = [item for item in mist_files if feh_low <= item[0] <= feh_high] or [nearest_mist_file(mist_files, cluster.feh)]
-    age_candidates = [age for age in age_grid if age_low <= age <= age_high] or [nearest_by_value(age_grid, cluster.log_age)]
-
-    specs: list[tuple[float, float, str]] = []
-
-    def add_spec(feh_value: float, age_value: float) -> None:
-        feh, _path, label = nearest_mist_file(file_candidates, feh_value)
-        age = nearest_by_value(age_candidates, age_value)
-        spec = (feh, age, label)
-        if spec not in specs:
-            specs.append(spec)
-
-    shifted_feh_offsets = (0.0, -1.0, 1.0, -0.5, 0.5)
-    for age_offset, feh_offset in zip(CLUSTER_ISOCHRONE_SAMPLE_OFFSETS, shifted_feh_offsets):
-        add_spec(cluster.feh + feh_offset * cluster.e_feh, cluster.log_age + age_offset * cluster.e_log_age)
-
-    if len(specs) < 2 and len(age_candidates) > 1:
-        add_spec(cluster.feh, min(age_candidates))
-        add_spec(cluster.feh, max(age_candidates))
-    if len(specs) < 2 and len(file_candidates) > 1:
-        add_spec(min(item[0] for item in file_candidates), cluster.log_age)
-        add_spec(max(item[0] for item in file_candidates), cluster.log_age)
-
-    return specs[: len(CLUSTER_ISOCHRONE_SAMPLE_OFFSETS)]
+    feh_low, feh_high = cluster_uncertainty_range(cluster.feh, cluster.e_feh, mist_files[0][0], mist_files[-1][0])
+    age_low, age_high = cluster_uncertainty_range(cluster.log_age, cluster.e_log_age, age_grid[0], age_grid[-1])
+    file_candidates = support_mist_files(mist_files, feh_low, feh_high)
+    age_candidates = support_grid_values(age_grid, age_low, age_high)
+    return [(feh, age, label) for feh, _path, label in file_candidates for age in age_candidates]
 
 
 def mist_cache_key(label: str, log_age: float) -> str:
@@ -5098,6 +5136,33 @@ def sample_cluster_initial_masses(rng: np.random.Generator, count: int, max_init
     return np.interp(rng.random(count), cdf, selected_masses)
 
 
+def sample_cluster_uncertainty_values(
+    rng: np.random.Generator,
+    center: float,
+    error: float,
+    count: int,
+    low: float,
+    high: float,
+) -> np.ndarray:
+    if count <= 0:
+        return np.array([], dtype=float)
+    sigma = max(float(error or 0), 0.0)
+    center = clamp_float(center, (low, high))
+    if sigma <= 0 or high <= low:
+        return np.full(count, center, dtype=float)
+    samples = np.empty(count, dtype=float)
+    filled = 0
+    while filled < count:
+        draw_count = max(64, (count - filled) * 2)
+        drawn = rng.normal(center, sigma, draw_count)
+        accepted = drawn[(drawn >= low) & (drawn <= high)]
+        take = min(count - filled, accepted.size)
+        if take:
+            samples[filled : filled + take] = accepted[:take]
+            filled += take
+    return samples
+
+
 def interpolate_isochrone_values(isochrone: MistIsochrone, masses: np.ndarray) -> dict[str, np.ndarray]:
     return {
         "star_mass": np.interp(masses, isochrone.initial_mass, isochrone.star_mass),
@@ -5106,6 +5171,71 @@ def interpolate_isochrone_values(isochrone: MistIsochrone, masses: np.ndarray) -
         "v_minus_i": np.interp(masses, isochrone.initial_mass, isochrone.v_minus_i),
         "temperature": np.interp(masses, isochrone.initial_mass, isochrone.temperature),
         "spectral": np.rint(np.interp(masses, isochrone.initial_mass, isochrone.spectral)).astype(int),
+    }
+
+
+def blend_isochrone_arrays(
+    lower_feh_values: dict[str, np.ndarray],
+    upper_feh_values: dict[str, np.ndarray],
+    feh_weight: np.ndarray,
+) -> dict[str, np.ndarray]:
+    weight = feh_weight
+    return {
+        key: lower_feh_values[key] * (1 - weight) + upper_feh_values[key] * weight
+        for key in lower_feh_values
+    }
+
+
+def blend_positive_arrays(values: list[np.ndarray], weights: list[np.ndarray]) -> np.ndarray:
+    blended = np.zeros_like(values[0], dtype=float)
+    for value, weight in zip(values, weights):
+        blended += np.log(np.maximum(value, 1e-12)) * weight
+    return np.exp(blended)
+
+
+def interpolate_cluster_isochrone_values(
+    isochrones: dict[tuple[str, float], MistIsochrone],
+    low_feh_label: str,
+    high_feh_label: str,
+    low_age: float,
+    high_age: float,
+    sampled_feh: np.ndarray,
+    sampled_log_age: np.ndarray,
+    masses: np.ndarray,
+) -> dict[str, np.ndarray] | None:
+    corners = [
+        isochrones.get((low_feh_label, low_age)),
+        isochrones.get((high_feh_label, low_age)),
+        isochrones.get((low_feh_label, high_age)),
+        isochrones.get((high_feh_label, high_age)),
+    ]
+    if any(corner is None for corner in corners):
+        return None
+    low_feh_iso, high_feh_iso, low_feh_high_age_iso, high_feh_high_age_iso = corners  # type: ignore[misc]
+    feh0 = low_feh_iso.feh
+    feh1 = high_feh_iso.feh
+    age0 = low_age
+    age1 = high_age
+    feh_weight = np.zeros_like(sampled_feh) if feh0 == feh1 else np.clip((sampled_feh - feh0) / (feh1 - feh0), 0, 1)
+    age_weight = np.zeros_like(sampled_log_age) if age0 == age1 else np.clip((sampled_log_age - age0) / (age1 - age0), 0, 1)
+
+    v00 = interpolate_isochrone_values(low_feh_iso, masses)
+    v10 = interpolate_isochrone_values(high_feh_iso, masses)
+    v01 = interpolate_isochrone_values(low_feh_high_age_iso, masses)
+    v11 = interpolate_isochrone_values(high_feh_high_age_iso, masses)
+    weights = [
+        (1 - feh_weight) * (1 - age_weight),
+        feh_weight * (1 - age_weight),
+        (1 - feh_weight) * age_weight,
+        feh_weight * age_weight,
+    ]
+    return {
+        "star_mass": v00["star_mass"] * weights[0] + v10["star_mass"] * weights[1] + v01["star_mass"] * weights[2] + v11["star_mass"] * weights[3],
+        "i_luminosity": blend_positive_arrays([v00["i_luminosity"], v10["i_luminosity"], v01["i_luminosity"], v11["i_luminosity"]], weights),
+        "radius": blend_positive_arrays([v00["radius"], v10["radius"], v01["radius"], v11["radius"]], weights),
+        "v_minus_i": v00["v_minus_i"] * weights[0] + v10["v_minus_i"] * weights[1] + v01["v_minus_i"] * weights[2] + v11["v_minus_i"] * weights[3],
+        "temperature": blend_positive_arrays([v00["temperature"], v10["temperature"], v01["temperature"], v11["temperature"]], weights),
+        "spectral": np.rint(v00["spectral"] * weights[0] + v10["spectral"] * weights[1] + v01["spectral"] * weights[2] + v11["spectral"] * weights[3]).astype(int),
     }
 
 
@@ -5119,7 +5249,7 @@ def cluster_isochrone_summary(isochrones: list[MistIsochrone]) -> str:
     feh_values = [iso.feh for iso in isochrones]
     age_values = [iso.log_age for iso in isochrones]
     return (
-        f"{len(isochrones)} MIST tracks; "
+        f"interpolated MIST ({len(isochrones)} blocks); "
         f"[Fe/H] {min(feh_values):.2f}..{max(feh_values):.2f}; "
         f"log(age) {min(age_values):.2f}..{max(age_values):.2f}"
     )
@@ -5137,6 +5267,7 @@ def serialize_synthetic_clusters(
     dict[str, int | float],
 ]:
     mist_files = available_mist_files()
+    age_grid = mist_log_age_grid()
     mist_path_by_label = {label: path for _feh, path, label in mist_files}
     requests: dict[Path, set[float]] = {}
     for cluster in clusters:
@@ -5190,15 +5321,43 @@ def serialize_synthetic_clusters(
         radius_kpc = max(cluster.radius_pc, 0.5) / 1000
 
         if star_count and cluster_isochrones:
-            assignments = rng.integers(0, len(cluster_isochrones), size=star_count)
-            for iso_index, isochrone in enumerate(cluster_isochrones):
-                group_count = int(np.sum(assignments == iso_index))
-                if group_count <= 0:
+            feh_low, feh_high = cluster_uncertainty_range(cluster.feh, cluster.e_feh, mist_files[0][0], mist_files[-1][0])
+            age_low, age_high = cluster_uncertainty_range(cluster.log_age, cluster.e_log_age, age_grid[0], age_grid[-1])
+            sampled_feh = sample_cluster_uncertainty_values(rng, cluster.feh, cluster.e_feh, star_count, feh_low, feh_high)
+            sampled_log_age = sample_cluster_uncertainty_values(rng, cluster.log_age, cluster.e_log_age, star_count, age_low, age_high)
+            interpolation_groups: dict[tuple[float, str, float, str, float, float], list[int]] = {}
+            for sample_index, (sample_feh, sample_log_age) in enumerate(zip(sampled_feh, sampled_log_age)):
+                low_file, high_file = bracketing_mist_files(mist_files, float(sample_feh))
+                low_age, high_age = bracketing_grid_values(age_grid, float(sample_log_age))
+                key = (low_file[0], low_file[2], high_file[0], high_file[2], low_age, high_age)
+                interpolation_groups.setdefault(key, []).append(sample_index)
+
+            for (_low_feh, low_label, _high_feh, high_label, low_age, high_age), group_indexes in interpolation_groups.items():
+                group_indices = np.array(group_indexes, dtype=int)
+                corner_isochrones = [
+                    isochrones.get((low_label, low_age)),
+                    isochrones.get((high_label, low_age)),
+                    isochrones.get((low_label, high_age)),
+                    isochrones.get((high_label, high_age)),
+                ]
+                if any(isochrone is None for isochrone in corner_isochrones):
                     continue
-                initial_masses = sample_cluster_initial_masses(rng, group_count, float(isochrone.initial_mass[-1]))
+                max_initial_mass = min(float(isochrone.initial_mass[-1]) for isochrone in corner_isochrones if isochrone is not None)
+                initial_masses = sample_cluster_initial_masses(rng, group_indices.size, max_initial_mass)
                 if initial_masses.size == 0:
                     continue
-                values = interpolate_isochrone_values(isochrone, initial_masses)
+                values = interpolate_cluster_isochrone_values(
+                    isochrones,
+                    low_label,
+                    high_label,
+                    low_age,
+                    high_age,
+                    sampled_feh[group_indices],
+                    sampled_log_age[group_indices],
+                    initial_masses,
+                )
+                if values is None:
+                    continue
                 mass_weight = np.clip(
                     np.log(np.maximum(initial_masses, CLUSTER_SYNTHETIC_MASS_CUTOFF) / CLUSTER_SYNTHETIC_MASS_CUTOFF)
                     / math.log(8.0 / CLUSTER_SYNTHETIC_MASS_CUTOFF),
@@ -5715,7 +5874,7 @@ def main() -> None:
             "colorCurveNote": "Pulsation color is driven by validated OGLE V- and I-band template fits; compact phase templates store V-I offsets around the catalog mean observed color before subtracting E(V-I) and blackbody color rendering.",
             "brightnessCurveNote": "Cepheid, anomalous Cepheid, and RR Lyrae brightness uses compact I-band templates fitted from OGLE epoch photometry, with validated convex dictionary templates promoted where they improve the unmodulated lightcurve. Miras use OGLE LPV primary, secondary, and tertiary periods and I-band amplitudes as a time-domain multi-sine model with phases fitted to OGLE I-band epoch photometry; V-band Mira components are fitted where possible, and sparse or missing V curves are regularized or filled from empirical V/I amplitude-ratio and phase-lag priors learned from the highest-quality Mira V/I fits.",
             "redClumpDensityNote": "Optional XMC surface opacity uses a smoothed Gaia DR3 broad red-clump count proxy binned on the same 0.25 degree galactic grid; it is for visual density only, not a reproduced Oden et al. RC catalog.",
-            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. MIST alpha=0, non-rotating isochrone blocks are sampled across each cluster's reported [Fe/H] and log(age) uncertainty range. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins with luminosity-weighted V-I color; brighter stars are rendered as points. Point luminosities are I-band blackbody surface-flux ratios relative to the Sun, radii are MIST radii, and positions are drawn inside the reported cluster radius with an age-dependent mass-segregation bias.",
+            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point luminosities are I-band blackbody surface-flux ratios relative to the Sun, radii are MIST radii, and positions are drawn inside the reported cluster radius with an age-dependent mass-segregation bias.",
             "redClumpDensitySource": red_clump_density_meta,
             "originDistanceKpc": round_number(vector_length(origin), 3),
             "coordinateCenters": {

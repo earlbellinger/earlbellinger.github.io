@@ -1,4 +1,4 @@
-const DATA_VERSION = "20260509-cluster-hrd-teff-radius";
+const DATA_VERSION = "20260509-cluster-isochrone-interp";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
 const DATA_DOWNLOAD_PROGRESS_MAX = 0.88;
 const ZOOM_BASE_SCALE = 1.62;
