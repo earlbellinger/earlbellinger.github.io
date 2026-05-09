@@ -307,6 +307,44 @@ h2 {
   backdrop-filter: blur(14px);
 }
 
+.overlayToggleButton {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0;
+  color: var(--alabaster-grey);
+}
+
+.overlayToggleButton svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.overlayToggleLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.overlayToggleButton.active {
+  border-color: rgba(252, 163, 17, 0.82);
+  background: rgba(252, 163, 17, 0.16);
+  color: var(--cream);
+}
+
 .panel section {
   padding: 15px 16px;
   border-bottom: 1px solid rgba(229, 229, 229, 0.12);
@@ -1615,4 +1653,111 @@ h2 {
     font-size: 0.68rem;
   }
 
+}
+
+.overlays-hidden .masthead,
+.overlays-hidden .coordinateHud,
+.overlays-hidden .mobileControlsToggle,
+.overlays-hidden .mobilePresetToggle,
+.overlays-hidden .mobileControlsBackdrop,
+.overlays-hidden .loading:not(.error),
+.overlays-hidden .perfHud {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.atlas.overlays-hidden > .masthead,
+.atlas.overlays-hidden > .mobileControlsToggle,
+.atlas.overlays-hidden > .mobilePresetToggle {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.overlays-hidden .panel {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  bottom: auto;
+  left: auto;
+  z-index: 8;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 0;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none;
+}
+
+.overlays-hidden .panel > :not(.datasetSection),
+.overlays-hidden .datasetSection > :not(.datasetSectionHeader),
+.overlays-hidden .datasetSectionHeader > h2,
+.overlays-hidden .presetToggleControl span {
+  display: none;
+}
+
+.overlays-hidden .datasetSection {
+  border: 0;
+  padding: 0;
+}
+
+.overlays-hidden .datasetSectionHeader {
+  display: block;
+  margin: 0;
+}
+
+.overlays-hidden .presetToggleControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overlays-hidden .presetToggleControl .iconToggle {
+  width: 46px;
+  min-width: 46px;
+  min-height: 46px;
+  border-radius: 50%;
+  background: rgba(20, 33, 61, 0.84);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.54);
+  backdrop-filter: blur(12px);
+}
+
+.overlays-hidden .presetToggleControl .iconToggle.active {
+  border-color: rgba(252, 163, 17, 0.82);
+  background: rgba(252, 163, 17, 0.16);
+}
+
+.overlays-hidden .presetToggleControl .iconToggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.overlays-hidden .overlayToggleButton {
+  width: 46px;
+  min-width: 46px;
+  min-height: 46px;
+  margin: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: rgba(20, 33, 61, 0.84);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.54);
+  backdrop-filter: blur(12px);
+}
+
+.overlays-hidden .overlayToggleButton svg {
+  width: 20px;
+  height: 20px;
+}
+
+.overlays-hidden .scaleBar {
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 7;
+  opacity: 1 !important;
 }

@@ -829,6 +829,7 @@ const MOBILE_CONTROLS_MEDIA = window.matchMedia("(max-width: 860px)");
 const MOBILE_TOUCH_MOVE_THRESHOLD = 7;
 const MOBILE_PINCH_MOVE_THRESHOLD = 3;
 const MOBILE_TARGET_PICK_RADIUS_SCALE = 2.25;
+const MOBILE_STAR_BASE_RADIUS_SCALE = 0.5;
 const MOBILE_DRAWER_SWIPE_CLOSE_DISTANCE = 58;
 let mobileControlsOpen = false;
 
@@ -882,6 +883,7 @@ const elements = {
   perfHud: document.querySelector("#perfHud"),
   scaleBar: document.querySelector("#scaleBar"),
   scaleBarValue: document.querySelector("#scaleBarValue"),
+  overlayToggle: document.querySelector("#overlayToggle"),
   mobileControlsToggle: document.querySelector("#mobileControlsToggle"),
   mobileControlsBackdrop: document.querySelector("#mobileControlsBackdrop"),
   mobileControlsClose: document.querySelector("#mobileControlsClose"),
@@ -933,6 +935,7 @@ const state = {
   hovered: null,
   locked: null,
   cameraLocked: false,
+  overlaysHidden: false,
 };
 
 const editableMultiplierConfigs = {
@@ -3057,12 +3060,16 @@ function pointRadiusBaseFromStellarRadius(radiusSolar) {
   return pointRadiusUnitFromStellarRadius(radiusSolar) * starRadiusZoomSize();
 }
 
+function starBaseRadiusViewportScale() {
+  return MOBILE_CONTROLS_MEDIA.matches ? MOBILE_STAR_BASE_RADIUS_SCALE : 1;
+}
+
 function pointRadiusFromUnitAtPerspective(radiusUnit, perspective, zoomSize = pointRadiusZoomSize()) {
   return clamp(radiusUnit * zoomSize * perspective, 0.35, 5.2);
 }
 
 function starRadiusFromUnitAtPerspective(radiusUnit, perspective, zoomSize = starRadiusZoomSize()) {
-  return clamp(radiusUnit * zoomSize * perspective, 0.35, STAR_RADIUS_BASE_MAX);
+  return clamp(radiusUnit * zoomSize * perspective, 0.35, STAR_RADIUS_BASE_MAX) * starBaseRadiusViewportScale();
 }
 
 function pointRadiusFromStellarRadiusAtPerspective(radiusSolar, perspective, zoomSize = starRadiusZoomSize()) {
@@ -4306,7 +4313,7 @@ function projectCatalogItemsForCache(points, catalogDrawList, catalogStats, tran
     if (projected.x <= minX || projected.x >= maxX || projected.y <= minY || projected.y >= maxY) continue;
 
     const item = point.drawItem;
-    item.baseRadius = clamp(point.radiusUnit * zoomSize * perspective, 0.35, STAR_RADIUS_BASE_MAX);
+    item.baseRadius = starRadiusFromUnitAtPerspective(point.radiusUnit, perspective, zoomSize);
     item.alphaUnit = point.alphaBaseUnit * (0.64 + perspective * 0.24);
     catalogDrawList.push(item);
     catalogStats.count += 1;
@@ -7246,16 +7253,49 @@ function setMobileElementHidden(element, hidden) {
   element.inert = hidden;
 }
 
+function syncOverlayVisibility() {
+  const overlaysHidden = Boolean(state.overlaysHidden);
+  elements.atlas?.classList.toggle("overlays-hidden", overlaysHidden);
+
+  if (elements.overlayToggle) {
+    const label = overlaysHidden ? "Show overlays" : "Hide overlays";
+    const labelElement = elements.overlayToggle.querySelector(".overlayToggleLabel");
+    if (labelElement) labelElement.textContent = label;
+    elements.overlayToggle.classList.toggle("active", overlaysHidden);
+    elements.overlayToggle.setAttribute("aria-pressed", String(overlaysHidden));
+    elements.overlayToggle.setAttribute("aria-label", label);
+    elements.overlayToggle.title = label;
+  }
+
+  if (overlaysHidden) {
+    mobileControlsOpen = false;
+    if (elements.mobileControlsBackdrop) elements.mobileControlsBackdrop.hidden = true;
+  }
+
+  setMobileElementHidden(elements.mobileControlsToggle, overlaysHidden);
+  setMobileElementHidden(controls.mobilePresetToggle, overlaysHidden);
+  syncMobileControlsVisibility();
+}
+
+function setOverlaysHidden(hidden) {
+  const nextHidden = Boolean(hidden);
+  if (state.overlaysHidden === nextHidden) return;
+  state.overlaysHidden = nextHidden;
+  syncOverlayVisibility();
+}
+
 function syncMobileControlsVisibility() {
+  const overlaysHidden = Boolean(state.overlaysHidden);
   const isMobile = MOBILE_CONTROLS_MEDIA.matches;
+  if (overlaysHidden) mobileControlsOpen = false;
   if (!isMobile) mobileControlsOpen = false;
   const isOpen = isMobile && mobileControlsOpen;
   elements.atlas?.classList.toggle("mobile-controls-open", isOpen);
   elements.mobileControlsToggle?.setAttribute("aria-expanded", String(isOpen));
   if (elements.mobileControlsBackdrop) elements.mobileControlsBackdrop.hidden = !isOpen;
-  setMobileElementHidden(elements.masthead, isMobile && isOpen);
-  setMobileElementHidden(elements.panel, isMobile && !isOpen);
-  setMobileElementHidden(elements.coordinateHud, isMobile && !isOpen);
+  setMobileElementHidden(elements.masthead, overlaysHidden || (isMobile && isOpen));
+  setMobileElementHidden(elements.panel, isMobile && !isOpen && !overlaysHidden);
+  setMobileElementHidden(elements.coordinateHud, overlaysHidden || (isMobile && !isOpen));
 }
 
 function setMobileControlsOpen(open, { restoreFocus = false, focusClose = true } = {}) {
@@ -7329,6 +7369,10 @@ function bindMobileControls() {
 
 function bindControls() {
   bindMobileControls();
+
+  elements.overlayToggle?.addEventListener("click", () => {
+    setOverlaysHidden(!state.overlaysHidden);
+  });
 
   controls.yaw.addEventListener("input", () => {
     markOrientationGridActive();
