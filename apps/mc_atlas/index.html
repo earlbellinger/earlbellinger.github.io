@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Magellanic Cloud Atlas</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000000'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23e5e5e5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23fca311'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./src/styles.css?v=20260508-speed-max-25m-catalog-static-dynamic-lod-mobile-controls-scale-bar-byline-perf" />
+  </head>
+  <body>
+    <main class="atlas" aria-label="Interactive Magellanic Cloud atlas">
+      <canvas id="scene" class="sceneCanvas" aria-label="3-D star map"></canvas>
+      <canvas id="redClumpScene" class="redClumpCanvas" aria-hidden="true"></canvas>
+      <canvas id="catalogScene" class="catalogCanvas" aria-hidden="true"></canvas>
+      <canvas id="catalogDynamicScene" class="catalogDynamicCanvas" aria-hidden="true"></canvas>
+      <canvas id="selectionScene" class="selectionCanvas" aria-hidden="true"></canvas>
+
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">OGLE + XMC + MIST</p>
+          <h1>Magellanic Cloud Atlas</h1>
+          <p class="byline">by <a href="https://earlbellinger.com/" target="_blank" rel="noopener noreferrer">Earl Bellinger</a> | <a href="http://www.astro.yale.edu/bellinger/" target="_blank" rel="noopener noreferrer">YAML</a></p>
+        </div>
+        <div class="metrics" aria-label="Visible object counts">
+          <span><strong id="visibleTotal">0</strong> visible</span>
+          <span><strong id="depthSpan">0</strong> kpc depth</span>
+        </div>
+      </header>
+
+      <button id="mobileControlsToggle" class="mobileControlsToggle" type="button" aria-label="Open atlas controls" aria-controls="atlasControls" aria-expanded="false" title="Open atlas controls">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+          <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2.15 2.15 0 0 1-3.04 3.04l-.05-.05a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.09 1.65v.14a2.15 2.15 0 0 1-4.3 0v-.08a1.8 1.8 0 0 0-1.17-1.68 1.8 1.8 0 0 0-1.98.36l-.05.05a2.15 2.15 0 0 1-3.04-3.04l.05-.05A1.8 1.8 0 0 0 3.5 15a1.8 1.8 0 0 0-1.65-1.09h-.14a2.15 2.15 0 0 1 0-4.3h.08A1.8 1.8 0 0 0 3.47 8.5a1.8 1.8 0 0 0-.36-1.98l-.05-.05a2.15 2.15 0 0 1 3.04-3.04l.05.05a1.8 1.8 0 0 0 1.98.36h.08A1.8 1.8 0 0 0 9.35 2.2v-.14a2.15 2.15 0 0 1 4.3 0v.08a1.8 1.8 0 0 0 1.09 1.65 1.8 1.8 0 0 0 1.98-.36l.05-.05a2.15 2.15 0 0 1 3.04 3.04l-.05.05a1.8 1.8 0 0 0-.36 1.98v.08a1.8 1.8 0 0 0 1.65 1.09h.14a2.15 2.15 0 0 1 0 4.3h-.08A1.8 1.8 0 0 0 19.4 15Z"></path>
+        </svg>
+      </button>
+      <button id="mobilePresetToggle" class="mobilePresetToggle" type="button" aria-label="Switch to Cepheids preset" aria-pressed="false" title="Switch to Cepheids preset">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 7h10l-3-3"></path>
+          <path d="M17 17H7l3 3"></path>
+          <path d="M17 7l-3 3"></path>
+          <path d="M7 17l3-3"></path>
+        </svg>
+      </button>
+      <button id="mobileControlsBackdrop" class="mobileControlsBackdrop" type="button" aria-label="Close atlas controls" hidden></button>
+
+      <aside id="atlasControls" class="panel" aria-label="Atlas controls">
+        <div class="mobilePanelHeader">
+          <span class="mobilePanelTitle">Atlas Controls</span>
+          <button id="mobileControlsClose" class="mobilePanelClose" type="button" aria-label="Close atlas controls" title="Close atlas controls">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <section>
+          <div class="sectionHeader">
+            <h2>Datasets</h2>
+            <div class="presetToggleControl">
+              <span>Toggle Presets</span>
+              <button id="datasetPresetToggle" class="iconToggle" type="button" aria-label="Switch to Cepheids preset" title="Switch to Cepheids preset">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 7h10l-3-3"></path>
+                  <path d="M17 17H7l3 3"></path>
+                  <path d="M17 7l-3 3"></path>
+                  <path d="M7 17l3-3"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="datasetColumnHeader" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span>exposure</span>
+            <span>N</span>
+          </div>
+          <div class="check datasetRow">
+            <input type="checkbox" data-dataset="cepheids" checked aria-label="Show Cepheids" title="Show Cepheids" />
+            <button class="datasetPresetText" type="button" data-dataset-preset="cepheids">Cepheids</button>
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="cepheids" aria-label="Cepheids exposure" title="Cepheids exposure" />
+            <output id="cepheidCount">0</output>
+          </div>
+          <div class="check datasetRow">
+            <input type="checkbox" data-dataset="rrlyrae" checked aria-label="Show RR Lyrae" title="Show RR Lyrae" />
+            <button class="datasetPresetText" type="button" data-dataset-preset="rrlyrae">RR Lyrae</button>
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="rrlyrae" aria-label="RR Lyrae exposure" title="RR Lyrae exposure" />
+            <output id="rrCount">0</output>
+          </div>
+          <div class="check datasetRow">
+            <input type="checkbox" data-dataset="miras" checked aria-label="Show Miras" title="Show Miras" />
+            <button class="datasetPresetText" type="button" data-dataset-preset="miras">Miras</button>
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="miras" aria-label="Miras exposure" title="Miras exposure" />
+            <output id="miraCount">0</output>
+          </div>
+          <div class="check datasetRow">
+            <input type="checkbox" data-dataset="clusters" checked aria-label="Show Clusters" title="Show Clusters" />
+            <button class="datasetPresetText" type="button" data-dataset-preset="clusters">Clusters</button>
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="clusters" aria-label="Clusters exposure" title="Clusters exposure" />
+            <output id="clusterCount">0</output>
+          </div>
+          <div class="check datasetRow">
+            <input type="checkbox" data-dataset="redclump" checked aria-label="Show Red clump" title="Show Red clump" />
+            <button class="datasetPresetText" type="button" data-dataset-preset="redclump">Red clump</button>
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="redclump" aria-label="Red clump exposure" title="Red clump exposure" />
+          </div>
+        </section>
+
+        <section>
+          <h2>Orbit</h2>
+          <div class="range orbitRange">
+            <span id="yawLabel" class="rangeReset" data-reset-control="yaw" role="button" tabindex="0" title="Reset yaw">Yaw</span>
+            <button class="axisSpinButton" type="button" data-spin-axis="yaw" aria-label="Spin yaw 360 degrees" title="Spin yaw 360 degrees">↻</button>
+            <input id="yaw" type="range" min="-180" max="180" value="0" aria-labelledby="yawLabel" />
+            <output id="yawValue" class="editableMultiplier" data-multiplier-output="yaw"><button class="editableMultiplierValue" type="button" aria-label="Edit yaw value">0</button><span class="editableMultiplierUnit">°</span></output>
+          </div>
+          <div class="range orbitRange">
+            <span id="pitchLabel" class="rangeReset" data-reset-control="pitch" role="button" tabindex="0" title="Reset pitch">Pitch</span>
+            <button class="axisSpinButton" type="button" data-spin-axis="pitch" aria-label="Spin pitch 360 degrees" title="Spin pitch 360 degrees">↻</button>
+            <input id="pitch" type="range" min="-180" max="180" value="0" aria-labelledby="pitchLabel" />
+            <output id="pitchValue" class="editableMultiplier" data-multiplier-output="pitch"><button class="editableMultiplierValue" type="button" aria-label="Edit pitch value">0</button><span class="editableMultiplierUnit">°</span></output>
+          </div>
+          <div class="range orbitRange">
+            <span id="rollLabel" class="rangeReset" data-reset-control="roll" role="button" tabindex="0" title="Reset roll">Roll</span>
+            <button class="axisSpinButton" type="button" data-spin-axis="roll" aria-label="Spin roll 360 degrees" title="Spin roll 360 degrees">↻</button>
+            <input id="roll" type="range" min="-180" max="180" value="0" aria-labelledby="rollLabel" />
+            <output id="rollValue" class="editableMultiplier" data-multiplier-output="roll"><button class="editableMultiplierValue" type="button" aria-label="Edit roll value">0</button><span class="editableMultiplierUnit">°</span></output>
+          </div>
+        </section>
+
+        <section>
+          <h2>Optics</h2>
+          <div class="range">
+            <span id="zoomLabel" class="rangeReset" data-reset-control="zoom" role="button" tabindex="0" title="Reset zoom">Zoom</span>
+            <input id="zoom" type="range" min="-0.30103" max="3" step="any" value="0" aria-labelledby="zoomLabel" />
+            <output id="zoomValue" class="editableMultiplier" data-multiplier-output="zoom"><button class="editableMultiplierValue" type="button" aria-label="Edit zoom value">1.00</button><span class="editableMultiplierUnit">x</span></output>
+          </div>
+          <div class="range">
+            <span id="radiusScaleLabel" class="rangeReset" data-reset-control="radiusScale" role="button" tabindex="0" title="Reset radius">Radius</span>
+            <input id="radiusScale" type="range" min="-1" max="0.47712125471966244" step="any" value="0" aria-labelledby="radiusScaleLabel" />
+            <output id="radiusValue" class="editableMultiplier" data-multiplier-output="radiusScale"><button class="editableMultiplierValue" type="button" aria-label="Edit radius value">1.00</button><span class="editableMultiplierUnit">x</span></output>
+          </div>
+        </section>
+
+        <section>
+          <div class="sectionHeader">
+            <h2>Pulsation</h2>
+            <output id="pulsationDaySeconds" class="pulsationDaySeconds">1 d = 4.8 s</output>
+          </div>
+          <div class="range pulsationRange">
+            <span id="pulsationSpeedLabel" class="rangeReset" data-reset-control="pulsationSpeed" role="button" tabindex="0" title="Reset speed">Speed</span>
+            <span id="pulsationClock" class="pulsationClock" aria-hidden="true">
+              <span id="pulsationClockHourHand" class="pulsationClockHourHand"></span>
+            </span>
+            <input id="pulsationSpeed" type="range" min="0" max="7.397940008672037" step="any" value="4.255272505103306" aria-labelledby="pulsationSpeedLabel" />
+            <output id="pulsationSpeedValue" class="editableMultiplier" data-multiplier-output="pulsationSpeed"><button class="editableMultiplierValue" type="button" aria-label="Edit speed value">18,000</button><span class="editableMultiplierUnit">x</span></output>
+          </div>
+          <div class="range">
+            <span id="pulsationAmplitudeLabel" class="rangeReset" data-reset-control="pulsationAmplitude" role="button" tabindex="0" title="Reset amplitude">Amplitude</span>
+            <input id="pulsationAmplitude" type="range" min="0" max="1.3010299956639813" step="any" value="1" aria-labelledby="pulsationAmplitudeLabel" />
+            <output id="pulsationAmplitudeValue" class="editableMultiplier" data-multiplier-output="pulsationAmplitude"><button class="editableMultiplierValue" type="button" aria-label="Edit amplitude value">10.0</button><span class="editableMultiplierUnit">x</span></output>
+          </div>
+        </section>
+
+        <section>
+          <div class="sectionHeader targetSectionHeader">
+            <h2>Target</h2>
+            <input id="targetSearch" class="targetSearch" type="search" placeholder="Search targets" autocomplete="off" spellcheck="false" aria-label="Search atlas targets" />
+          </div>
+          <div id="target" class="target">
+            <strong>No target selected</strong>
+          </div>
+        </section>
+
+        <section class="spectralSection">
+          <div class="sectionHeader spectralSectionHeader">
+            <h2>Spectral Color</h2>
+            <span class="spectralHint">click to toggle, right click to solo</span>
+          </div>
+          <div id="spectralLegend" class="legend"></div>
+        </section>
+
+        <section>
+          <h2>Sources</h2>
+          <div id="sourceLinks" class="sources"></div>
+          <p class="note">Spectral class is inferred from dereddened V-I color for OGLE stars and from MIST temperatures for synthetic cluster stars before D58 blackbody rendering.</p>
+        </section>
+      </aside>
+
+      <div class="coordinateHud" aria-label="Coordinate controls">
+        <div class="coordinateDock">
+          <div class="coordinateDockRow">
+            <div class="coordinateDockHeader">Center</div>
+            <div id="coordinateCenterControls" class="coordinateCenterControls coordinateRadioGroup"></div>
+            <div class="coordinateActionRow" aria-label="View orientation">
+              <button id="faceView" type="button">Face</button>
+              <button id="edgeView" type="button">Edge</button>
+            </div>
+            <label class="panLockOption" title="Pan without moving the coordinate origin">
+              <input id="panLock" type="checkbox" checked />
+              <span>Pan lock</span>
+            </label>
+          </div>
+        </div>
+        <div id="coordinateReadout" class="coordinateReadout">
+          <div class="coordinateSkyRow">
+            <div class="coordinateReadoutGroup">
+              <label class="coordinateGridToggle" title="Show RA/Dec grid lines"><input id="equatorialGrid" data-sky-grid="equatorial" type="checkbox" aria-label="Show RA/Dec grid lines" /><span>ECS</span></label>
+              <span class="skyCoordinate"><b>RA</b><strong>0.000°</strong></span>
+              <span class="skyCoordinate"><b>Dec</b><strong>0.000°</strong></span>
+            </div>
+            <div class="coordinateReadoutGroup">
+              <label class="coordinateGridToggle" title="Show Galactic coordinate grid lines"><input id="galacticGrid" data-sky-grid="galactic" type="checkbox" aria-label="Show Galactic coordinate grid lines" /><span>GCS</span></label>
+              <span class="skyCoordinate"><b>l</b><strong>0.000°</strong></span>
+              <span class="skyCoordinate"><b>b</b><strong>0.000°</strong></span>
+            </div>
+          </div>
+          <div class="coordinateLocalRow">
+            <span class="localCoordinate"><b>x</b> east <strong>0.0 kpc</strong></span>
+            <span class="localCoordinate"><b>y</b> north <strong>0.0 kpc</strong></span>
+            <span class="localCoordinate"><b>d</b> distance from Sun <strong></strong></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="scaleBar" class="scaleBar" aria-label="Scale bar">
+        <span id="scaleBarValue" class="scaleBarValue">0 kpc</span>
+        <span class="scaleBarTrack" aria-hidden="true"></span>
+      </div>
+      <div id="loading" class="loading" role="progressbar" aria-label="Loading Magellanic Data" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">Loading Magellanic Data</div>
+      <div id="perfHud" class="perfHud hidden" aria-live="off"></div>
+    </main>
+
+    <script type="module" src="./src/app.js?v=20260508-speed-max-25m-catalog-static-dynamic-lod-mobile-controls-scale-bar"></script>
+  </body>
+</html>

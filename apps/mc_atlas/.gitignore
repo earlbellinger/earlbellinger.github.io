@@ -1,0 +1,56 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# JavaScript/tooling caches, in case local tooling is added later
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+.vite/
+playwright-report/
+test-results/
+
+# Logs and temporary files
+*.log
+*.tmp
+/.tmp/
+*.temp
+*.bak
+*.crdownload
+
+# Local raw/rebuild data and diagnostics
+/data/
+/diagnostics/
+
+# Bulky scientific/archive formats
+*.fits
+*.tar
+*.tar.gz
+*.zip
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.parquet
+*.feather
+papers/
