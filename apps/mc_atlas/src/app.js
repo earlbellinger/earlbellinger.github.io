@@ -1,4 +1,4 @@
-const DATA_VERSION = "20260509-cluster-hr-diagram-mist-teff";
+const DATA_VERSION = "20260509-cluster-hrd-teff-radius";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
 const DATA_DOWNLOAD_PROGRESS_MAX = 0.88;
 const ZOOM_BASE_SCALE = 1.62;
@@ -238,6 +238,8 @@ const CHR = {
   logLum: 2,
   count: 3,
   lum: 4,
+  temperature: 5,
+  radius: 6,
 };
 
 const COORDINATE_FRAMES = [
@@ -3077,6 +3079,12 @@ function clusterHrTickLabel(value) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+function clusterHrTemperatureTickLabel(value) {
+  if (!Number.isFinite(value)) return "";
+  const rounded = value >= 10000 ? Math.round(value / 1000) * 1000 : Math.round(value / 100) * 100;
+  return formatInteger(rounded);
+}
+
 function clusterHrStarsForTarget(target) {
   if (!target) return [];
   if (Array.isArray(target.clusterStars)) return target.clusterStars;
@@ -3101,44 +3109,77 @@ function sampledClusterHrStars(stars, limit = 1600) {
   return [...selected];
 }
 
+function clusterHrPointRadius(radiusSolar, radiusMin, radiusMax, { faint = false } = {}) {
+  const safeRadius = Math.max(0.02, Number.isFinite(radiusSolar) ? radiusSolar : radiusMin);
+  const safeMin = Math.max(0.02, Number.isFinite(radiusMin) ? radiusMin : 0.1);
+  const safeMax = Math.max(safeMin * 1.05, Number.isFinite(radiusMax) ? radiusMax : safeMin * 8);
+  const low = Math.log10(safeMin);
+  const high = Math.log10(safeMax);
+  const level = high > low ? clamp((Math.log10(safeRadius) - low) / (high - low), 0, 1) : 0.5;
+  return faint ? 0.42 + level * 1.15 : 0.72 + level * 2.55;
+}
+
+function clusterHrJitterUnit(seed) {
+  const raw = Math.sin(seed * 12.9898) * 43758.5453;
+  return raw - Math.floor(raw);
+}
+
+function clusterHrBinSampleCount(bin, totalCount, budget) {
+  const count = Math.max(0, Math.floor(bin.count || 0));
+  if (!count) return 0;
+  if (totalCount <= budget) return count;
+  return Math.min(count, Math.max(1, Math.round((count / totalCount) * budget)));
+}
+
 function createClusterHrDiagram(target) {
   const stars = clusterHrStarsForTarget(target);
   const hrBins = target.hrBins || [];
-  let colorMin = Infinity;
-  let colorMax = -Infinity;
+  let temperatureMin = Infinity;
+  let temperatureMax = -Infinity;
   let logLumMin = Infinity;
   let logLumMax = -Infinity;
+  let radiusMin = Infinity;
+  let radiusMax = -Infinity;
 
   for (const star of stars) {
-    const color = star.row[CS.vMinusI0];
+    const temperature = star.row[CS.temperature];
     const logLum = star.row[CS.logLum];
-    if (!Number.isFinite(color) || !Number.isFinite(logLum)) continue;
-    colorMin = Math.min(colorMin, color);
-    colorMax = Math.max(colorMax, color);
+    const radius = star.row[CS.radius];
+    if (!Number.isFinite(temperature) || !Number.isFinite(logLum)) continue;
+    temperatureMin = Math.min(temperatureMin, temperature);
+    temperatureMax = Math.max(temperatureMax, temperature);
     logLumMin = Math.min(logLumMin, logLum);
     logLumMax = Math.max(logLumMax, logLum);
+    if (Number.isFinite(radius)) {
+      radiusMin = Math.min(radiusMin, radius);
+      radiusMax = Math.max(radiusMax, radius);
+    }
   }
   for (const bin of hrBins) {
-    if (!Number.isFinite(bin.vMinusI0) || !Number.isFinite(bin.logLum)) continue;
-    colorMin = Math.min(colorMin, bin.vMinusI0);
-    colorMax = Math.max(colorMax, bin.vMinusI0);
+    if (!Number.isFinite(bin.temperature) || !Number.isFinite(bin.logLum)) continue;
+    temperatureMin = Math.min(temperatureMin, bin.temperature);
+    temperatureMax = Math.max(temperatureMax, bin.temperature);
     logLumMin = Math.min(logLumMin, bin.logLum);
     logLumMax = Math.max(logLumMax, bin.logLum);
+    if (Number.isFinite(bin.radius)) {
+      radiusMin = Math.min(radiusMin, bin.radius);
+      radiusMax = Math.max(radiusMax, bin.radius);
+    }
   }
 
-  if (!Number.isFinite(colorMin) || !Number.isFinite(logLumMin)) return null;
+  if (!Number.isFinite(temperatureMin) || !Number.isFinite(logLumMin)) return null;
 
   const width = 278;
   const height = 184;
-  const padLeft = 34;
-  const padRight = 10;
+  const padLeft = 38;
+  const padRight = 11;
   const padTop = 12;
-  const padBottom = 28;
+  const padBottom = 30;
   const plotWidth = width - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
-  const [xMin, xMax] = clusterHrExpandedRange(colorMin, colorMax, 0.9, -0.6, 3.25);
+  const [xMin, xMax] = clusterHrExpandedRange(temperatureMin, temperatureMax, 2200, 2500, 40000);
   const [yMin, yMax] = clusterHrExpandedRange(logLumMin, logLumMax, 1.6, -2.1, 6.2);
-  const xForColor = (color) => padLeft + ((color - xMin) / (xMax - xMin)) * plotWidth;
+  const xForTemperature = (temperature) => padLeft + (1 - (temperature - xMin) / (xMax - xMin)) * plotWidth;
   const yForLogLum = (logLum) => padTop + (1 - (logLum - yMin) / (yMax - yMin)) * plotHeight;
 
   const diagram = document.createElement("div");
@@ -3161,7 +3202,7 @@ function createClusterHrDiagram(target) {
   const xTicks = clusterHrTicks(xMin, xMax, 4);
   const yTicks = clusterHrTicks(yMin, yMax, 4);
   for (const tick of xTicks) {
-    const x = xForColor(tick);
+    const x = xForTemperature(tick);
     const line = createSvgElement("line");
     line.classList.add("clusterHrGrid");
     line.setAttribute("x1", x.toFixed(2));
@@ -3175,7 +3216,7 @@ function createClusterHrDiagram(target) {
     label.setAttribute("x", x.toFixed(2));
     label.setAttribute("y", String(height - 13));
     label.setAttribute("text-anchor", "middle");
-    label.textContent = clusterHrTickLabel(tick);
+    label.textContent = clusterHrTemperatureTickLabel(tick);
     axisGroup.append(label);
   }
   for (const tick of yTicks) {
@@ -3202,7 +3243,7 @@ function createClusterHrDiagram(target) {
   xLabel.setAttribute("x", String(padLeft + plotWidth / 2));
   xLabel.setAttribute("y", String(height - 2));
   xLabel.setAttribute("text-anchor", "middle");
-  xLabel.textContent = "V-I0";
+  xLabel.textContent = "Teff [K]";
 
   const yLabel = createSvgElement("text");
   yLabel.classList.add("clusterHrLabel");
@@ -3210,39 +3251,49 @@ function createClusterHrDiagram(target) {
   yLabel.setAttribute("y", String(padTop + plotHeight / 2));
   yLabel.setAttribute("text-anchor", "middle");
   yLabel.setAttribute("transform", `rotate(-90 9 ${padTop + plotHeight / 2})`);
-  yLabel.textContent = "log L";
+  yLabel.textContent = "log L_I [Lsun]";
   axisGroup.append(xLabel, yLabel);
 
   const binGroup = createSvgElement("g");
-  const maxBinCount = Math.max(1, ...hrBins.map((bin) => bin.count || 0));
-  for (const bin of hrBins) {
-    if (!Number.isFinite(bin.vMinusI0) || !Number.isFinite(bin.logLum)) continue;
-    const x = xForColor(bin.vMinusI0);
-    const y = yForLogLum(bin.logLum);
-    const countLevel = Math.log1p(bin.count || 1) / Math.log1p(maxBinCount);
-    const circle = createSvgElement("circle");
-    circle.classList.add("clusterHrBin");
-    circle.setAttribute("cx", x.toFixed(2));
-    circle.setAttribute("cy", y.toFixed(2));
-    circle.setAttribute("r", (1.2 + countLevel * 5.3).toFixed(2));
-    circle.style.fill = bin.color;
-    circle.style.opacity = String(0.16 + countLevel * 0.36);
-    binGroup.append(circle);
+  const totalBinCount = hrBins.reduce((total, bin) => total + Math.max(0, Math.floor(bin.count || 0)), 0);
+  const binBudget = 1200;
+  for (let binIndex = 0; binIndex < hrBins.length; binIndex += 1) {
+    const bin = hrBins[binIndex];
+    if (!Number.isFinite(bin.temperature) || !Number.isFinite(bin.logLum)) continue;
+    const sampleCount = clusterHrBinSampleCount(bin, totalBinCount, binBudget);
+    const opacity = totalBinCount > binBudget ? 0.34 : 0.42;
+    for (let sample = 0; sample < sampleCount; sample += 1) {
+      const seed = (target.index + 1) * 104729 + (binIndex + 1) * 577 + (sample + 1) * 37;
+      const temperatureJitter = (clusterHrJitterUnit(seed) - 0.5) * 0.038;
+      const logLumJitter = (clusterHrJitterUnit(seed + 17) - 0.5) * 0.11;
+      const radiusJitter = 1 + (clusterHrJitterUnit(seed + 31) - 0.5) * 0.18;
+      const temperature = clamp(bin.temperature * (1 + temperatureJitter), xMin, xMax);
+      const logLum = clamp(bin.logLum + logLumJitter, yMin, yMax);
+      const radius = Number.isFinite(bin.radius) ? bin.radius * radiusJitter : radiusMin;
+      const circle = createSvgElement("circle");
+      circle.classList.add("clusterHrBin");
+      circle.setAttribute("cx", xForTemperature(temperature).toFixed(2));
+      circle.setAttribute("cy", yForLogLum(logLum).toFixed(2));
+      circle.setAttribute("r", clusterHrPointRadius(radius, radiusMin, radiusMax, { faint: true }).toFixed(2));
+      circle.style.fill = bin.color;
+      circle.style.opacity = String(opacity);
+      binGroup.append(circle);
+    }
   }
 
   const starGroup = createSvgElement("g");
   const displayStars = sampledClusterHrStars(stars);
   const starOpacity = displayStars.length > 900 ? 0.62 : 0.78;
   for (const star of displayStars) {
-    const color = star.row[CS.vMinusI0];
+    const temperature = star.row[CS.temperature];
     const logLum = star.row[CS.logLum];
-    if (!Number.isFinite(color) || !Number.isFinite(logLum)) continue;
-    const lumLevel = clamp((logLum - yMin) / (yMax - yMin), 0, 1);
+    const radius = star.row[CS.radius];
+    if (!Number.isFinite(temperature) || !Number.isFinite(logLum)) continue;
     const circle = createSvgElement("circle");
     circle.classList.add("clusterHrStar");
-    circle.setAttribute("cx", xForColor(color).toFixed(2));
+    circle.setAttribute("cx", xForTemperature(temperature).toFixed(2));
     circle.setAttribute("cy", yForLogLum(logLum).toFixed(2));
-    circle.setAttribute("r", (0.85 + lumLevel * 1.8).toFixed(2));
+    circle.setAttribute("r", clusterHrPointRadius(radius, radiusMin, radiusMax).toFixed(2));
     circle.style.fill = star.color;
     circle.style.opacity = String(starOpacity);
     starGroup.append(circle);
@@ -7122,6 +7173,10 @@ function setTarget(target) {
   lockLabel.append(lockInput, lockIcon);
   header.append(lockLabel);
   elements.target.append(header);
+  if (current.kind === "cluster") {
+    const hrDiagram = createClusterHrDiagram(current);
+    if (hrDiagram) elements.target.append(hrDiagram);
+  }
 
   const dl = document.createElement("dl");
   const rows =
@@ -7145,10 +7200,6 @@ function setTarget(target) {
     dl.append(dt, dd);
   }
   elements.target.append(dl);
-  if (current.kind === "cluster") {
-    const hrDiagram = createClusterHrDiagram(current);
-    if (hrDiagram) elements.target.append(hrDiagram);
-  }
   updateCoordinateReadout();
 }
 
@@ -7307,26 +7358,42 @@ function targetRowsForCluster(target) {
   const reference = activeCoordinateReference();
   const activeCoordinates = displayCoordinatesForPoint(target);
   const ageMyr = 10 ** (row[CL.logAge] - 6);
+  const ageUnit = ageMyr >= 1000 ? "Gyr" : "Myr";
+  const ageScale = ageMyr >= 1000 ? 1000 : 1;
+  const ageValue = ageMyr / ageScale;
+  const agePlus = Number.isFinite(row[CL.eLogAge]) ? (10 ** (row[CL.logAge] + row[CL.eLogAge] - 6) - ageMyr) / ageScale : null;
+  const ageMinus = Number.isFinite(row[CL.eLogAge]) ? (ageMyr - 10 ** (row[CL.logAge] - row[CL.eLogAge] - 6)) / ageScale : null;
+  const ageDigits = ageUnit === "Gyr" ? 2 : 0;
+  const distanceError = Number.isFinite(row[CL.eMu0]) ? (Math.log(10) / 5) * row[CL.distance] * row[CL.eMu0] : null;
+  const ageLabel =
+    Number.isFinite(agePlus) && Number.isFinite(ageMinus)
+      ? `${formatNumber(ageValue, ageDigits)} +${formatNumber(agePlus, ageDigits)}/-${formatNumber(ageMinus, ageDigits)}`
+      : formatNumber(ageValue, ageDigits);
   const details = [
     ["Type", `MIST synthetic cluster, ${row[CL.galaxy]}`],
-    ["Stars", `${formatInteger(row[CL.renderedStars])} points, ${formatInteger(row[CL.unresolvedStars])} in glow`],
-    ["Mass", `${formatInteger(row[CL.mass])} +/- ${formatInteger(row[CL.eMass])} Msun`],
-    ["Radius", `${formatNumber(row[CL.radiusPc], 1)} pc`],
-    ["[Fe/H]", `${formatNumber(row[CL.feh], 2)} +/- ${formatNumber(row[CL.eFeh], 2)}`],
-    ["log age", `${formatNumber(row[CL.logAge], 2)} +/- ${formatNumber(row[CL.eLogAge], 2)}`],
-    ["Age", ageMyr >= 1000 ? `${formatNumber(ageMyr / 1000, 2)} Gyr` : `${formatNumber(ageMyr, 0)} Myr`],
-    ["E(B-V)", `${formatNumber(row[CL.ebv], 3)} +/- ${formatNumber(row[CL.eEbv], 3)}`],
-    ["Dist", `${formatNumber(row[CL.distance], 2)} kpc`],
+    ["Stars [N]", `${formatInteger(row[CL.renderedStars])} rendered, ${formatInteger(row[CL.unresolvedStars])} glow`],
+    ["Mass [Msun]", `${formatInteger(row[CL.mass])} +/- ${formatInteger(row[CL.eMass])}`],
+    ["Radius [pc]", formatNumber(row[CL.radiusPc], 1)],
+    ["[Fe/H] [dex]", `${formatNumber(row[CL.feh], 2)} +/- ${formatNumber(row[CL.eFeh], 2)}`],
+    ["log age [dex]", `${formatNumber(row[CL.logAge], 2)} +/- ${formatNumber(row[CL.eLogAge], 2)}`],
+    [`Age [${ageUnit}]`, ageLabel],
+    ["E(B-V) [mag]", `${formatNumber(row[CL.ebv], 3)} +/- ${formatNumber(row[CL.eEbv], 3)}`],
+    [
+      "Dist [kpc]",
+      Number.isFinite(distanceError)
+        ? `${formatNumber(row[CL.distance], 2)} +/- ${formatNumber(distanceError, 2)}`
+        : formatNumber(row[CL.distance], 2),
+    ],
     ["Isochrones", row[CL.isochroneSummary]],
     [
-      "Glow",
-      `${formatNumber(row[CL.unresolvedLum], 1)} Lsun in ${formatInteger(target.glowBins?.length || 0)} bins, V-I ${formatNumber(row[CL.unresolvedVMinusI0], 2)}`,
+      "Glow [Lsun]",
+      `${formatNumber(row[CL.unresolvedLum], 1)} in ${formatInteger(target.glowBins?.length || 0)} bins, V-I0 [mag] ${formatNumber(row[CL.unresolvedVMinusI0], 2)}`,
     ],
     ["Segregation", formatNumber(row[CL.segregation], 2)],
     ["Quality", row[CL.qualityFlags] === "none" ? `FC ${row[CL.flagsCount]}` : `${row[CL.qualityFlags]} (FC ${row[CL.flagsCount]})`],
-    [`${reference.label} ${frame.label}`, formatCoordinateTriplet(activeCoordinates)],
-    ["RA, Dec", `${formatNumber(row[CL.raDeg], 4)}°, ${formatNumber(row[CL.decDeg], 4)}°`],
-    ["Gal l,b", `${formatNumber(row[CL.galLonDeg], 4)}°, ${formatNumber(row[CL.galLatDeg], 4)}°`],
+    [`${reference.label} ${frame.label} [kpc]`, formatCoordinateTriplet(activeCoordinates)],
+    ["RA, Dec [deg]", `${formatNumber(row[CL.raDeg], 4)}°, ${formatNumber(row[CL.decDeg], 4)}°`],
+    ["Gal l,b [deg]", `${formatNumber(row[CL.galLonDeg], 4)}°, ${formatNumber(row[CL.galLatDeg], 4)}°`],
   ];
   if (row[CL.ageOutlier]) {
     details.splice(12, 0, ["ASteCA note", "large published age rerun delta"]);
@@ -8254,6 +8321,8 @@ function preparePoints(payload) {
       logLum: row[CHR.logLum],
       count: row[CHR.count],
       luminosity: row[CHR.lum],
+      temperature: row[CHR.temperature],
+      radius: row[CHR.radius],
       color: colorForVMinusI(row[CHR.vMinusI0], 5),
     });
   }

@@ -5185,6 +5185,8 @@ def serialize_synthetic_clusters(
         hr_color_bins = np.zeros_like(hr_count_bins, dtype=float)
         hr_log_luminosity_bins = np.zeros_like(hr_count_bins, dtype=float)
         hr_luminosity_bins = np.zeros_like(hr_count_bins, dtype=float)
+        hr_temperature_bins = np.zeros_like(hr_count_bins, dtype=float)
+        hr_radius_bins = np.zeros_like(hr_count_bins, dtype=float)
         radius_kpc = max(cluster.radius_pc, 0.5) / 1000
 
         if star_count and cluster_isochrones:
@@ -5244,6 +5246,8 @@ def serialize_synthetic_clusters(
                         hr_color_bins[color_bin, luminosity_bin] += v_minus_i
                         hr_log_luminosity_bins[color_bin, luminosity_bin] += log_luminosity
                         hr_luminosity_bins[color_bin, luminosity_bin] += luminosity
+                        hr_temperature_bins[color_bin, luminosity_bin] += float(values["temperature"][item_index])
+                        hr_radius_bins[color_bin, luminosity_bin] += float(values["radius"][item_index])
                         continue
 
                     rendered_count += 1
@@ -5297,6 +5301,8 @@ def serialize_synthetic_clusters(
                     round_number(float(hr_log_luminosity_bins[color_bin, luminosity_bin] / count), 3),
                     count,
                     round_luminosity(float(hr_luminosity_bins[color_bin, luminosity_bin])),
+                    int(round(float(hr_temperature_bins[color_bin, luminosity_bin] / count))),
+                    round_number(float(hr_radius_bins[color_bin, luminosity_bin] / count), 4),
                 ]
             )
 
@@ -5839,6 +5845,8 @@ def main() -> None:
                 "logLuminosity",
                 "starCount",
                 "luminositySolar",
+                "temperatureK",
+                "radiusSolar",
             ],
         },
         "locations": ["LMC", "SMC", "Bridge", "Outer"],
