@@ -284,6 +284,7 @@ IMPUTED_MEDIAN_REDDENING_ERROR_FLOOR = 0.05
 MIST_DIR = ROOT / "data" / "mist"
 PERREN_CLUSTER_TABLE = RAW / "perren_vizier_clusters.dat"
 PERREN_ASTECA_TABLE = RAW / "perren_asteca_output_final.dat"
+VISCACHA_CLUSTER_TABLE = ROOT / "scripts" / "reference" / "viscacha_bridge_wing_clusters.tsv"
 MIST_CLUSTER_ISOCHRONE_CACHE = PROCESSED / "mist_cluster_isochrones_v1.npz"
 MIST_CLUSTER_ISOCHRONE_CACHE_VERSION = 1
 MIST_VI_TEMPERATURE_CACHE = PROCESSED / "mist_vi_temperature_calibration_v1.json"
@@ -447,6 +448,7 @@ class ClusterParameters:
     king_concentration: float | None = None
     quality_flags: str = "none"
     age_outlier: bool = False
+    source: str = "Perren+2017"
     iso_specs: list[tuple[float, float, str]] | None = None
 
 
@@ -5201,6 +5203,130 @@ def parse_perren_clusters(path: Path, asteca_path: Path) -> list[ClusterParamete
     return clusters
 
 
+def cluster_name_key(name: str) -> str:
+    return re.sub(r"\s+", "", name).upper()
+
+
+def distance_kpc_to_modulus(distance_kpc: float) -> float:
+    return 5 * math.log10(distance_kpc) + 10
+
+
+def distance_error_kpc_to_modulus_error(distance_kpc: float, distance_error_kpc: float) -> float:
+    if distance_kpc <= 0 or distance_error_kpc <= 0:
+        return 0.0
+    return (5 * distance_error_kpc) / (math.log(10) * distance_kpc)
+
+
+def angular_radius_arcsec_to_pc(radius_arcsec: float, distance_kpc: float) -> float:
+    return distance_kpc * radius_arcsec / 206.265
+
+
+def log_age_error_from_gyr(age_gyr: float, error_plus_gyr: float, error_minus_gyr: float) -> float:
+    if age_gyr <= 0:
+        return 0.0
+    plus = math.log10((age_gyr + max(error_plus_gyr, 0.0)) / age_gyr) if error_plus_gyr > 0 else 0.0
+    minus_floor = max(age_gyr - max(error_minus_gyr, 0.0), age_gyr * 0.01)
+    minus = math.log10(age_gyr / minus_floor) if error_minus_gyr > 0 else 0.0
+    return max(plus, minus)
+
+
+def mass_error_from_log_mass(log_mass: float, e_log_mass: float) -> float:
+    if e_log_mass <= 0:
+        return 0.0
+    return (10 ** (log_mass + e_log_mass) - 10 ** (log_mass - e_log_mass)) * 0.5
+
+
+def parse_optional_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return float(text)
+
+
+def parse_viscacha_clusters(path: Path) -> list[ClusterParameters]:
+    clusters: list[ClusterParameters] = []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader((line for line in handle if not line.startswith("#")), delimiter="\t")
+        for row in reader:
+            distance = float(row["distance_kpc"])
+            distance_error = float(row["e_distance_kpc"])
+            age = float(row["age_gyr"])
+            age_error_plus = float(row["e_age_gyr_plus"])
+            age_error_minus = float(row["e_age_gyr_minus"])
+            log_mass = float(row["log_mass"])
+            e_log_mass = float(row["e_log_mass"])
+            tidal_arcsec = parse_optional_float(row.get("rt_arcsec"))
+            tidal_pc = angular_radius_arcsec_to_pc(tidal_arcsec, distance) if tidal_arcsec is not None else None
+            quality_flags = "viscacha:no-tidal-radius" if tidal_pc is None else "none"
+            clusters.append(
+                ClusterParameters(
+                    name=row["name"],
+                    galaxy=row["galaxy"],
+                    ra=hms_to_degrees(row["ra_hms"]),
+                    dec=dms_to_degrees(row["dec_dms"]),
+                    radius_pc=tidal_pc if tidal_pc is not None else 0.0,
+                    feh=float(row["feh"]),
+                    e_feh=float(row["e_feh"]),
+                    log_age=math.log10(age * 1e9),
+                    e_log_age=log_age_error_from_gyr(age, age_error_plus, age_error_minus),
+                    ebv=float(row["ebv"]),
+                    e_ebv=float(row["e_ebv"]),
+                    mu0=distance_kpc_to_modulus(distance),
+                    e_mu0=distance_error_kpc_to_modulus_error(distance, distance_error),
+                    mass=10**log_mass,
+                    e_mass=mass_error_from_log_mass(log_mass, e_log_mass),
+                    fc=0,
+                    tidal_radius_pc=tidal_pc,
+                    quality_flags=quality_flags,
+                    source="VISCACHA VII",
+                )
+            )
+
+    measured_radii = [cluster.radius_pc for cluster in clusters if cluster.radius_pc > 0]
+    fallback_radius = float(np.median(measured_radii)) if measured_radii else 12.0
+    for cluster in clusters:
+        if cluster.radius_pc <= 0:
+            cluster.radius_pc = fallback_radius
+    return clusters
+
+
+def merge_cluster_catalogs(base_clusters: list[ClusterParameters], additions: list[ClusterParameters]) -> list[ClusterParameters]:
+    merged = list(base_clusters)
+    by_name = {cluster_name_key(cluster.name): index for index, cluster in enumerate(merged)}
+    for cluster in additions:
+        key = cluster_name_key(cluster.name)
+        existing_index = by_name.get(key)
+        if existing_index is None:
+            by_name[key] = len(merged)
+            merged.append(cluster)
+            continue
+
+        existing = merged[existing_index]
+        if cluster.quality_flags == "viscacha:no-tidal-radius" and existing.radius_pc > 0:
+            cluster.radius_pc = existing.radius_pc
+        if cluster.core_radius_pc is None:
+            cluster.core_radius_pc = existing.core_radius_pc
+        if cluster.tidal_radius_pc is None:
+            cluster.tidal_radius_pc = existing.tidal_radius_pc
+        if cluster.king_concentration is None:
+            cluster.king_concentration = existing.king_concentration
+        if cluster.ci is None:
+            cluster.ci = existing.ci
+        if cluster.prob_cl is None:
+            cluster.prob_cl = existing.prob_cl
+        if cluster.fc is None:
+            cluster.fc = existing.fc
+        if cluster.quality_flags == "none":
+            cluster.quality_flags = existing.quality_flags
+        elif existing.quality_flags != "none":
+            cluster.quality_flags = f"{existing.quality_flags},{cluster.quality_flags}"
+        cluster.age_outlier = existing.age_outlier
+        merged[existing_index] = cluster
+    return merged
+
+
 def mist_feh_from_filename(path: Path) -> float | None:
     match = re.search(r"feh_([mp])(\d+(?:\.\d+)?)_afe_p0(?:\.0)?_vvcrit\d+(?:\.\d+)?", path.name)
     if not match:
@@ -6122,9 +6248,11 @@ def serialize_synthetic_clusters(
     total_unresolved_stars = 0
     total_unresolved_luminosity = 0.0
     spatial_profile_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
 
     for cluster_index, cluster in enumerate(clusters):
-        rng = np.random.default_rng(stable_seed_int(f"perren-cluster-{cluster.name}"))
+        rng = np.random.default_rng(stable_seed_int(f"cluster-{cluster.source}-{cluster.name}"))
+        source_counts[cluster.source] = source_counts.get(cluster.source, 0) + 1
         center_vector = equatorial_to_galactic_vector(cluster.ra, cluster.dec, distance_modulus_to_kpc(cluster.mu0))
         center_local = project_local(center_vector, origin, basis)
         gal_lon, gal_lat = vector_to_lon_lat(center_vector)
@@ -6341,6 +6469,7 @@ def serialize_synthetic_clusters(
                 cluster.fc,
                 segregation,
                 cluster.age_outlier,
+                cluster.source,
             ]
         )
 
@@ -6367,6 +6496,7 @@ def serialize_synthetic_clusters(
         "clusterSyntheticTotalMassSolar": int(round(sum(cluster.mass for cluster in clusters))),
         "clusterSyntheticAgeOutliers": sum(1 for cluster in clusters if cluster.age_outlier),
         "clusterMistIsochroneBlocks": len(isochrones),
+        "clusterSourceCounts": source_counts,
     }
 
 
@@ -6703,7 +6833,9 @@ def main() -> None:
     red_clump = parse_fits_distance_map(RAW / "MC_RC_Distance_Map_Oden25_galactic.fits", origin, basis)
     red_clump_density_counts, red_clump_density_meta = load_red_clump_density_counts(XMC_DENSITY_COUNTS)
     red_clump_density_summary = attach_red_clump_density(red_clump, red_clump_density_counts)
-    clusters = parse_perren_clusters(PERREN_CLUSTER_TABLE, PERREN_ASTECA_TABLE)
+    perren_clusters = parse_perren_clusters(PERREN_CLUSTER_TABLE, PERREN_ASTECA_TABLE)
+    viscacha_clusters = parse_viscacha_clusters(VISCACHA_CLUSTER_TABLE)
+    clusters = merge_cluster_catalogs(perren_clusters, viscacha_clusters)
     cluster_rows, cluster_stars, cluster_glow_bins, cluster_hr_bins, cluster_summary = serialize_synthetic_clusters(clusters, origin, basis)
 
     payload = {
@@ -6722,6 +6854,7 @@ def main() -> None:
                 "Skowron et al. 2021 OGLE-IV Red Clump E(V-I) map",
                 "He & Huang 2026 3-D RR Lyrae E(V-I) map",
                 "Perren et al. 2017 ASteCA Magellanic Cloud cluster catalog",
+                "VISCACHA VII SMC Wing and Magellanic Bridge cluster catalog",
                 "MIST non-rotating alpha=0 isochrones",
             ],
             "coordinateFrame": "OGLE-aligned observed-sky tangent frame centered on the OGLE Magellanic sample; x/y are RA/Dec tangent axes rotated 15 degrees so the default OGLE-facing view starts level, z=away from Sun, units=kpc.",
@@ -6735,7 +6868,7 @@ def main() -> None:
             "colorCurveNote": "Pulsation color is driven by validated OGLE V- and I-band template fits; compact phase templates store V-I offsets around the catalog mean observed color before subtracting E(V-I). Rendering evaluates the temperature calibration at each phase using instantaneous intrinsic V-I and I-band luminosity.",
             "brightnessCurveNote": "Cepheid, anomalous Cepheid, and RR Lyrae brightness uses compact I-band templates fitted from OGLE epoch photometry, with validated convex dictionary templates promoted where they improve the unmodulated lightcurve. Miras use OGLE LPV primary, secondary, and tertiary periods and I-band amplitudes as a time-domain multi-sine model with phases fitted to OGLE I-band epoch photometry; V-band Mira components are fitted where possible, and sparse or missing V curves are regularized or filled from empirical V/I amplitude-ratio and phase-lag priors learned from the highest-quality Mira V/I fits.",
             "redClumpDensityNote": "Optional XMC surface opacity uses a smoothed Gaia DR3 broad red-clump count proxy binned on the same 0.25 degree galactic grid; it is for visual density only, not a reproduced Oden et al. RC catalog.",
-            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. When UBVRIplus MIST CMD files are available, Bessell V and I magnitudes provide synthetic V-I colors and I-band luminosities; otherwise the build falls back to full MIST tracks with blackbody-derived display colors. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point radii come from MIST radii or from MIST luminosity plus Teff. Positions use the ASteCA structural fit where reliable: older clusters draw from a truncated King-like profile using the fitted core and tidal radii, young clusters draw from an EFF-like extended-halo profile, and sparse or unreliable fits fall back to a Plummer model. The reported cluster radius is treated as the main measured aperture rather than a hard edge, with an age-dependent mass-segregation bias.",
+            "clusterSynthesisNote": "Perren et al. and VISCACHA VII cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. VISCACHA VII rows replace matching Perren fundamental parameters and add SMC Wing/Magellanic Bridge clusters missing from Perren; matching rows keep useful Perren structural fits where VISCACHA does not publish them. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. When UBVRIplus MIST CMD files are available, Bessell V and I magnitudes provide synthetic V-I colors and I-band luminosities; otherwise the build falls back to full MIST tracks with blackbody-derived display colors. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point radii come from MIST radii or from MIST luminosity plus Teff. Positions use the ASteCA structural fit where reliable: older clusters draw from a truncated King-like profile using the fitted core and tidal radii, young clusters draw from an EFF-like extended-halo profile, and sparse or unreliable fits fall back to a Plummer model. The reported cluster radius is treated as the main measured aperture rather than a hard edge, with an age-dependent mass-segregation bias.",
             "redClumpDensitySource": red_clump_density_meta,
             "viTemperatureCalibration": vi_temperature_calibration,
             "viLuminosityTemperatureCalibration": vi_luminosity_temperature_calibration,
@@ -6839,6 +6972,7 @@ def main() -> None:
                 "flagsCount",
                 "massSegregationStrength",
                 "ageOutlier",
+                "source",
             ],
             "clusterStars": [
                 "x",
@@ -6959,6 +7093,10 @@ def main() -> None:
             {
                 "name": "Perren et al. 2017 ASteCA Magellanic Cloud star-cluster catalog",
                 "url": "https://ui.adsabs.harvard.edu/abs/2017A%26A...602A..89P/abstract",
+            },
+            {
+                "name": "VISCACHA VII SMC Wing and Magellanic Bridge star-cluster catalog",
+                "url": "https://academic.oup.com/mnras/article/524/2/2244/7199804",
             },
             {
                 "name": "MIST stellar evolution isochrones",

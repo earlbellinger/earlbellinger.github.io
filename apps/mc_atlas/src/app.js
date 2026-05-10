@@ -9,6 +9,8 @@ const TARGET_ZOOM_SCALE_MAX = 100_000;
 const TARGET_ZOOM_SCREEN_DIAMETER_FRACTION = 0.8;
 const TARGET_SELECTION_RING_PADDING_PX = 7;
 const TARGET_SELECTION_RING_MIN_RADIUS = 8;
+const CLUSTER_TARGET_SELECTION_RADIUS_SCALE = 0.58;
+const CLUSTER_TARGET_SELECTION_MIN_RADIUS = 10;
 const DEFAULT_UNCERTAINTY_SEED = 0;
 const UNCERTAINTY_SEED_MAX = 100;
 const UNCERTAINTY_TRUNCATION_SIGMA = 3;
@@ -48,7 +50,7 @@ const PULSATION_SPEED_MAX = 25_000_000;
 const PULSATION_FLICKER_FREQUENCY_HZ = 2;
 const PULSATION_AMPLITUDE_MIN = 1;
 const PULSATION_AMPLITUDE_MAX = 20;
-const PULSATION_AMPLITUDE_DEFAULT = 10;
+const PULSATION_AMPLITUDE_DEFAULT = 5;
 const SECONDS_PER_DAY = 86400;
 const INTRO_ROTATION_DURATION_MS = 3000;
 const INTRO_CLOUD_LABEL_TRIGGER_YAW_DEGREES = -10;
@@ -76,6 +78,10 @@ const STAR_RADIUS_ZOOM_GAIN = 0.18;
 const STAR_RADIUS_ZOOM_MAX_BOOST = 1.2;
 const STAR_RADIUS_ZOOM_BASE_GAIN = 0.75;
 const STAR_RADIUS_ZOOM_SIZE_MAX = 20;
+const STAR_RADIUS_DEEP_ZOOM_FADE_START = 250;
+const STAR_RADIUS_DEEP_ZOOM_FADE_END = 8000;
+const STAR_RADIUS_DEEP_ZOOM_MIN_SCALE = 0.45;
+const STAR_RADIUS_DEEP_ZOOM_TARGET_GROWTH_POWER = 0.72;
 const STAR_RADIUS_BASE_MAX = 56;
 const CATALOG_LIMB_DARKEN_ALL_STARS = true;
 const LIMB_DARKENING_RADIUS_MIN = 1.35;
@@ -91,6 +97,8 @@ const LIMB_DARKENING_HIGH_RADIUS_VISUAL_WEIGHT_MIN = 0.55;
 const CATALOG_GPU_VERTEX_FLOATS = 8;
 const CLUSTER_STAR_GPU_VERTEX_FLOATS = 9;
 const RED_CLUMP_GPU_VERTEX_FLOATS = 6;
+const RED_CLUMP_ZOOM_FADE_START = 75;
+const RED_CLUMP_ZOOM_FADE_END = 350;
 // User-facing yaw zero is the observer-side OGLE view.
 const OBSERVED_VIEW_YAW_DEGREES = -180;
 const OBSERVED_VIEW_ROLL_DEGREES = 0;
@@ -216,6 +224,7 @@ const CL = {
   flagsCount: 30,
   segregation: 31,
   ageOutlier: 32,
+  source: 33,
 };
 
 const CS = {
@@ -363,7 +372,7 @@ const RED_CLUMP_GRID_QUANTIZATION = 4;
 const RED_CLUMP_EDGE_FEATHER_CELLS = 10;
 const RED_CLUMP_EDGE_ALPHA_FLOOR = 0.08;
 // Keep the red clump map-like, but let the Gaia RC-like count proxy gently nudge brightness.
-const RED_CLUMP_EXPOSURE_DEFAULT = 1;
+const RED_CLUMP_EXPOSURE_DEFAULT = 0.8;
 const RED_CLUMP_EXPOSURE_RENDER_SCALE = 0.4;
 const RED_CLUMP_SURFACE_ALPHA_SCALE = 0.46;
 const RED_CLUMP_COUNT_TO_STAR_EQUIVALENT = 0.01;
@@ -381,8 +390,8 @@ const CLUSTER_GLOW_ALPHA_MAX = 0.16;
 const CLUSTER_GLOW_RADIUS_SCALE = 1.15;
 const CLUSTER_GLOW_EDGE_FEATHER = 0.7;
 const CLUSTER_GLOW_PROFILE_STOPS = 14;
-const CLUSTER_STAR_LOD_CORE_RADIUS_START = 8;
-const CLUSTER_STAR_LOD_CORE_RADIUS_END = 18;
+const CLUSTER_STAR_LOD_CORE_RADIUS_START = 6;
+const CLUSTER_STAR_LOD_CORE_RADIUS_END = 13;
 const CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_SCALE = 0.16;
 const CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_MAX = 0.18;
 const CLUSTER_STAR_RESOLVED_GLOW_FLOOR = 0.18;
@@ -1366,6 +1375,22 @@ function clampZoomScale(value, { allowTargetZoom = false, target = selectedTarge
 function effectiveZoomScale(value = state.zoom) {
   const zoom = Number.isFinite(value) ? value : DEFAULT_ZOOM_SCALE;
   return Math.max(ZOOM_SCALE_MIN, zoom) * ZOOM_BASE_SCALE;
+}
+
+function logarithmicZoomFade(value, start, end) {
+  const zoom = Math.max(ZOOM_SCALE_MIN, Number.isFinite(value) ? value : DEFAULT_ZOOM_SCALE);
+  if (end <= start) return zoom >= end ? 1 : 0;
+  const logZoom = Math.log10(zoom);
+  return smoothStep((logZoom - Math.log10(start)) / (Math.log10(end) - Math.log10(start)));
+}
+
+function redClumpZoomFade(value = state.zoom) {
+  return 1 - logarithmicZoomFade(value, RED_CLUMP_ZOOM_FADE_START, RED_CLUMP_ZOOM_FADE_END);
+}
+
+function starRadiusDeepZoomScale(value = state.zoom) {
+  const fade = logarithmicZoomFade(value, STAR_RADIUS_DEEP_ZOOM_FADE_START, STAR_RADIUS_DEEP_ZOOM_FADE_END);
+  return 1 - (1 - STAR_RADIUS_DEEP_ZOOM_MIN_SCALE) * fade;
 }
 
 function panDragSensitivity(value = state.zoom) {
@@ -4393,7 +4418,7 @@ function pointRadiusZoomSizeForZoom(zoom = state.zoom) {
 function starRadiusZoomSizeForZoom(zoom = state.zoom) {
   const zoomSize = 0.8 + Math.log2(Math.max(1, effectiveZoomScale(zoom))) * STAR_RADIUS_ZOOM_BASE_GAIN;
   const boost = 1 + Math.min(STAR_RADIUS_ZOOM_MAX_BOOST, Math.log2(Math.max(1, zoom)) * STAR_RADIUS_ZOOM_GAIN);
-  return Math.min(zoomSize * boost, STAR_RADIUS_ZOOM_SIZE_MAX);
+  return Math.min(zoomSize * boost, STAR_RADIUS_ZOOM_SIZE_MAX) * starRadiusDeepZoomScale(zoom);
 }
 
 function starRadiusZoomSize() {
@@ -6768,14 +6793,24 @@ function rebuildRedClumpStaticLayer() {
   scene.redClumpStaticSignature = signature;
 }
 
-function drawRedClumpStaticLayer() {
+function setRedClumpLayerOpacity(opacity) {
+  if (!redClumpCanvas) return;
+  redClumpCanvas.style.opacity = String(clamp(opacity, 0, 1));
+}
+
+function drawRedClumpStaticLayer(opacity = 1) {
   if (scene.redClumpStaticCanvas === redClumpCanvas) return;
   if (scene.redClumpStaticCanvas.width <= 0 || scene.redClumpStaticCanvas.height <= 0) return;
+  ctx.save();
+  ctx.globalAlpha *= clamp(opacity, 0, 1);
   ctx.drawImage(scene.redClumpStaticCanvas, 0, 0, scene.width, scene.height);
+  ctx.restore();
 }
 
 function drawRedClump(forceDirect = false) {
   const redClumpStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
+  const zoomFade = redClumpZoomFade();
+  setRedClumpLayerOpacity(zoomFade);
   if (!state.datasets.redclump) {
     if (scene.redClumpStaticSignature !== "disabled") {
       clearRedClumpStaticCanvas();
@@ -6795,7 +6830,7 @@ function drawRedClump(forceDirect = false) {
     if (scene.redClumpStaticDirty || scene.redClumpStaticSignature !== signature) {
       rebuildRedClumpStaticLayer();
     }
-    drawRedClumpStaticLayer();
+    drawRedClumpStaticLayer(zoomFade);
   }
 
   if (PERF_HUD_ENABLED) {
@@ -6851,7 +6886,11 @@ function catalogDeepZoomVisualRadiusAtZoom(point, projected, zoom = state.zoom, 
   const maxAreaPulse = Math.max(areaPulse, catalogMaxAreaPulse(point));
   const sliderProjected = targetProjectedAtZoom(point, ZOOM_SCALE_MAX);
   const sliderMaxRadius = catalogNormalVisualRadiusAtZoom(point, sliderProjected, ZOOM_SCALE_MAX, maxAreaPulse);
-  const grownMaxRadius = Math.min(catalogTargetStarMaxRadius(), sliderMaxRadius * (zoom / ZOOM_SCALE_MAX));
+  const deepZoomGrowth = (zoom / ZOOM_SCALE_MAX) ** STAR_RADIUS_DEEP_ZOOM_TARGET_GROWTH_POWER;
+  const grownMaxRadius = Math.min(
+    catalogTargetStarMaxRadius(),
+    sliderMaxRadius * deepZoomGrowth * starRadiusDeepZoomScale(zoom),
+  );
   const pulseScale = Math.sqrt(Math.max(0.000001, areaPulse) / Math.max(0.000001, maxAreaPulse));
   return Math.max(normalRadius, grownMaxRadius * Math.min(1, pulseScale));
 }
@@ -7395,6 +7434,11 @@ function catalogTargetVisualRadiusAtZoom(target, projected, zoom = state.zoom) {
   return catalogDeepZoomVisualRadiusAtZoom(target, projected, zoom, catalogMaxAreaPulse(target));
 }
 
+function clusterTargetVisualRadiusAtZoom(target, projected, zoom = state.zoom) {
+  const physicalRadius = clusterCoreRadiusAtZoom(target, projected, zoom);
+  return Math.max(CLUSTER_TARGET_SELECTION_MIN_RADIUS, physicalRadius * CLUSTER_TARGET_SELECTION_RADIUS_SCALE);
+}
+
 function redClumpTargetVisualRadiusAtZoom(projected, zoom = state.zoom) {
   const radiusUnit = pointRadiusUnitFromStellarRadius(RED_CLUMP_RADIUS);
   return pointRadiusFromUnitAtPerspective(radiusUnit, projected.perspective, pointRadiusZoomSizeForZoom(zoom));
@@ -7404,12 +7448,7 @@ function targetVisualRadiusAtZoom(target, zoom = state.zoom) {
   if (!target) return 0;
   const projected = targetProjectedAtZoom(target, zoom);
   if (target.kind === "catalog") return catalogTargetVisualRadiusAtZoom(target, projected, zoom);
-  if (target.kind === "cluster") {
-    const outerRadiusFraction = clusterGlowOuterRadiusFraction(target);
-    const boundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom, { bounded: true }), outerRadiusFraction);
-    const unboundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom), outerRadiusFraction);
-    return Math.max(boundedRadius, unboundedRadius);
-  }
+  if (target.kind === "cluster") return clusterTargetVisualRadiusAtZoom(target, projected, zoom);
   if (target.kind === "redclump") return redClumpTargetVisualRadiusAtZoom(projected, zoom);
   return TARGET_SELECTION_RING_MIN_RADIUS;
 }
@@ -7647,8 +7686,12 @@ function syncDatasetCheckboxes() {
   });
 }
 
+function defaultDatasetExposureValue(datasetKey) {
+  return datasetKey === "redclump" ? RED_CLUMP_EXPOSURE_DEFAULT : DATASET_EXPOSURE_DEFAULT;
+}
+
 function datasetExposureValue(datasetKey) {
-  return clampDatasetExposure(state.datasetExposure[datasetKey] ?? DATASET_EXPOSURE_DEFAULT);
+  return clampDatasetExposure(state.datasetExposure[datasetKey] ?? defaultDatasetExposureValue(datasetKey));
 }
 
 function redClumpRenderExposureValue() {
@@ -8057,7 +8100,7 @@ function applyPulsatorPreset(preset) {
     state.pulsatorPreset = null;
     DATASET_PRESET_EXPOSURE_KEYS.forEach((datasetKey) => {
       state.datasets[datasetKey] = true;
-      state.datasetExposure[datasetKey] = DATASET_EXPOSURE_DEFAULT;
+      state.datasetExposure[datasetKey] = defaultDatasetExposureValue(datasetKey);
     });
     state.radiusScale = defaultRadiusScaleForPreset(preset);
     state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(preset);
@@ -8484,6 +8527,24 @@ function viewportKeyboardMultiplier(event) {
   return event.shiftKey ? VIEWPORT_KEY_FAST_MULTIPLIER : 1;
 }
 
+function bindPointerRangeFocusRelease(input) {
+  let pointerIsDown = false;
+  const releaseFocus = () => {
+    if (!pointerIsDown) return;
+    pointerIsDown = false;
+    window.setTimeout(() => {
+      if (document.activeElement === input) input.blur();
+    }, 0);
+  };
+
+  input.addEventListener("pointerdown", () => {
+    pointerIsDown = true;
+    window.addEventListener("pointerup", releaseFocus, { once: true });
+    window.addEventListener("pointercancel", releaseFocus, { once: true });
+  });
+  input.addEventListener("change", releaseFocus);
+}
+
 function resetAppState() {
   cancelIntroRotation();
   cancelAxisSpinAnimation();
@@ -8676,7 +8737,7 @@ function clusterSearchTextForRow(row) {
     row[CL.galaxy],
     "cluster",
     "mist",
-    "perren",
+    row[CL.source],
     row[CL.feh],
     row[CL.logAge],
     row[CL.raDeg],
@@ -8732,6 +8793,7 @@ function catalogMatchMeta(point) {
     const row = point.row;
     return [
       `Star cluster, ${row[CL.galaxy]}`,
+      row[CL.source] || "Perren+2017",
       `log age ${formatNumber(row[CL.logAge], 2)}`,
       `${formatInteger(row[CL.renderedStars])} points`,
     ].join(" | ");
@@ -9155,6 +9217,7 @@ function targetRowsForCluster(target) {
   const frame = activeCoordinateFrame();
   const reference = activeCoordinateReference();
   const activeCoordinates = displayCoordinatesForPoint(target);
+  const source = row[CL.source] || "Perren+2017";
   const ageMyr = 10 ** (row[CL.logAge] - 6);
   const ageUnit = ageMyr >= 1000 ? "Gyr" : "Myr";
   const ageScale = ageMyr >= 1000 ? 1000 : 1;
@@ -9179,6 +9242,7 @@ function targetRowsForCluster(target) {
       : formatNumber(ageValue, ageDigits);
   const details = [
     ["Type", `MIST synthetic cluster, ${row[CL.galaxy]}`],
+    ["Source", source],
     ["Stars [N]", `${formatInteger(row[CL.renderedStars])} rendered, ${formatInteger(row[CL.unresolvedStars])} glow`],
     ["Mass [Msun]", `${formatInteger(row[CL.mass])} +/- ${formatInteger(row[CL.eMass])}`],
     ["Radius [pc]", formatNumber(row[CL.radiusPc], 1)],
@@ -9193,7 +9257,16 @@ function targetRowsForCluster(target) {
       `${formatNumber(row[CL.unresolvedLum], 1)} in ${formatInteger(target.glowBins?.length || 0)} bins, V-I0 [mag] ${formatNumber(row[CL.unresolvedVMinusI0], 2)}`,
     ],
     ["Segregation", formatNumber(row[CL.segregation], 2)],
-    ["Quality", row[CL.qualityFlags] === "none" ? `FC ${row[CL.flagsCount]}` : `${row[CL.qualityFlags]} (FC ${row[CL.flagsCount]})`],
+    [
+      "Quality",
+      row[CL.qualityFlags] === "none"
+        ? Number.isFinite(row[CL.flagsCount])
+          ? `FC ${row[CL.flagsCount]}`
+          : "none"
+        : Number.isFinite(row[CL.flagsCount])
+          ? `${row[CL.qualityFlags]} (FC ${row[CL.flagsCount]})`
+          : row[CL.qualityFlags],
+    ],
     [`${reference.label} ${frame.label} [kpc]`, formatCoordinateTriplet(activeCoordinates)],
     ["RA, Dec [deg]", `${formatNumber(row[CL.raDeg], 4)}°, ${formatNumber(row[CL.decDeg], 4)}°`],
     ["Gal l,b [deg]", `${formatNumber(row[CL.galLonDeg], 4)}°, ${formatNumber(row[CL.galLatDeg], 4)}°`],
@@ -9741,6 +9814,8 @@ function bindControls() {
   elements.overlayToggle?.addEventListener("click", () => {
     setOverlaysHidden(!state.overlaysHidden);
   });
+
+  document.querySelectorAll('input[type="range"]').forEach(bindPointerRangeFocusRelease);
 
   controls.yaw.addEventListener("input", () => {
     markOrientationGridActive();
