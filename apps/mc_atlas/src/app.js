@@ -923,8 +923,9 @@ const MOBILE_CONTROLS_MEDIA = window.matchMedia("(max-width: 860px)");
 const MOBILE_TOUCH_MOVE_THRESHOLD = 7;
 const MOBILE_PINCH_MOVE_THRESHOLD = 3;
 const MOBILE_TARGET_PICK_RADIUS_SCALE = 2.25;
-const MOBILE_DOUBLE_TAP_MAX_MS = 320;
+const MOBILE_DOUBLE_TAP_MAX_MS = 520;
 const MOBILE_DOUBLE_TAP_MAX_DISTANCE = 28;
+const MOBILE_ROTATE_ANGLE_THRESHOLD = 0.035;
 const MOBILE_STAR_BASE_RADIUS_SCALE = 0.5;
 const MOBILE_DRAWER_SWIPE_CLOSE_DISTANCE = 58;
 let mobileControlsOpen = false;
@@ -8611,6 +8612,7 @@ function touchPairMetrics(points = currentTouchPoints()) {
     centerX: (first.clientX + second.clientX) / 2,
     centerY: (first.clientY + second.clientY) / 2,
     distance: Math.max(1, Math.hypot(dx, dy)),
+    angle: Math.atan2(dy, dx),
   };
 }
 
@@ -8655,6 +8657,8 @@ function beginMultiTouchGesture() {
     centerX: metrics.centerX,
     centerY: metrics.centerY,
     distance: metrics.distance,
+    angle: metrics.angle,
+    roll: state.roll,
     zoom: state.zoom,
     scale: scene.scale || getBaseSceneLayout().scale,
     sceneCenterX: scene.centerX,
@@ -8708,7 +8712,11 @@ function applyMultiTouchGesture() {
   const dx = metrics.centerX - touchGesture.centerX;
   const dy = metrics.centerY - touchGesture.centerY;
   const distanceDelta = Math.abs(metrics.distance - touchGesture.distance);
-  const moved = Math.hypot(dx, dy) > MOBILE_TOUCH_MOVE_THRESHOLD || distanceDelta > MOBILE_PINCH_MOVE_THRESHOLD;
+  const angleDelta = normalizeRadians(metrics.angle - touchGesture.angle);
+  const moved =
+    Math.hypot(dx, dy) > MOBILE_TOUCH_MOVE_THRESHOLD ||
+    distanceDelta > MOBILE_PINCH_MOVE_THRESHOLD ||
+    Math.abs(angleDelta) > MOBILE_ROTATE_ANGLE_THRESHOLD;
 
   if (moved) {
     touchGesture.moved = true;
@@ -8718,6 +8726,7 @@ function applyMultiTouchGesture() {
     if (state.locked || state.cameraLocked) clearTargetSelection();
 
     const nextZoom = clampZoomScale(touchGesture.zoom * (metrics.distance / Math.max(1, touchGesture.distance)));
+    state.roll = normalizeRadians(touchGesture.roll - angleDelta);
     state.zoom = nextZoom;
     updateSceneLayout();
 
@@ -10628,7 +10637,11 @@ function bindControls() {
     }
 
     if (!movedDuringDrag && pointerMode === "orbit" && event.button === 0) {
-      selectTargetAt(event.clientX, event.clientY);
+      if (MOBILE_CONTROLS_MEDIA.matches) {
+        selectMobileTapTarget(touchPointFromEvent(event));
+      } else {
+        selectTargetAt(event.clientX, event.clientY);
+      }
     } else if (!movedDuringDrag && pointerMode === "pan" && event.button === 2) {
       if (consumeRightDoubleClick(event)) {
         queueRender();
