@@ -112,6 +112,13 @@ canvas.is-dragging {
   isolation: isolate;
 }
 
+.atlas:fullscreen,
+.atlas:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+
 .masthead {
   position: fixed;
   top: 18px;
@@ -1529,10 +1536,16 @@ h2 {
 @media (max-width: 860px) {
   html,
   body {
+    width: 100dvw;
+    height: 100dvh;
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
+  }
+
+  .atlas {
+    min-height: 100dvh;
   }
 
   input,
@@ -1544,6 +1557,8 @@ h2 {
 
   canvas {
     position: fixed;
+    width: 100dvw;
+    height: 100dvh;
   }
 
   .masthead {

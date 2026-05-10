@@ -79,19 +79,11 @@ const PULSE_LOD_VISUAL_WEIGHT_OFF = 0.55;
 const CATALOG_PULSE_ALL_STARS = true;
 const NAVIGATION_PULSE_THROTTLE_SETTLE_MS = 400;
 const NAVIGATION_PULSE_UPDATE_INTERVAL_MS = 220;
-const NAVIGATION_SLOW_PULSE_PERIOD_SECONDS = 5;
+const ADAPTIVE_PULSE_REFRESH_PERIOD_SECONDS = 2;
 const SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS = 1000 / 60;
-const SLOW_PULSE_REFRESH_EASE_END_SECONDS = 10;
-const SLOW_PULSE_REFRESH_SAMPLES_PER_CYCLE = 320;
+const SLOW_PULSE_REFRESH_EASE_END_SECONDS = 8;
+const SLOW_PULSE_REFRESH_SAMPLES_PER_CYCLE = 96;
 const SLOW_PULSE_REFRESH_MAX_INTERVAL_MS = 1000;
-const INTRO_LIVE_PULSE_MIN_CYCLE_FRACTION = 0.12;
-const INTRO_LIVE_PULSE_MAX_PERIOD_SECONDS = 3.6;
-const INTRO_LIVE_PULSE_ISOLATION_CELL_PX = 22;
-const INTRO_LIVE_PULSE_MAX_NEARBY_COUNT = 24;
-const INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_DELTA = 0.06;
-const INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_RATIO = 0.12;
-const INTRO_LIVE_PULSE_SAMPLE_COUNT = 6;
-const INTRO_PULSE_THROTTLE_RELEASE_MS = 1000;
 const STAR_RADIUS_ZOOM_GAIN = 0.18;
 const STAR_RADIUS_ZOOM_MAX_BOOST = 1.2;
 const STAR_RADIUS_ZOOM_BASE_GAIN = 0.75;
@@ -113,6 +105,8 @@ const LIMB_DARKENING_VISUAL_WEIGHT_MIN = 0.12;
 const LIMB_DARKENING_HIGH_RADIUS_SCALE = 2.1;
 const LIMB_DARKENING_HIGH_RADIUS_VISUAL_WEIGHT_MIN = 0.55;
 const CATALOG_GPU_VERTEX_FLOATS = 8;
+const CATALOG_DYNAMIC_GPU_STATIC_VERTEX_FLOATS = 8;
+const CATALOG_DYNAMIC_GPU_PULSE_VERTEX_FLOATS = 5;
 const CLUSTER_STAR_GPU_VERTEX_FLOATS = 9;
 const RED_CLUMP_GPU_VERTEX_FLOATS = 6;
 const RED_CLUMP_ZOOM_FADE_START = 75;
@@ -1186,6 +1180,8 @@ const scene = {
   clusterStarLodAlphaByCluster: [],
   clusterPulsatorStats: null,
   catalogDrawList: [],
+  catalogDrawListScreenProjected: true,
+  catalogProjectionFastPending: false,
   catalogAnimatedDrawList: [],
   redClumpDrawList: [],
   redClumpSurfaceDrawList: [],
@@ -1197,7 +1193,11 @@ const scene = {
   catalogStaticRadiusScale: null,
   catalogStaticExposureSignature: null,
   catalogStaticPulsationSpeed: null,
+  catalogStaticPulsationAmplitudeScale: null,
+  catalogStaticPulsatorPreset: null,
   catalogStaticPulseLodActive: null,
+  catalogStaticProjectionMode: null,
+  catalogStaticCacheVersion: 0,
   catalogStaticRenderer: null,
   catalogRenderer: null,
   redClumpRenderer: null,
@@ -1256,11 +1256,6 @@ let previousCustomView = null;
 let lastTargetNavigationStep = null;
 let orientationGridLastActivityMs = animationStartMs;
 let navigationPulseThrottleUntilMs = 0;
-let introPulseThrottleActive = false;
-let introPulseThrottleEndedThisFrame = false;
-let introPulseThrottleRelease = 0;
-let introPulseThrottleGeneration = 0;
-let introPulseThrottleStartDay = animationEpoch;
 const WAVEFORM_SAMPLES = 96;
 const LIGHTCURVE_INSET_CYCLES = 2;
 const MIRA_LIGHTCURVE_INSET_CYCLES = 10;
@@ -1335,7 +1330,7 @@ function navigationPulseThrottleActive(now = performance.now()) {
   return (
     PULSE_LOD_ENABLED &&
     CATALOG_PULSE_ALL_STARS &&
-    (introPulseThrottleActive || now < navigationPulseThrottleUntilMs)
+    now < navigationPulseThrottleUntilMs
   );
 }
 
@@ -1347,62 +1342,30 @@ function shouldUseCatalogPulseLod(now = performance.now()) {
 function catalogPulseModeLabel(now = performance.now()) {
   if (!PULSE_LOD_ENABLED) return "all";
   if (!CATALOG_PULSE_ALL_STARS) return "lod";
-  if (introPulseThrottleActive) return "intro throttle";
   return navigationPulseThrottleActive(now) ? "nav slow throttle" : "all";
 }
 
 function markNavigationPulseThrottleActive(now = performance.now()) {
-  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS || introPulseThrottleEndedThisFrame) return;
+  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS) return;
   navigationPulseThrottleUntilMs = Math.max(
     navigationPulseThrottleUntilMs,
     now + NAVIGATION_PULSE_THROTTLE_SETTLE_MS,
   );
 }
 
-function beginIntroPulseThrottle() {
-  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS) return;
-  introPulseThrottleActive = true;
-  introPulseThrottleEndedThisFrame = false;
-  introPulseThrottleRelease = 0;
-  introPulseThrottleGeneration += 1;
-  introPulseThrottleStartDay = currentSimulationDay();
-  preselectIntroLivePulsators();
-}
-
-function endIntroPulseThrottle({ clearNavigationThrottle = false, skipProjectionThrottle = false } = {}) {
-  introPulseThrottleActive = false;
-  introPulseThrottleRelease = 1;
-  if (clearNavigationThrottle) navigationPulseThrottleUntilMs = 0;
-  if (skipProjectionThrottle) introPulseThrottleEndedThisFrame = true;
-}
-
-function updateIntroPulseThrottleRelease(progress) {
-  if (!introPulseThrottleActive) return;
-  const releaseStart = 1 - INTRO_PULSE_THROTTLE_RELEASE_MS / INTRO_ROTATION_DURATION_MS;
-  const release = smoothStep(
-    (progress - releaseStart) / Math.max(0.001, 1 - releaseStart),
-  );
-  introPulseThrottleRelease = release;
-}
-
-function catalogPulseUpdateIntervalMs() {
-  if (!introPulseThrottleActive) return NAVIGATION_PULSE_UPDATE_INTERVAL_MS;
-  return NAVIGATION_PULSE_UPDATE_INTERVAL_MS * (1 - introPulseThrottleRelease);
-}
-
 function slowPulseAdaptiveRefreshIntervalMsForPeriod(periodSeconds) {
   if (
     !Number.isFinite(periodSeconds) ||
-    periodSeconds <= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS
+    periodSeconds <= ADAPTIVE_PULSE_REFRESH_PERIOD_SECONDS
   ) {
     return 0;
   }
 
   const ease = smoothStep(
-    (periodSeconds - NAVIGATION_SLOW_PULSE_PERIOD_SECONDS) /
+    (periodSeconds - ADAPTIVE_PULSE_REFRESH_PERIOD_SECONDS) /
       Math.max(
         0.001,
-        SLOW_PULSE_REFRESH_EASE_END_SECONDS - NAVIGATION_SLOW_PULSE_PERIOD_SECONDS,
+        SLOW_PULSE_REFRESH_EASE_END_SECONDS - ADAPTIVE_PULSE_REFRESH_PERIOD_SECONDS,
       ),
   );
   const targetIntervalMs = clamp(
@@ -1448,7 +1411,7 @@ function slowPulseRefreshIntervalMs(item, throttleSlowPulse) {
   updateSlowPulseRefreshSchedule(item);
   const adaptiveIntervalMs = item.slowPulseAdaptiveRefreshIntervalMs || 0;
   if (!throttleSlowPulse) return adaptiveIntervalMs;
-  return Math.max(adaptiveIntervalMs, catalogPulseUpdateIntervalMs());
+  return Math.max(adaptiveIntervalMs, NAVIGATION_PULSE_UPDATE_INTERVAL_MS);
 }
 
 function clampDatasetExposure(value) {
@@ -2503,6 +2466,11 @@ function normalizedRgbFromCssColor(color) {
   return rgbValue;
 }
 
+function normalizedRgbForCatalogColor(color) {
+  if (color && typeof color !== "string" && color.length >= 3) return color;
+  return normalizedRgbFromCssColor(color || "#ffffff");
+}
+
 function rgbaFromRgb(values, alpha) {
   return `rgba(${values[0]}, ${values[1]}, ${values[2]}, ${alpha})`;
 }
@@ -3493,6 +3461,7 @@ function makeWaveform(row) {
   const logLuminosities = new Float32Array(WAVEFORM_SAMPLES);
   const temperatures = new Float32Array(WAVEFORM_SAMPLES);
   const colors = new Array(WAVEFORM_SAMPLES);
+  const rgbColors = new Float32Array(WAVEFORM_SAMPLES * 3);
   const meanVMinusI0 = intrinsicVMinusIForRow(row);
   const iAmplitude = magnitudeOffsetSpan(iMagnitudeOffsets, meanIMagnitudeOffset);
   const fallbackVAmplitude = iAmplitude * colorAmplitudeRatio;
@@ -3562,11 +3531,16 @@ function makeWaveform(row) {
     colorOffsets[index] = colorOffset;
     logLuminosities[index] = logLuminosity;
     temperatures[index] = Number.isFinite(temperature) ? temperature : NaN;
-    colors[index] = Number.isFinite(meanVMinusI0)
+    const color = Number.isFinite(meanVMinusI0)
       ? Number.isFinite(temperature)
         ? colorForTemperature(temperature)
         : colorForCatalogState(row, meanVMinusI0, logLuminosity)
       : colorForCatalogState(row, meanVMinusI0, logLuminosity);
+    const rgbColor = cssColorToRgb(color);
+    colors[index] = color;
+    rgbColors[index * 3] = rgbColor[0] / 255;
+    rgbColors[index * 3 + 1] = rgbColor[1] / 255;
+    rgbColors[index * 3 + 2] = rgbColor[2] / 255;
     meanFlux += waveform[index];
     meanColorOffset += colorOffset;
     minFlux = Math.min(minFlux, waveform[index]);
@@ -3602,6 +3576,7 @@ function makeWaveform(row) {
     logLuminosities,
     temperatures,
     colors,
+    rgbColors,
     params,
     minFlux,
     maxFlux,
@@ -3902,140 +3877,11 @@ function renderedPulsationPeriodSeconds(point) {
   return frequencyHz > 0 ? 1 / frequencyHz : Infinity;
 }
 
-function introPulseDurationDays() {
-  return (INTRO_ROTATION_DURATION_MS / 1000 / SECONDS_PER_DAY) * state.pulsationSpeed;
-}
-
-function introPulseIsolationKeyForPosition(x, y) {
-  const cellSize = INTRO_LIVE_PULSE_ISOLATION_CELL_PX;
-  return `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
-}
-
-function introPulseIsolationGridForItems(items) {
-  const grid = new Map();
-  for (const item of items) {
-    const point = item.point;
-    if (point?.kind !== "catalog" || !point.lightCurve) continue;
-    const key = introPulseIsolationKeyForPosition(item.projected.x, item.projected.y);
-    grid.set(key, (grid.get(key) || 0) + 1);
-  }
-  return grid;
-}
-
-function introPulseNearbyCount(item, isolationGrid) {
-  const cellSize = INTRO_LIVE_PULSE_ISOLATION_CELL_PX;
-  const cellX = Math.floor(item.projected.x / cellSize);
-  const cellY = Math.floor(item.projected.y / cellSize);
-  let count = 0;
-  for (let dx = -1; dx <= 1; dx += 1) {
-    for (let dy = -1; dy <= 1; dy += 1) {
-      count += isolationGrid.get(`${cellX + dx},${cellY + dy}`) || 0;
-    }
-  }
-  return count;
-}
-
-function pulseScreenSignal(item, pulseSample) {
-  const radius = catalogRenderVisualRadius(item, pulseSample.areaPulse);
-  const alpha = starAlphaFromUnit(
-    item.alphaUnit,
-    pulseSample.opacityPulse,
-    item.point.lightCurve,
-    item.point,
-    item.staticExposure,
-  );
-  return radius * radius * alpha;
-}
-
-function introPulsatorShouldLiveAtEnd(item, isolationGrid) {
-  const point = item.point;
-  if (point?.kind !== "catalog" || !point.lightCurve) return false;
-
-  const periodSeconds = renderedPulsationPeriodSeconds(point);
-  const cycleFraction = (INTRO_ROTATION_DURATION_MS / 1000) / periodSeconds;
-  if (pulsationTooFastForAnimation(point)) return false;
-  if (periodSeconds > INTRO_LIVE_PULSE_MAX_PERIOD_SECONDS) return false;
-  if (cycleFraction < INTRO_LIVE_PULSE_MIN_CYCLE_FRACTION) return false;
-  if (introPulseNearbyCount(item, isolationGrid) > INTRO_LIVE_PULSE_MAX_NEARBY_COUNT) return false;
-
-  item.staticExposure = datasetExposureForPoint(point);
-  const durationDays = introPulseDurationDays();
-  let minSignal = Infinity;
-  let maxSignal = -Infinity;
-  for (let index = 0; index < INTRO_LIVE_PULSE_SAMPLE_COUNT; index += 1) {
-    const fraction = index / Math.max(1, INTRO_LIVE_PULSE_SAMPLE_COUNT - 1);
-    const sample = pulseState(point, introPulseThrottleStartDay + durationDays * fraction);
-    const signal = pulseScreenSignal(item, sample);
-    if (!Number.isFinite(signal)) continue;
-    minSignal = Math.min(minSignal, signal);
-    maxSignal = Math.max(maxSignal, signal);
-  }
-
-  const signalDelta = maxSignal - minSignal;
-  const signalThreshold = Math.max(
-    INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_DELTA,
-    maxSignal * INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_RATIO,
-  );
-  return Number.isFinite(minSignal) && signalDelta >= signalThreshold;
-}
-
-function preselectIntroLivePulsators() {
-  if (!introRotation) return;
-
-  const previousYaw = state.yaw;
-  const previousPitch = state.pitch;
-  const previousRoll = state.roll;
-  const introEndDrawList = [];
-  const introEndStats = resetStats({ count: 0, minDepth: Infinity, maxDepth: -Infinity });
-
-  state.yaw = introRotation.targetYaw;
-  state.pitch = introRotation.targetPitch;
-  state.roll = introRotation.targetRoll;
-  rebuildActivePointLists();
-  rebuildCoordinateCache();
-  projectCatalogItemsForCache(
-    scene.activeCatalog,
-    introEndDrawList,
-    introEndStats,
-    makeProjectionTransform(),
-    scene.centerX,
-    scene.centerY,
-    starRadiusZoomSize(),
-    Math.max(28, effectiveZoomScale() * 0.35),
-  );
-  const isolationGrid = introPulseIsolationGridForItems(introEndDrawList);
-  for (const item of introEndDrawList) {
-    const point = item.point;
-    point.introPulseLiveGeneration = introPulseThrottleGeneration;
-    point.introPulseLive = introPulsatorShouldLiveAtEnd(item, isolationGrid);
-  }
-
-  state.yaw = previousYaw;
-  state.pitch = previousPitch;
-  state.roll = previousRoll;
-  projectionDirty = true;
-}
-
-function shouldIntroThrottleCatalogItem(item) {
-  updateSlowPulseRefreshSchedule(item);
-  if (
-    item.point.introPulseLiveGeneration === introPulseThrottleGeneration &&
-    item.point.introPulseLive
-  ) {
-    return false;
-  }
-  return (
-    item.slowPulseRenderedPeriodSeconds >=
-    NAVIGATION_SLOW_PULSE_PERIOD_SECONDS * introPulseThrottleRelease
-  );
-}
-
 function shouldNavigationThrottleCatalogItem(item) {
   const point = item?.point;
   if (!point?.lightCurve) return false;
   updateSlowPulseRefreshSchedule(item);
-  if (introPulseThrottleActive) return shouldIntroThrottleCatalogItem(item);
-  return item.slowPulseRenderedPeriodSeconds >= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS;
+  return item.slowPulseAdaptiveRefreshIntervalMs > SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS + 1;
 }
 
 function pulsationTooFastForAnimation(point) {
@@ -4186,6 +4032,7 @@ function timeDomainPulseSample(point, simulationDay) {
   return {
     pulse,
     color,
+    rgb: normalizedRgbFromCssColor(color),
     colorOffset,
     logLuminosity,
     temperature,
@@ -4239,11 +4086,13 @@ function lightCurveVisualPulses(fluxPulse, point = null) {
 function meanPulseState(point) {
   const pulse = point?.lightCurve?.meanFlux || 1;
   const visualPulses = lightCurveVisualPulses(pulse, point);
+  const color = point?.lightCurve?.meanColor || point?.color || "#ffffff";
   return {
     pulse,
     areaPulse: visualPulses.areaPulse,
     opacityPulse: visualPulses.opacityPulse,
-    color: point?.lightCurve?.meanColor || point?.color || "#ffffff",
+    color,
+    rgb: normalizedRgbFromCssColor(color),
   };
 }
 
@@ -4259,6 +4108,7 @@ function pulseState(point, simulationDay) {
         areaPulse: visualPulses.areaPulse,
         opacityPulse: visualPulses.opacityPulse,
         color: current.color,
+        rgb: current.rgb,
       };
     }
   }
@@ -4271,6 +4121,8 @@ function pulseState(point, simulationDay) {
     areaPulse: visualPulses.areaPulse,
     opacityPulse: visualPulses.opacityPulse,
     color: point.lightCurve.colors[colorIndex],
+    rgbArray: point.lightCurve.rgbColors,
+    rgbOffset: colorIndex * 3,
   };
 }
 
@@ -5150,6 +5002,152 @@ function createCatalogProgram(gl) {
   return null;
 }
 
+function createCatalogDynamicProgram(gl) {
+  const vertexShader = compileCatalogShader(
+    gl,
+    gl.VERTEX_SHADER,
+    `
+      precision highp float;
+
+      attribute vec3 a_position;
+      attribute vec4 a_static0;
+      attribute float a_lodAlpha;
+      attribute vec2 a_pulse;
+      attribute vec3 a_color;
+
+      uniform vec2 u_resolution;
+      uniform vec2 u_center;
+      uniform vec4 u_yawPitch;
+      uniform vec2 u_roll;
+      uniform float u_scale;
+      uniform float u_depthScale;
+      uniform float u_dpr;
+      uniform float u_radiusZoomSize;
+      uniform float u_radiusScale;
+      uniform float u_starBaseRadiusViewportScale;
+      uniform float u_displayLuminosityBaseBoost;
+      uniform float u_starAlphaHeadroomExposure;
+      uniform float u_starPulseAlphaMax;
+      uniform float u_starRadiusBaseMax;
+
+      varying vec3 v_color;
+      varying float v_alpha;
+      varying float v_limb;
+
+      void main() {
+        float cosy = u_yawPitch.x;
+        float siny = u_yawPitch.y;
+        float cosp = u_yawPitch.z;
+        float sinp = u_yawPitch.w;
+        float cosr = u_roll.x;
+        float sinr = u_roll.y;
+        float depthZ = a_position.z * u_depthScale;
+
+        float x1 = a_position.x * cosy - depthZ * siny;
+        float z1 = a_position.x * siny + depthZ * cosy;
+        float y1 = a_position.y * cosp - z1 * sinp;
+        float z2 = a_position.y * sinp + z1 * cosp;
+        float x2 = x1 * cosr - y1 * sinr;
+        float y2 = x1 * sinr + y1 * cosr;
+        float perspective = clamp(140.0 / (140.0 - z2), 0.45, 2.2);
+        vec2 screen = u_center + vec2(x2, -y2) * u_scale * perspective;
+        vec2 clip = (screen / u_resolution) * 2.0 - 1.0;
+        float radiusUnit = a_static0.x;
+        float alphaBaseUnit = a_static0.y;
+        float pulseSafeAlpha = a_static0.z;
+        float exposureGain = a_static0.w;
+        float areaPulse = a_pulse.x;
+        float opacityPulse = a_pulse.y;
+
+        float baseRadius = clamp(
+          radiusUnit * u_radiusZoomSize * perspective,
+          0.35,
+          u_starRadiusBaseMax
+        ) * u_starBaseRadiusViewportScale;
+        float radius = clamp(
+          baseRadius *
+            ${PULSATOR_RADIUS_BASE_SCALE.toFixed(5)} *
+            ${PULSATOR_BASE_RADIUS_FACTOR.toFixed(2)} *
+            u_radiusScale *
+            sqrt(max(0.000001, areaPulse)),
+          0.18,
+          28.0
+        );
+        float alphaUnit = alphaBaseUnit * (0.64 + perspective * 0.24);
+        float exposure = (exposureGain / 10.0) * u_displayLuminosityBaseBoost * alphaUnit;
+        float baseAlphaWithPulseHeadroom =
+          pulseSafeAlpha * (1.0 - exp(-exposure / u_starAlphaHeadroomExposure));
+        float alpha = clamp(
+          baseAlphaWithPulseHeadroom * opacityPulse,
+          0.0005,
+          u_starPulseAlphaMax
+        ) * a_lodAlpha;
+        float highRadiusScale = step(${LIMB_DARKENING_HIGH_RADIUS_SCALE.toFixed(4)}, u_radiusScale);
+        float limbVisualWeightMin = mix(
+          ${LIMB_DARKENING_VISUAL_WEIGHT_MIN.toFixed(4)},
+          ${LIMB_DARKENING_HIGH_RADIUS_VISUAL_WEIGHT_MIN.toFixed(4)},
+          highRadiusScale
+        );
+        float visualWeight = radius * radius * alpha;
+        float limb =
+          ${CATALOG_LIMB_DARKEN_ALL_STARS ? "1.0" : "0.0"} *
+          step(${LIMB_DARKENING_RADIUS_MIN.toFixed(4)}, radius) *
+          step(${LIMB_DARKENING_ALPHA_MIN.toFixed(4)}, alpha) *
+          step(limbVisualWeightMin, visualWeight);
+
+        gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+        gl_PointSize = max(1.0, radius * 2.0 * u_dpr);
+        v_color = a_color;
+        v_alpha = alpha;
+        v_limb = limb;
+      }
+    `,
+  );
+  const fragmentShader = compileCatalogShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    `
+      precision mediump float;
+
+      uniform float u_limbCoefficient;
+      uniform float u_limbFluxNormalization;
+
+      varying vec3 v_color;
+      varying float v_alpha;
+      varying float v_limb;
+
+      void main() {
+        vec2 uv = gl_PointCoord * 2.0 - 1.0;
+        float radiusSquared = dot(uv, uv);
+        if (radiusSquared > 1.0) discard;
+
+        float edgeAlpha = 1.0 - smoothstep(0.94, 1.0, radiusSquared);
+        float intensity = 1.0;
+        if (v_limb > 0.5) {
+          float mu = sqrt(max(0.0, 1.0 - radiusSquared));
+          intensity = (1.0 - u_limbCoefficient * (1.0 - mu)) * u_limbFluxNormalization;
+        }
+
+        float alpha = clamp(v_alpha * edgeAlpha * intensity, 0.0, 1.0);
+        gl_FragColor = vec4(v_color * alpha, alpha);
+      }
+    `,
+  );
+  if (!vertexShader || !fragmentShader) return null;
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+  if (gl.getProgramParameter(program, gl.LINK_STATUS)) return program;
+
+  console.warn("Dynamic catalog WebGL program link failed", gl.getProgramInfoLog(program));
+  gl.deleteProgram(program);
+  return null;
+}
+
 function createClusterStarProgram(gl) {
   const vertexShader = compileCatalogShader(
     gl,
@@ -5368,10 +5366,15 @@ function createCatalogRenderer(canvasElement, options = {}) {
 
   const catalogProgram = createCatalogProgram(gl);
   if (!catalogProgram) return null;
+  const catalogDynamicProgram = createCatalogDynamicProgram(gl);
 
   const catalogDynamicBuffer = gl.createBuffer();
+  const catalogWorldStaticBuffer = catalogDynamicProgram ? gl.createBuffer() : null;
+  const catalogWorldPulseBuffer = catalogDynamicProgram ? gl.createBuffer() : null;
   const catalogStaticBuffer = gl.createBuffer();
   const catalogStride = CATALOG_GPU_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+  const catalogWorldStaticStride = CATALOG_DYNAMIC_GPU_STATIC_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+  const catalogWorldPulseStride = CATALOG_DYNAMIC_GPU_PULSE_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
   const catalogAttributes = {
     position: gl.getAttribLocation(catalogProgram, "a_position"),
     radius: gl.getAttribLocation(catalogProgram, "a_radius"),
@@ -5385,6 +5388,38 @@ function createCatalogRenderer(canvasElement, options = {}) {
     limbCoefficient: gl.getUniformLocation(catalogProgram, "u_limbCoefficient"),
     limbFluxNormalization: gl.getUniformLocation(catalogProgram, "u_limbFluxNormalization"),
   };
+  const catalogDynamicAttributes = catalogDynamicProgram
+    ? {
+        position: gl.getAttribLocation(catalogDynamicProgram, "a_position"),
+        static0: gl.getAttribLocation(catalogDynamicProgram, "a_static0"),
+        lodAlpha: gl.getAttribLocation(catalogDynamicProgram, "a_lodAlpha"),
+        pulse: gl.getAttribLocation(catalogDynamicProgram, "a_pulse"),
+        color: gl.getAttribLocation(catalogDynamicProgram, "a_color"),
+      }
+    : null;
+  const catalogDynamicUniforms = catalogDynamicProgram
+    ? {
+        resolution: gl.getUniformLocation(catalogDynamicProgram, "u_resolution"),
+        center: gl.getUniformLocation(catalogDynamicProgram, "u_center"),
+        yawPitch: gl.getUniformLocation(catalogDynamicProgram, "u_yawPitch"),
+        roll: gl.getUniformLocation(catalogDynamicProgram, "u_roll"),
+        scale: gl.getUniformLocation(catalogDynamicProgram, "u_scale"),
+        depthScale: gl.getUniformLocation(catalogDynamicProgram, "u_depthScale"),
+        dpr: gl.getUniformLocation(catalogDynamicProgram, "u_dpr"),
+        radiusZoomSize: gl.getUniformLocation(catalogDynamicProgram, "u_radiusZoomSize"),
+        radiusScale: gl.getUniformLocation(catalogDynamicProgram, "u_radiusScale"),
+        starBaseRadiusViewportScale: gl.getUniformLocation(
+          catalogDynamicProgram,
+          "u_starBaseRadiusViewportScale",
+        ),
+        displayLuminosityBaseBoost: gl.getUniformLocation(catalogDynamicProgram, "u_displayLuminosityBaseBoost"),
+        starAlphaHeadroomExposure: gl.getUniformLocation(catalogDynamicProgram, "u_starAlphaHeadroomExposure"),
+        starPulseAlphaMax: gl.getUniformLocation(catalogDynamicProgram, "u_starPulseAlphaMax"),
+        starRadiusBaseMax: gl.getUniformLocation(catalogDynamicProgram, "u_starRadiusBaseMax"),
+        limbCoefficient: gl.getUniformLocation(catalogDynamicProgram, "u_limbCoefficient"),
+        limbFluxNormalization: gl.getUniformLocation(catalogDynamicProgram, "u_limbFluxNormalization"),
+      }
+    : null;
   const clusterStarProgram = createClusterStarProgram(gl);
   const clusterStarBuffer = clusterStarProgram ? gl.createBuffer() : null;
   const clusterStarStride = CLUSTER_STAR_GPU_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
@@ -5433,17 +5468,29 @@ function createCatalogRenderer(canvasElement, options = {}) {
     gl,
     canvas: canvasElement,
     catalogProgram,
+    catalogDynamicProgram,
     catalogDynamicBuffer,
+    catalogWorldStaticBuffer,
+    catalogWorldPulseBuffer,
     catalogStaticBuffer,
     catalogAttributes,
     catalogUniforms,
+    catalogDynamicAttributes,
+    catalogDynamicUniforms,
     clusterStarProgram,
     clusterStarBuffer,
     clusterStarAttributes,
     clusterStarUniforms,
+    projectsCatalogDynamicInShader: Boolean(catalogDynamicProgram),
     projectsClusterStarsInShader: Boolean(clusterStarProgram),
     catalogDynamicCapacity: 0,
     catalogDynamicData: new Float32Array(0),
+    catalogWorldStaticCapacity: 0,
+    catalogWorldStaticData: new Float32Array(0),
+    catalogWorldStaticCount: 0,
+    catalogWorldStaticCacheVersion: -1,
+    catalogWorldPulseCapacity: 0,
+    catalogWorldPulseData: new Float32Array(0),
     catalogStaticCapacity: 0,
     catalogStaticData: new Float32Array(0),
     catalogStaticCount: 0,
@@ -5457,6 +5504,22 @@ function createCatalogRenderer(canvasElement, options = {}) {
       this.catalogDynamicCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, count)));
       this.catalogDynamicData = new Float32Array(this.catalogDynamicCapacity * CATALOG_GPU_VERTEX_FLOATS);
       return this.catalogDynamicData;
+    },
+    ensureCatalogWorldStaticCapacity(count) {
+      if (this.catalogWorldStaticCapacity >= count) return this.catalogWorldStaticData;
+      this.catalogWorldStaticCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, count)));
+      this.catalogWorldStaticData = new Float32Array(
+        this.catalogWorldStaticCapacity * CATALOG_DYNAMIC_GPU_STATIC_VERTEX_FLOATS,
+      );
+      return this.catalogWorldStaticData;
+    },
+    ensureCatalogWorldPulseCapacity(count) {
+      if (this.catalogWorldPulseCapacity >= count) return this.catalogWorldPulseData;
+      this.catalogWorldPulseCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, count)));
+      this.catalogWorldPulseData = new Float32Array(
+        this.catalogWorldPulseCapacity * CATALOG_DYNAMIC_GPU_PULSE_VERTEX_FLOATS,
+      );
+      return this.catalogWorldPulseData;
     },
     ensureCatalogStaticCapacity(count) {
       if (this.catalogStaticCapacity >= count) return this.catalogStaticData;
@@ -5479,11 +5542,21 @@ function createCatalogRenderer(canvasElement, options = {}) {
       this.canvas.style.height = `${scene.height}px`;
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     },
+    disableUnusedAttributes(keepLocations) {
+      const keep = new Set(keepLocations.filter((location) => location >= 0));
+      for (const attributes of [this.catalogAttributes, this.catalogDynamicAttributes, this.clusterStarAttributes]) {
+        if (!attributes) continue;
+        for (const location of Object.values(attributes)) {
+          if (location >= 0 && !keep.has(location)) this.gl.disableVertexAttribArray(location);
+        }
+      }
+    },
     clear() {
       this.gl.clearColor(0, 0, 0, 0);
       this.gl.clear(this.gl.COLOR_BUFFER_BIT);
     },
     bindCatalogAttributes(buffer = this.catalogDynamicBuffer) {
+      this.disableUnusedAttributes(Object.values(this.catalogAttributes));
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
       this.gl.enableVertexAttribArray(this.catalogAttributes.position);
       this.gl.vertexAttribPointer(this.catalogAttributes.position, 2, this.gl.FLOAT, false, catalogStride, 0);
@@ -5524,8 +5597,61 @@ function createCatalogRenderer(canvasElement, options = {}) {
         7 * Float32Array.BYTES_PER_ELEMENT,
       );
     },
+    bindCatalogWorldAttributes() {
+      if (!this.projectsCatalogDynamicInShader) return false;
+      this.disableUnusedAttributes(Object.values(this.catalogDynamicAttributes));
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.catalogWorldStaticBuffer);
+      this.gl.enableVertexAttribArray(this.catalogDynamicAttributes.position);
+      this.gl.vertexAttribPointer(
+        this.catalogDynamicAttributes.position,
+        3,
+        this.gl.FLOAT,
+        false,
+        catalogWorldStaticStride,
+        0,
+      );
+      this.gl.enableVertexAttribArray(this.catalogDynamicAttributes.static0);
+      this.gl.vertexAttribPointer(
+        this.catalogDynamicAttributes.static0,
+        4,
+        this.gl.FLOAT,
+        false,
+        catalogWorldStaticStride,
+        3 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      this.gl.enableVertexAttribArray(this.catalogDynamicAttributes.lodAlpha);
+      this.gl.vertexAttribPointer(
+        this.catalogDynamicAttributes.lodAlpha,
+        1,
+        this.gl.FLOAT,
+        false,
+        catalogWorldStaticStride,
+        7 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.catalogWorldPulseBuffer);
+      this.gl.enableVertexAttribArray(this.catalogDynamicAttributes.pulse);
+      this.gl.vertexAttribPointer(
+        this.catalogDynamicAttributes.pulse,
+        2,
+        this.gl.FLOAT,
+        false,
+        catalogWorldPulseStride,
+        0,
+      );
+      this.gl.enableVertexAttribArray(this.catalogDynamicAttributes.color);
+      this.gl.vertexAttribPointer(
+        this.catalogDynamicAttributes.color,
+        3,
+        this.gl.FLOAT,
+        false,
+        catalogWorldPulseStride,
+        2 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      return true;
+    },
     bindClusterStarAttributes() {
       if (!this.projectsClusterStarsInShader) return false;
+      this.disableUnusedAttributes(Object.values(this.clusterStarAttributes));
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.clusterStarBuffer);
       this.gl.enableVertexAttribArray(this.clusterStarAttributes.position);
       this.gl.vertexAttribPointer(this.clusterStarAttributes.position, 3, this.gl.FLOAT, false, clusterStarStride, 0);
@@ -5653,6 +5779,37 @@ function createCatalogRenderer(canvasElement, options = {}) {
       this.gl.uniform1f(this.catalogUniforms.limbFluxNormalization, LIMB_DARKENING_FLUX_NORMALIZATION);
       this.gl.blendFunc(this.gl.ONE, this.gl.ONE);
     },
+    prepareCatalogWorldDraw() {
+      if (!this.projectsCatalogDynamicInShader) return false;
+      this.resize();
+      const transform = makeProjectionTransform();
+      this.gl.useProgram(this.catalogDynamicProgram);
+      this.bindCatalogWorldAttributes();
+      this.gl.uniform2f(this.catalogDynamicUniforms.resolution, scene.width, scene.height);
+      this.gl.uniform2f(this.catalogDynamicUniforms.center, scene.centerX, scene.centerY);
+      this.gl.uniform4f(
+        this.catalogDynamicUniforms.yawPitch,
+        transform.cosy,
+        transform.siny,
+        transform.cosp,
+        transform.sinp,
+      );
+      this.gl.uniform2f(this.catalogDynamicUniforms.roll, transform.cosr, transform.sinr);
+      this.gl.uniform1f(this.catalogDynamicUniforms.scale, transform.scale);
+      this.gl.uniform1f(this.catalogDynamicUniforms.depthScale, transform.depthScale);
+      this.gl.uniform1f(this.catalogDynamicUniforms.dpr, scene.dpr);
+      this.gl.uniform1f(this.catalogDynamicUniforms.radiusZoomSize, starRadiusZoomSize());
+      this.gl.uniform1f(this.catalogDynamicUniforms.radiusScale, state.radiusScale);
+      this.gl.uniform1f(this.catalogDynamicUniforms.starBaseRadiusViewportScale, starBaseRadiusViewportScale());
+      this.gl.uniform1f(this.catalogDynamicUniforms.displayLuminosityBaseBoost, DISPLAY_LUMINOSITY_BASE_BOOST);
+      this.gl.uniform1f(this.catalogDynamicUniforms.starAlphaHeadroomExposure, STAR_ALPHA_HEADROOM_EXPOSURE);
+      this.gl.uniform1f(this.catalogDynamicUniforms.starPulseAlphaMax, STAR_PULSE_ALPHA_MAX);
+      this.gl.uniform1f(this.catalogDynamicUniforms.starRadiusBaseMax, STAR_RADIUS_BASE_MAX);
+      this.gl.uniform1f(this.catalogDynamicUniforms.limbCoefficient, LIMB_DARKENING_LINEAR_COEFFICIENT);
+      this.gl.uniform1f(this.catalogDynamicUniforms.limbFluxNormalization, LIMB_DARKENING_FLUX_NORMALIZATION);
+      this.gl.blendFunc(this.gl.ONE, this.gl.ONE);
+      return true;
+    },
     drawCatalogBuffer(buffer, count) {
       if (count <= 0) return;
       this.prepareCatalogDraw(buffer);
@@ -5664,8 +5821,48 @@ function createCatalogRenderer(canvasElement, options = {}) {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.catalogStaticBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, this.catalogStaticData.subarray(0, vertexCount), this.gl.STATIC_DRAW);
     },
+    uploadCatalogWorldStatic(items) {
+      if (!this.projectsCatalogDynamicInShader) return 0;
+      const data = this.ensureCatalogWorldStaticCapacity(items.length);
+      let offset = 0;
+      let count = 0;
+      for (const item of items) {
+        if (scene.catalogDrawListScreenProjected && catalogDynamicItemNeedsScreenProjection(item)) continue;
+        offset = writeCatalogGpuWorldStaticItem(data, offset, item);
+        count += 1;
+      }
+      this.catalogWorldStaticCount = count;
+      this.catalogWorldStaticCacheVersion = scene.catalogStaticCacheVersion;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.catalogWorldStaticBuffer);
+      this.gl.bufferData(
+        this.gl.ARRAY_BUFFER,
+        data.subarray(0, count * CATALOG_DYNAMIC_GPU_STATIC_VERTEX_FLOATS),
+        this.gl.STATIC_DRAW,
+      );
+      return count;
+    },
+    ensureCatalogWorldStatic(items) {
+      if (!this.projectsCatalogDynamicInShader) return 0;
+      if (this.catalogWorldStaticCacheVersion !== scene.catalogStaticCacheVersion) {
+        return this.uploadCatalogWorldStatic(items);
+      }
+      return this.catalogWorldStaticCount;
+    },
     drawCatalogStatic() {
       this.drawCatalogBuffer(this.catalogStaticBuffer, this.catalogStaticCount);
+    },
+    drawCatalogDynamicWorld(count) {
+      if (!this.projectsCatalogDynamicInShader || count <= 0) return false;
+      const vertexCount = count * CATALOG_DYNAMIC_GPU_PULSE_VERTEX_FLOATS;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.catalogWorldPulseBuffer);
+      this.gl.bufferData(
+        this.gl.ARRAY_BUFFER,
+        this.catalogWorldPulseData.subarray(0, vertexCount),
+        this.gl.STREAM_DRAW,
+      );
+      this.prepareCatalogWorldDraw();
+      this.gl.drawArrays(this.gl.POINTS, 0, count);
+      return true;
     },
     drawCatalogDynamic(count) {
       if (count <= 0) return;
@@ -6301,7 +6498,7 @@ function startIntroRotation() {
   const now = performance.now();
   markOrientationGridActive(now);
   primeIntroRotation();
-  beginIntroPulseThrottle();
+  markNavigationPulseThrottleActive(now);
   introRotation.startMs = now;
   introCloudLabelAnimation = { startMs: null };
   projectionDirty = true;
@@ -6323,7 +6520,6 @@ function updateIntroRotation(now = performance.now()) {
   markOrientationGridActive(now);
   const elapsed = now - introRotation.startMs;
   const progress = clamp(elapsed / INTRO_ROTATION_DURATION_MS, 0, 1);
-  updateIntroPulseThrottleRelease(progress);
   const easedProgress = easeOutSine(progress);
   const yawDelta = introRotation.targetYaw - introRotation.startYaw;
   const pitchDelta = introRotation.targetPitch - introRotation.startPitch;
@@ -6340,7 +6536,6 @@ function updateIntroRotation(now = performance.now()) {
     state.pitch = introRotation.targetPitch;
     state.roll = introRotation.targetRoll;
     introRotation = null;
-    endIntroPulseThrottle();
     updateCoordinateReadout();
     syncRangeOutputs();
   }
@@ -6349,7 +6544,6 @@ function updateIntroRotation(now = performance.now()) {
 function cancelIntroRotation() {
   introRotation = null;
   introCloudLabelAnimation = null;
-  endIntroPulseThrottle();
 }
 
 function cancelAxisSpinAnimation() {
@@ -6526,6 +6720,57 @@ function projectCatalogItemsForCache(points, catalogDrawList, catalogStats, tran
   }
 }
 
+function selectedCatalogProjectionTarget() {
+  const target = state.locked || state.hovered;
+  if (!target) return null;
+  return target.kind === "catalog" || target.kind === "clusterStar" ? target : null;
+}
+
+function catalogCanUseFastProjectionCache(now = performance.now()) {
+  return Boolean(
+    scene.catalogRenderer?.projectsCatalogDynamicInShader &&
+      scene.catalogStaticRenderer?.projectsCatalogDynamicInShader &&
+      CATALOG_PULSE_ALL_STARS &&
+      !shouldUseCatalogPulseLod(now) &&
+      navigationPulseThrottleActive(now) &&
+      !selectedCatalogProjectionTarget()
+  );
+}
+
+function appendCatalogItemsForGpuProjection(
+  points,
+  catalogDrawList,
+  catalogStats,
+  { clusterStarLodAlphaByCluster = null } = {},
+) {
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const coordinates = point.activeCoordinates;
+    if (!coordinates) continue;
+
+    const item = point.drawItem;
+    if (point.kind === "clusterStar") {
+      const clusterStarLodAlpha = clusterStarLodAlphaByCluster?.[point.clusterIndex] || 0;
+      if (clusterStarLodAlpha <= 0.001) continue;
+      item.clusterStarLodAlpha = clusterStarLodAlpha;
+    } else {
+      item.clusterStarLodAlpha = 1;
+    }
+
+    catalogDrawList.push(item);
+    catalogStats.count += 1;
+    const depth = Number.isFinite(coordinates[2]) ? coordinates[2] * state.depthScale : 0;
+    catalogStats.minDepth = Math.min(catalogStats.minDepth, depth);
+    catalogStats.maxDepth = Math.max(catalogStats.maxDepth, depth);
+  }
+}
+
+function ensureProjectionCacheForInteraction() {
+  if (projectionDirty || scene.catalogProjectionFastPending) {
+    rebuildProjectionCache({ forceCatalogProjection: true });
+  }
+}
+
 function isCatalogVisible(point) {
   const datasetKey = DATASET_KEYS[point.row[IDX.dataset]];
   return (
@@ -6644,7 +6889,7 @@ function markProjectionDirty() {
   queueRender();
 }
 
-function rebuildProjectionCache() {
+function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
   const projectionStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
   const redStats = resetStats(scene.cachedStats.redClump);
   const catalogStats = resetStats(scene.cachedStats.catalog);
@@ -6655,6 +6900,7 @@ function rebuildProjectionCache() {
   const projectionTransform = makeProjectionTransform();
   const redClumpProjectsInShader = Boolean(scene.redClumpRenderer?.projectsInShader);
   const clusterStarsProjectInShader = Boolean(scene.catalogStaticRenderer?.projectsClusterStarsInShader);
+  const fastCatalogProjection = !forceCatalogProjection && catalogCanUseFastProjectionCache();
   const project = (target, x, y, z) => {
     projectOffsetWithTransformInto(target, x, y, z, projectionTransform);
     target.x += scene.centerX;
@@ -6669,6 +6915,8 @@ function rebuildProjectionCache() {
   redClumpDrawList.length = 0;
   redClumpSurfaceDrawList.length = 0;
   catalogDrawList.length = 0;
+  scene.catalogDrawListScreenProjected = !fastCatalogProjection;
+  scene.catalogProjectionFastPending = fastCatalogProjection;
   clusterTargetDrawList.length = 0;
   scene.activeClusterStarRenderCount = 0;
   scene.clusterStarLodAlphaByCluster.length = scene.clusters.length;
@@ -6756,16 +7004,20 @@ function rebuildProjectionCache() {
   }
 
   const catalogViewportMargin = Math.max(28, effectiveZoomScale() * 0.35);
-  projectCatalogItemsForCache(
-    scene.activeCatalog,
-    catalogDrawList,
-    catalogStats,
-    projectionTransform,
-    scene.centerX,
-    scene.centerY,
-    catalogRadiusZoomSize,
-    catalogViewportMargin,
-  );
+  if (fastCatalogProjection) {
+    appendCatalogItemsForGpuProjection(scene.activeCatalog, catalogDrawList, catalogStats);
+  } else {
+    projectCatalogItemsForCache(
+      scene.activeCatalog,
+      catalogDrawList,
+      catalogStats,
+      projectionTransform,
+      scene.centerX,
+      scene.centerY,
+      catalogRadiusZoomSize,
+      catalogViewportMargin,
+    );
+  }
 
   for (const point of scene.activeClusters) {
     const coordinates = point.activeCoordinates || coordinatesForPoint(point);
@@ -6792,16 +7044,22 @@ function rebuildProjectionCache() {
   if (clusterStarsProjectInShader) {
     catalogStats.count += scene.activeClusterStarRenderCount;
     markClusterStarGpuDirty();
-    projectCatalogItemsForCache(
-      scene.activeClusterPulsatorStars,
-      catalogDrawList,
-      catalogStats,
-      projectionTransform,
-      scene.centerX,
-      scene.centerY,
-      catalogRadiusZoomSize,
-      catalogViewportMargin,
-    );
+    if (fastCatalogProjection) {
+      appendCatalogItemsForGpuProjection(scene.activeClusterPulsatorStars, catalogDrawList, catalogStats, {
+        clusterStarLodAlphaByCluster: scene.clusterStarLodAlphaByCluster,
+      });
+    } else {
+      projectCatalogItemsForCache(
+        scene.activeClusterPulsatorStars,
+        catalogDrawList,
+        catalogStats,
+        projectionTransform,
+        scene.centerX,
+        scene.centerY,
+        catalogRadiusZoomSize,
+        catalogViewportMargin,
+      );
+    }
   } else {
     projectCatalogItemsForCache(
       scene.activeClusterStars,
@@ -7683,24 +7941,41 @@ function updateAnimatedCatalogVisualStyle(item) {
   stampAnimatedCatalogVisualStyle(item);
 }
 
-function updateAnimatedCatalogItem(item, simulationDay) {
+function animatedCatalogPulseStateValid(item) {
+  return (
+    item.currentColor &&
+    Number.isFinite(item.currentAreaPulse) &&
+    item.currentAreaPulse > 0 &&
+    Number.isFinite(item.currentOpacityPulse) &&
+    item.currentOpacityPulse > 0
+  );
+}
+
+function updateAnimatedCatalogPulseState(item, simulationDay) {
   const pulseSample = pulseState(item.point, simulationDay);
   item.currentPulse = pulseSample.pulse;
   item.currentAreaPulse = pulseSample.areaPulse;
   item.currentOpacityPulse = pulseSample.opacityPulse;
-  updateAnimatedCatalogVisualStyle(item);
   item.currentColor = pulseSample.color;
+  item.currentRgb = pulseSample.rgb || null;
+  item.currentRgbArray = pulseSample.rgbArray || null;
+  item.currentRgbOffset = pulseSample.rgbOffset || 0;
+  return item.currentColor;
+}
+
+function updateAnimatedCatalogItem(item, simulationDay) {
+  updateAnimatedCatalogPulseState(item, simulationDay);
+  updateAnimatedCatalogVisualStyle(item);
+  return item.currentColor;
+}
+
+function cachedAnimatedCatalogPulseColor(item, simulationDay) {
+  if (!animatedCatalogPulseStateValid(item)) return updateAnimatedCatalogPulseState(item, simulationDay);
   return item.currentColor;
 }
 
 function cachedAnimatedCatalogItemColor(item, simulationDay) {
-  if (
-    !item.currentColor ||
-    !Number.isFinite(item.currentAreaPulse) ||
-    item.currentAreaPulse <= 0 ||
-    !Number.isFinite(item.currentOpacityPulse) ||
-    item.currentOpacityPulse <= 0
-  ) {
+  if (!animatedCatalogPulseStateValid(item)) {
     return updateAnimatedCatalogItem(item, simulationDay);
   }
   if (!animatedCatalogVisualStyleMatches(item)) updateAnimatedCatalogVisualStyle(item);
@@ -7740,6 +8015,13 @@ function animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, pulseN
   return updateAnimatedCatalogItem(item, simulationDay);
 }
 
+function animatedCatalogItemPulseColor(item, simulationDay, throttleSlowPulse, pulseNow) {
+  if (!shouldRefreshAnimatedCatalogItem(item, pulseNow, throttleSlowPulse)) {
+    return cachedAnimatedCatalogPulseColor(item, simulationDay);
+  }
+  return updateAnimatedCatalogPulseState(item, simulationDay);
+}
+
 function updateStaticCatalogItem(item, { freezePulse = false, simulationDay = currentSimulationDay() } = {}) {
   if (pulsationTooFastForAnimation(item.point)) {
     const pulseSample = meanPulseState(item.point);
@@ -7755,6 +8037,9 @@ function updateStaticCatalogItem(item, { freezePulse = false, simulationDay = cu
     );
     item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
     item.currentColor = pulseSample.color;
+    item.currentRgb = pulseSample.rgb || normalizedRgbForCatalogColor(item.currentColor);
+    item.currentRgbArray = null;
+    item.currentRgbOffset = 0;
     return item.currentColor;
   }
 
@@ -7772,6 +8057,9 @@ function updateStaticCatalogItem(item, { freezePulse = false, simulationDay = cu
     );
     item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
     item.currentColor = pulseSample.color;
+    item.currentRgb = pulseSample.rgb || null;
+    item.currentRgbArray = pulseSample.rgbArray || null;
+    item.currentRgbOffset = pulseSample.rgbOffset || 0;
     return item.currentColor;
   }
 
@@ -7781,31 +8069,76 @@ function updateStaticCatalogItem(item, { freezePulse = false, simulationDay = cu
   item.currentAlpha = item.staticAlpha;
   item.currentRadius = item.staticRadius;
   item.currentColor = item.point.color;
+  item.currentRgb = normalizedRgbForCatalogColor(item.currentColor);
+  item.currentRgbArray = null;
+  item.currentRgbOffset = 0;
   return item.currentColor;
 }
 
+function writeCatalogGpuRgb(data, offset, item, color) {
+  const rgbArray = item.currentRgbArray;
+  if (rgbArray) {
+    const rgbOffset = item.currentRgbOffset || 0;
+    data[offset] = rgbArray[rgbOffset];
+    data[offset + 1] = rgbArray[rgbOffset + 1];
+    data[offset + 2] = rgbArray[rgbOffset + 2];
+    return;
+  }
+
+  const rgbValue = item.currentRgb || normalizedRgbForCatalogColor(color);
+  data[offset] = rgbValue[0];
+  data[offset + 1] = rgbValue[1];
+  data[offset + 2] = rgbValue[2];
+}
+
 function writeCatalogGpuItem(data, offset, item, color) {
-  const rgbValue = normalizedRgbFromCssColor(color);
   data[offset] = item.projected.x;
   data[offset + 1] = item.projected.y;
   data[offset + 2] = item.currentRadius;
-  data[offset + 3] = rgbValue[0];
-  data[offset + 4] = rgbValue[1];
-  data[offset + 5] = rgbValue[2];
+  writeCatalogGpuRgb(data, offset + 3, item, color);
   data[offset + 6] = item.currentAlpha;
   data[offset + 7] = shouldUseLimbDarkening(item) ? 1 : 0;
   return offset + CATALOG_GPU_VERTEX_FLOATS;
 }
 
+function catalogDynamicItemNeedsScreenProjection(item) {
+  return item.point === state.locked || item.point === state.hovered;
+}
+
+function writeCatalogGpuWorldStaticItem(data, offset, item) {
+  const coordinates = item.point.activeCoordinates || coordinatesForPoint(item.point);
+  const exposure = Number.isFinite(item.staticExposure) ? item.staticExposure : datasetExposureForPoint(item.point);
+  data[offset] = coordinates[0];
+  data[offset + 1] = coordinates[1];
+  data[offset + 2] = coordinates[2];
+  data[offset + 3] = item.point.radiusUnit;
+  data[offset + 4] = item.point.alphaBaseUnit;
+  data[offset + 5] = pulseSafeAlphaForPoint(item.point, item.point.lightCurve);
+  data[offset + 6] = exposure;
+  data[offset + 7] = catalogItemLodAlpha(item);
+  return offset + CATALOG_DYNAMIC_GPU_STATIC_VERTEX_FLOATS;
+}
+
+function writeCatalogGpuWorldPulseItem(data, offset, item, color) {
+  data[offset] = item.currentAreaPulse;
+  data[offset + 1] = item.currentOpacityPulse;
+  writeCatalogGpuRgb(data, offset + 2, item, color);
+  return offset + CATALOG_DYNAMIC_GPU_PULSE_VERTEX_FLOATS;
+}
+
 function catalogStaticCacheMatches() {
   const pulseLodActive = shouldUseCatalogPulseLod();
+  const projectionMode = scene.catalogDrawListScreenProjected ? "screen" : "world";
   return (
     !scene.catalogStaticDirty &&
     (!scene.catalogStaticRenderer?.projectsClusterStarsInShader || !scene.clusterStarGpuDirty) &&
     scene.catalogStaticRadiusScale === state.radiusScale &&
     scene.catalogStaticExposureSignature === catalogExposureSignature() &&
     scene.catalogStaticPulsationSpeed === state.pulsationSpeed &&
-    scene.catalogStaticPulseLodActive === pulseLodActive
+    scene.catalogStaticPulsationAmplitudeScale === state.pulsationAmplitudeScale &&
+    scene.catalogStaticPulsatorPreset === currentPulsatorPreset() &&
+    scene.catalogStaticPulseLodActive === pulseLodActive &&
+    scene.catalogStaticProjectionMode === projectionMode
   );
 }
 
@@ -7815,8 +8148,12 @@ function stampCatalogStaticCache(animatedCatalog, staticCatalog, pulseLodActive 
   scene.catalogStaticRadiusScale = state.radiusScale;
   scene.catalogStaticExposureSignature = catalogExposureSignature();
   scene.catalogStaticPulsationSpeed = state.pulsationSpeed;
+  scene.catalogStaticPulsationAmplitudeScale = state.pulsationAmplitudeScale;
+  scene.catalogStaticPulsatorPreset = currentPulsatorPreset();
   scene.catalogStaticPulseLodActive = pulseLodActive;
+  scene.catalogStaticProjectionMode = scene.catalogDrawListScreenProjected ? "screen" : "world";
   scene.catalogStaticDirty = false;
+  scene.catalogStaticCacheVersion += 1;
 }
 
 function drawAnimatedCatalogItems(
@@ -7837,11 +8174,36 @@ function drawAnimatedCatalogItems(
 }
 
 function rebuildCatalogGpuStaticLayer(renderer, simulationDay = currentSimulationDay()) {
-  const data = renderer.ensureCatalogStaticCapacity(scene.catalogDrawList.length);
   scene.catalogAnimatedDrawList.length = 0;
   const now = performance.now();
   const usePulseLod = shouldUseCatalogPulseLod(now);
   const freezeStaticPulse = navigationPulseThrottleActive(now);
+  const useWorldProjectionCache =
+    !scene.catalogDrawListScreenProjected &&
+    renderer.projectsCatalogDynamicInShader &&
+    CATALOG_PULSE_ALL_STARS &&
+    !usePulseLod;
+
+  if (useWorldProjectionCache) {
+    for (const item of scene.catalogDrawList) {
+      item.navigationPulseThrottle = shouldNavigationThrottleCatalogItem(item);
+      scene.catalogAnimatedDrawList.push(item);
+    }
+
+    renderer.resize();
+    renderer.clear();
+    renderer.uploadCatalogStatic(0);
+    renderer.drawCatalogStatic();
+    let staticCatalog = 0;
+    if (renderer.projectsClusterStarsInShader) {
+      renderer.drawClusterStars();
+      staticCatalog += renderer.clusterStarCount;
+    }
+    stampCatalogStaticCache(scene.catalogAnimatedDrawList.length, staticCatalog, usePulseLod);
+    return;
+  }
+
+  const data = renderer.ensureCatalogStaticCapacity(scene.catalogDrawList.length);
 
   let offset = 0;
   let staticCount = 0;
@@ -7946,16 +8308,34 @@ function drawCatalogGpu(simulationDay, throttleSlowPulse = false, pulseNow = per
     rebuildCatalogGpuStaticLayer(staticRenderer, simulationDay);
   }
 
+  const useWorldProjection = renderer.projectsCatalogDynamicInShader;
+  const expectedWorldCount = useWorldProjection
+    ? renderer.ensureCatalogWorldStatic(scene.catalogAnimatedDrawList)
+    : 0;
   const data = renderer.ensureCatalogCapacity(scene.catalogAnimatedDrawList.length);
+  const worldData = useWorldProjection
+    ? renderer.ensureCatalogWorldPulseCapacity(expectedWorldCount)
+    : null;
   let offset = 0;
+  let worldOffset = 0;
   let count = 0;
+  let worldCount = 0;
 
   for (const item of scene.catalogAnimatedDrawList) {
-    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, pulseNow);
-    offset = writeCatalogGpuItem(data, offset, item, color);
-    count += 1;
+    const needsScreenProjection =
+      scene.catalogDrawListScreenProjected && catalogDynamicItemNeedsScreenProjection(item);
+    if (useWorldProjection && !needsScreenProjection) {
+      const color = animatedCatalogItemPulseColor(item, simulationDay, throttleSlowPulse, pulseNow);
+      worldOffset = writeCatalogGpuWorldPulseItem(worldData, worldOffset, item, color);
+      worldCount += 1;
+    } else {
+      const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, pulseNow);
+      offset = writeCatalogGpuItem(data, offset, item, color);
+      count += 1;
+    }
   }
 
+  renderer.drawCatalogDynamicWorld(worldCount);
   renderer.drawCatalogDynamic(count);
   return {
     animatedCatalog: scene.catalogStaticCounts.animated,
@@ -7974,34 +8354,37 @@ function drawCatalog(useStaticCache = true) {
   const gpuResult = drawCatalogGpu(simulationDay, throttleSlowPulse, pulseNow);
   if (gpuResult) {
     ({ animatedCatalog, staticCatalog } = gpuResult);
-  } else if (useStaticCache && PULSE_LOD_ENABLED && catalogStaticCacheMatches()) {
-    if (scene.catalogStaticDirty) rebuildCatalogStaticLayer(simulationDay);
-    ctx.drawImage(scene.catalogStaticCanvas, 0, 0, scene.width, scene.height);
-    animatedCatalog = scene.catalogStaticCounts.animated;
-    staticCatalog = scene.catalogStaticCounts.static;
-    drawAnimatedCatalogItems(
-      scene.catalogAnimatedDrawList,
-      simulationDay,
-      throttleSlowPulse,
-      pulseNow,
-    );
-  } else if (useStaticCache && PULSE_LOD_ENABLED) {
-    rebuildCatalogStaticLayer(simulationDay);
-    ctx.drawImage(scene.catalogStaticCanvas, 0, 0, scene.width, scene.height);
-    animatedCatalog = scene.catalogStaticCounts.animated;
-    staticCatalog = scene.catalogStaticCounts.static;
-    drawAnimatedCatalogItems(
-      scene.catalogAnimatedDrawList,
-      simulationDay,
-      throttleSlowPulse,
-      pulseNow,
-    );
   } else {
-    ({ animatedCatalog, staticCatalog } = drawCatalogDirect(
-      simulationDay,
-      throttleSlowPulse,
-      pulseNow,
-    ));
+    if (!scene.catalogDrawListScreenProjected) rebuildProjectionCache({ forceCatalogProjection: true });
+    if (useStaticCache && PULSE_LOD_ENABLED && catalogStaticCacheMatches()) {
+      if (scene.catalogStaticDirty) rebuildCatalogStaticLayer(simulationDay);
+      ctx.drawImage(scene.catalogStaticCanvas, 0, 0, scene.width, scene.height);
+      animatedCatalog = scene.catalogStaticCounts.animated;
+      staticCatalog = scene.catalogStaticCounts.static;
+      drawAnimatedCatalogItems(
+        scene.catalogAnimatedDrawList,
+        simulationDay,
+        throttleSlowPulse,
+        pulseNow,
+      );
+    } else if (useStaticCache && PULSE_LOD_ENABLED) {
+      rebuildCatalogStaticLayer(simulationDay);
+      ctx.drawImage(scene.catalogStaticCanvas, 0, 0, scene.width, scene.height);
+      animatedCatalog = scene.catalogStaticCounts.animated;
+      staticCatalog = scene.catalogStaticCounts.static;
+      drawAnimatedCatalogItems(
+        scene.catalogAnimatedDrawList,
+        simulationDay,
+        throttleSlowPulse,
+        pulseNow,
+      );
+    } else {
+      ({ animatedCatalog, staticCatalog } = drawCatalogDirect(
+        simulationDay,
+        throttleSlowPulse,
+        pulseNow,
+      ));
+    }
   }
 
   if (PERF_HUD_ENABLED) {
@@ -8162,12 +8545,18 @@ function render(timestamp) {
   drawBackgroundStars();
   drawGrid(timestamp);
 
-  const rebuiltProjection = projectionDirty;
-  if (projectionDirty) {
-    markNavigationPulseThrottleActive(timestamp);
-    rebuildProjectionCache();
+  let forceExactProjectionRebuild = false;
+  if (!projectionDirty && scene.catalogProjectionFastPending && !navigationPulseThrottleActive(timestamp)) {
+    projectionDirty = true;
+    forceExactProjectionRebuild = true;
   }
-  introPulseThrottleEndedThisFrame = false;
+
+  let rebuiltProjection = false;
+  if (projectionDirty) {
+    if (!forceExactProjectionRebuild) markNavigationPulseThrottleActive(timestamp);
+    rebuildProjectionCache({ forceCatalogProjection: forceExactProjectionRebuild });
+    rebuiltProjection = true;
+  }
   drawClusterGlows();
   beginGpuSceneLayer();
   const redStats = drawRedClump(rebuiltProjection);
@@ -8922,6 +9311,36 @@ function isMobileTouchPointer(event) {
   return event.pointerType === "touch" && MOBILE_CONTROLS_MEDIA.matches;
 }
 
+function activeFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function requestMobileFullscreen() {
+  if (!MOBILE_CONTROLS_MEDIA.matches || activeFullscreenElement()) return;
+  const target = elements.atlas || document.documentElement;
+  const requestFullscreen =
+    target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
+  if (!requestFullscreen) return;
+  try {
+    const result = requestFullscreen.call(target, { navigationUI: "hide" });
+    if (result?.catch) result.catch(() => {});
+  } catch {
+    // Some mobile browsers only support fullscreen for installed web apps or media elements.
+  }
+}
+
+function exitMobileFullscreen() {
+  if (!activeFullscreenElement()) return;
+  const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+  if (!exitFullscreen) return;
+  try {
+    const result = exitFullscreen.call(document);
+    if (result?.catch) result.catch(() => {});
+  } catch {
+    // Ignore browser-specific fullscreen exit failures.
+  }
+}
+
 function touchPointFromEvent(event) {
   return {
     pointerId: event.pointerId,
@@ -9101,6 +9520,7 @@ function resetMobileViewportToDefault() {
   syncCoordinateFrameControls();
   setTarget(null);
   markProjectionDirty();
+  exitMobileFullscreen();
 }
 
 function selectMobileTapTarget(point) {
@@ -9137,6 +9557,7 @@ function selectMobileTapTarget(point) {
 function handleCanvasTouchPointerDown(event) {
   if (!isMobileTouchPointer(event)) return false;
   event.preventDefault();
+  requestMobileFullscreen();
   window.clearTimeout(hoverTimer);
   cancelIntroRotation();
   cancelAxisSpinAnimation();
@@ -10308,7 +10729,7 @@ function targetNavigationTargetIsAllowed(target, includeRedClump) {
 }
 
 function buildTargetNavigationCandidates() {
-  if (projectionDirty) rebuildProjectionCache();
+  ensureProjectionCacheForInteraction();
   if (scene.width <= 0 || scene.height <= 0) return [];
 
   const candidates = [];
@@ -10366,8 +10787,9 @@ function buildTargetNavigationCandidates() {
 }
 
 function buildFullTargetNavigationCandidates() {
-  if (projectionDirty) rebuildProjectionCache();
-  else {
+  if (projectionDirty || scene.catalogProjectionFastPending) {
+    rebuildProjectionCache({ forceCatalogProjection: true });
+  } else {
     rebuildActivePointLists();
     rebuildCoordinateCache();
   }
@@ -10562,7 +10984,7 @@ function stepTargetNavigation(direction) {
 }
 
 function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
-  if (projectionDirty) rebuildProjectionCache();
+  ensureProjectionCacheForInteraction();
 
   let best = null;
   const radiusScale = Math.max(1, pickRadiusScale);
@@ -10842,7 +11264,10 @@ function endMobileDrawerSwipe(event) {
 }
 
 function bindMobileControls() {
-  elements.mobileControlsToggle?.addEventListener("click", () => setMobileControlsOpen(true));
+  elements.mobileControlsToggle?.addEventListener("click", () => {
+    requestMobileFullscreen();
+    setMobileControlsOpen(true);
+  });
   elements.mobileControlsClose?.addEventListener("click", () => {
     setMobileControlsOpen(false, { restoreFocus: true });
   });
@@ -10960,6 +11385,7 @@ function bindControls() {
 
   [controls.datasetPresetToggle, controls.mobilePresetToggle].filter(Boolean).forEach((button) => {
     button.addEventListener("click", () => {
+      if (button === controls.mobilePresetToggle) requestMobileFullscreen();
       applyPulsatorPreset(nextPulsatorPreset());
     });
   });
@@ -11354,6 +11780,9 @@ function preparePoints(payload) {
       currentAlpha: 0,
       currentRadius: 0,
       currentColor: null,
+      currentRgb: null,
+      currentRgbArray: null,
+      currentRgbOffset: 0,
       navigationPulseThrottle: false,
       staticBaseRadius: -1,
       staticAlphaUnit: -1,
@@ -11492,6 +11921,9 @@ function preparePoints(payload) {
       currentAlpha: 0,
       currentRadius: 0,
       currentColor: null,
+      currentRgb: null,
+      currentRgbArray: null,
+      currentRgbOffset: 0,
       navigationPulseThrottle: false,
       staticBaseRadius: -1,
       staticAlphaUnit: -1,
