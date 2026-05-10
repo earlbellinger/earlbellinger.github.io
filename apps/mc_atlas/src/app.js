@@ -926,7 +926,7 @@ const MOBILE_TARGET_PICK_RADIUS_SCALE = 2.25;
 const MOBILE_DOUBLE_TAP_MAX_MS = 620;
 const MOBILE_DOUBLE_TAP_MAX_DISTANCE = 28;
 const MOBILE_ROTATE_ANGLE_THRESHOLD = 0.035;
-const MOBILE_VIEWPORT_CENTER_SEQUENCE = ["bridge", "lmc", "smc"];
+const MOBILE_ROTATE_SENSITIVITY = 0.25;
 const MOBILE_STAR_BASE_RADIUS_SCALE = 0.5;
 const MOBILE_DRAWER_SWIPE_CLOSE_DISTANCE = 58;
 let mobileControlsOpen = false;
@@ -8744,7 +8744,7 @@ function applyMultiTouchGesture() {
     if (state.locked || state.cameraLocked) clearTargetSelection();
 
     const nextZoom = clampZoomScale(touchGesture.zoom * (metrics.distance / Math.max(1, touchGesture.distance)));
-    state.roll = normalizeRadians(touchGesture.roll - angleDelta);
+    state.roll = normalizeRadians(touchGesture.roll - angleDelta * MOBILE_ROTATE_SENSITIVITY);
     state.zoom = nextZoom;
     updateSceneLayout();
 
@@ -8762,11 +8762,30 @@ function applyMultiTouchGesture() {
   setCursorClientPosition(metrics.centerX, metrics.centerY);
 }
 
-function cycleMobileViewportCenter() {
-  const currentCenter = state.centerSelection || state.coordinateCenter;
-  const currentIndex = MOBILE_VIEWPORT_CENTER_SEQUENCE.indexOf(currentCenter);
-  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % MOBILE_VIEWPORT_CENTER_SEQUENCE.length : 0;
-  setCoordinateCenter(MOBILE_VIEWPORT_CENTER_SEQUENCE[nextIndex]);
+function resetMobileViewportToDefault() {
+  cancelIntroRotation();
+  cancelAxisSpinAnimation();
+  markOrientationGridActive();
+  state.yaw = 0;
+  state.pitch = 0;
+  state.roll = 0;
+  state.zoom = DEFAULT_ZOOM_SCALE;
+  state.panX = 0;
+  state.panY = 0;
+  state.coordinateFrame = "atlas";
+  state.coordinateCenter = "bridge";
+  state.centerSelection = "bridge";
+  state.customCoordinateContext = null;
+  state.hovered = null;
+  state.locked = null;
+  state.cameraLocked = false;
+  state.cameraFollowsLockedTarget = false;
+  previousCustomView = null;
+  updateSceneLayout();
+  syncRangeOutputs();
+  syncCoordinateFrameControls();
+  setTarget(null);
+  markProjectionDirty();
 }
 
 function selectMobileTapTarget(point) {
@@ -8776,7 +8795,7 @@ function selectMobileTapTarget(point) {
     Math.hypot(point.clientX - lastMobileTap.x, point.clientY - lastMobileTap.y) <= MOBILE_DOUBLE_TAP_MAX_DISTANCE;
 
   if (isDoubleTap) {
-    cycleMobileViewportCenter();
+    resetMobileViewportToDefault();
     lastMobileTap = { time: 0, x: 0, y: 0, target: null };
     return;
   }
@@ -8785,7 +8804,13 @@ function selectMobileTapTarget(point) {
     pickRadiusScale: MOBILE_TARGET_PICK_RADIUS_SCALE,
   });
   if (target) {
-    setCameraLock(true, target);
+    state.locked = target;
+    state.hovered = null;
+    state.cameraLocked = false;
+    state.cameraFollowsLockedTarget = false;
+    setTarget(target);
+    updateCoordinateReadout();
+    queueRender();
   } else {
     clearTargetSelection();
   }
@@ -9464,7 +9489,18 @@ function mobileTargetPreviewName(target) {
 
 function createMobileTargetPreviewPlot(target) {
   if (target?.kind === "cluster") return createClusterHrDiagram(target);
-  if (target?.lightCurve?.waveform?.length) return createLightCurveInset(target);
+  if (target?.lightCurve?.waveform?.length) {
+    const plot = createLightCurveInset(target);
+    if (target.kind !== "catalog") return plot;
+    const link = document.createElement("a");
+    link.className = "mobileTargetPreviewLink";
+    link.href = ogleObjectUrl(target.row);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.setAttribute("aria-label", `Open ${mobileTargetPreviewName(target)} in OGLE`);
+    link.append(plot);
+    return link;
+  }
   return null;
 }
 
@@ -10699,6 +10735,7 @@ function bindControls() {
 
   canvas.addEventListener("dblclick", (event) => {
     event.preventDefault();
+    if (MOBILE_CONTROLS_MEDIA.matches) return;
     setCursorPosition(event);
     selectTargetAt(event.clientX, event.clientY, { lockCamera: true });
   });

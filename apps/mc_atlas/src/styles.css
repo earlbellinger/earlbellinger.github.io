@@ -63,6 +63,8 @@ canvas {
   background: #000;
   cursor: grab;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .sceneCanvas {
@@ -1525,8 +1527,19 @@ h2 {
 }
 
 @media (max-width: 860px) {
+  html,
   body {
     overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   canvas {
@@ -1659,6 +1672,14 @@ h2 {
   .mobileTargetPreviewPlot {
     display: grid;
     min-width: 0;
+  }
+
+  .mobileTargetPreviewLink {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    pointer-events: auto;
+    touch-action: manipulation;
   }
 
   .mobileTargetPreview .lightcurveInset {
