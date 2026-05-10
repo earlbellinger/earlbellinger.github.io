@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Magellanic Cloud Atlas</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000000'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23e5e5e5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23fca311'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./src/styles.css?v=20260509-cluster-isochrone-interp" />
+    <link rel="stylesheet" href="./src/styles.css?v=20260510-keyboard-shortcuts" />
   </head>
   <body>
     <main class="atlas" aria-label="Interactive Magellanic Cloud atlas">
-      <canvas id="scene" class="sceneCanvas" aria-label="3-D star map"></canvas>
+      <canvas id="scene" class="sceneCanvas" aria-label="3-D star map" tabindex="0"></canvas>
       <canvas id="redClumpScene" class="redClumpCanvas" aria-hidden="true"></canvas>
       <canvas id="catalogScene" class="catalogCanvas" aria-hidden="true"></canvas>
       <canvas id="catalogDynamicScene" class="catalogDynamicCanvas" aria-hidden="true"></canvas>
@@ -241,8 +241,17 @@
       </div>
       <div id="loading" class="loading" role="progressbar" aria-label="Loading Magellanic Data" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">Loading Magellanic Data</div>
       <div id="perfHud" class="perfHud hidden" aria-live="off"></div>
+      <div id="shortcutHelp" class="shortcutHelp" role="dialog" aria-label="Keyboard shortcuts" hidden>
+        <div class="shortcutHelpPanel">
+          <div class="shortcutHelpHeader">
+            <strong>Keyboard Shortcuts</strong>
+            <button id="shortcutHelpClose" class="shortcutHelpClose" type="button" aria-label="Close keyboard shortcuts" title="Close keyboard shortcuts">x</button>
+          </div>
+          <div id="shortcutHelpList" class="shortcutHelpList"></div>
+        </div>
+      </div>
     </main>
 
-    <script type="module" src="./src/app.js?v=20260510-cluster-pick-halo"></script>
+    <script type="module" src="./src/app.js?v=20260510-keyboard-shortcuts"></script>
   </body>
 </html>

@@ -55,6 +55,8 @@ const PULSATION_FLICKER_FREQUENCY_HZ = 2;
 const PULSATION_AMPLITUDE_MIN = 1;
 const PULSATION_AMPLITUDE_MAX = 20;
 const PULSATION_AMPLITUDE_DEFAULT = 7;
+const PULSATION_SPEED_KEY_GAIN = 10 ** 0.125;
+const PULSATION_SPEED_KEY_FAST_GAIN = 10;
 const SECONDS_PER_DAY = 86400;
 const INTRO_ROTATION_DURATION_MS = 3000;
 const INTRO_CLOUD_LABEL_TRIGGER_YAW_DEGREES = -10;
@@ -119,6 +121,29 @@ const INTRO_ROTATION_START_YAW_DEGREES = -143;
 const INTRO_ROTATION_START_PITCH_DEGREES = 0;
 const INTRO_ROTATION_START_ROLL_DEGREES = 0;
 const AXIS_SPIN_AXES = new Set(["yaw", "pitch", "roll"]);
+const GRID_SHORTCUT_SEQUENCE = ["none", "equatorial", "galactic", "both"];
+const KEYBOARD_DATASET_PRESETS = {
+  1: "cepheids",
+  2: "rrlyrae",
+  3: "miras",
+  4: "clusters",
+  5: "redclump",
+};
+const SHORTCUT_HELP_ITEMS = [
+  { keys: ["/"], label: "Search targets" },
+  { keys: ["Esc"], label: "Unlock or clear target" },
+  { keys: ["Space"], label: "Pause or resume pulsation" },
+  { keys: ["1", "2", "3", "4", "5"], label: "Activate dataset presets" },
+  { keys: ["["], label: "Previous target" },
+  { keys: ["]"], label: "Next target" },
+  { keys: ["L"], label: "Lock camera to target" },
+  { keys: ["H"], label: "Hide or show overlays" },
+  { keys: ["V"], label: "Cycle face, edge, and custom view" },
+  { keys: ["G"], label: "Cycle coordinate grids" },
+  { keys: [","], label: "Slow pulsation" },
+  { keys: ["."], label: "Speed pulsation" },
+  { keys: ["?"], label: "Show this panel" },
+];
 const ORIENTATION_GRID_VISIBLE_MS = 1200;
 const ORIENTATION_GRID_FADE_MS = 450;
 const EQUATORIAL_GRID_RA_STEP_DEGREES = 30;
@@ -961,6 +986,9 @@ const elements = {
   mobileControlsBackdrop: document.querySelector("#mobileControlsBackdrop"),
   mobileControlsClose: document.querySelector("#mobileControlsClose"),
   mobilePanelHeader: document.querySelector(".mobilePanelHeader"),
+  shortcutHelp: document.querySelector("#shortcutHelp"),
+  shortcutHelpList: document.querySelector("#shortcutHelpList"),
+  shortcutHelpClose: document.querySelector("#shortcutHelpClose"),
 };
 
 const state = {
@@ -1010,6 +1038,7 @@ const state = {
   locked: null,
   cameraLocked: false,
   overlaysHidden: false,
+  pulsationPaused: false,
 };
 
 const editableMultiplierConfigs = {
@@ -1083,9 +1112,7 @@ const editableMultiplierConfigs = {
     max: () => 10 ** Number(controls.pulsationSpeed.max),
     get: () => state.pulsationSpeed,
     set: (value) => {
-      const speed = clampPulsationSpeed(value);
-      state.pulsationSpeed = speed;
-      state.pulsationSpeedLog = Math.log10(speed);
+      setPulsationSpeed(value);
       markCatalogStaticDirty();
       queueRender();
     },
@@ -1196,6 +1223,9 @@ let axisSpinAnimation = null;
 let datasetPresetPreview = null;
 const animationEpoch = 6000;
 const animationStartMs = performance.now();
+let simulationTimeOffsetDays = 0;
+let pausedSimulationDay = null;
+let previousCustomView = null;
 let orientationGridLastActivityMs = animationStartMs;
 let navigationPulseThrottleUntilMs = 0;
 let lastCatalogPulseUpdateMs = Number.NEGATIVE_INFINITY;
@@ -3060,9 +3090,66 @@ function lowerBoundByLogLum(samples, logLuminosity) {
   return low;
 }
 
-function currentSimulationDay() {
-  const elapsedMs = performance.now() - animationStartMs;
-  return animationEpoch + (elapsedMs / 86400000) * state.pulsationSpeed;
+function simulationDayForSpeed(speed = state.pulsationSpeed, now = performance.now()) {
+  const elapsedMs = now - animationStartMs;
+  return animationEpoch + simulationTimeOffsetDays + (elapsedMs / 86400000) * speed;
+}
+
+function setSimulationOffsetForDay(day, speed = state.pulsationSpeed, now = performance.now()) {
+  simulationTimeOffsetDays = day - animationEpoch - ((now - animationStartMs) / 86400000) * speed;
+}
+
+function currentSimulationDay(now = performance.now()) {
+  if (state.pulsationPaused && Number.isFinite(pausedSimulationDay)) return pausedSimulationDay;
+  return simulationDayForSpeed(state.pulsationSpeed, now);
+}
+
+function setPulsationSpeed(value, { preserveDay = true } = {}) {
+  const now = performance.now();
+  const day = preserveDay ? currentSimulationDay(now) : null;
+  const speed = clampPulsationSpeed(value);
+  state.pulsationSpeed = speed;
+  state.pulsationSpeedLog = Math.log10(speed);
+  if (preserveDay && Number.isFinite(day)) {
+    if (state.pulsationPaused) pausedSimulationDay = day;
+    else setSimulationOffsetForDay(day, speed, now);
+  }
+}
+
+function resetSimulationClock() {
+  simulationTimeOffsetDays = 0;
+  pausedSimulationDay = null;
+  state.pulsationPaused = false;
+}
+
+function setPulsationPaused(paused) {
+  const shouldPause = Boolean(paused);
+  if (state.pulsationPaused === shouldPause) return;
+  const now = performance.now();
+  if (shouldPause) {
+    pausedSimulationDay = currentSimulationDay(now);
+    state.pulsationPaused = true;
+  } else {
+    if (Number.isFinite(pausedSimulationDay)) setSimulationOffsetForDay(pausedSimulationDay, state.pulsationSpeed, now);
+    pausedSimulationDay = null;
+    state.pulsationPaused = false;
+  }
+  markCatalogStaticDirty();
+  queueRender();
+}
+
+function togglePulsationPaused() {
+  setPulsationPaused(!state.pulsationPaused);
+}
+
+function adjustPulsationSpeed(direction, fast = false) {
+  if (!direction) return;
+  const gain = fast ? PULSATION_SPEED_KEY_FAST_GAIN : PULSATION_SPEED_KEY_GAIN;
+  const factor = direction > 0 ? gain : 1 / gain;
+  setPulsationSpeed(state.pulsationSpeed * factor);
+  markCatalogStaticDirty();
+  syncRangeOutputs();
+  queueRender();
 }
 
 function updatePulsationClock() {
@@ -7830,8 +7917,7 @@ function syncOrientationPresetButtons() {
 function syncRangeOutputs() {
   state.zoom = clampZoomScale(state.zoom, { allowTargetZoom: Boolean(selectedTargetForDeepZoom()) });
   state.radiusScale = clampRadiusScale(state.radiusScale);
-  state.pulsationSpeed = clampPulsationSpeed(state.pulsationSpeed);
-  state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
+  setPulsationSpeed(state.pulsationSpeed);
   state.pulsationAmplitudeScale = clampPulsationAmplitudeScale(state.pulsationAmplitudeScale);
   syncEditableMultiplierOutput("yaw", radiansToDegrees(state.yaw));
   syncEditableMultiplierOutput("pitch", radiansToDegrees(state.pitch));
@@ -7976,6 +8062,8 @@ function syncDatasetPresetButtons() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute("aria-label", active ? `${label} preset active` : `Preview or activate ${label} preset`);
+    const shortcutKey = Object.entries(KEYBOARD_DATASET_PRESETS).find(([, presetKey]) => presetKey === preset)?.[0];
+    if (shortcutKey) button.setAttribute("aria-keyshortcuts", shortcutKey);
     button.title = active ? `${label} preset active` : `Preview or activate ${label} preset`;
   });
 }
@@ -8017,6 +8105,7 @@ function updateCoordinateReadout() {
     input.dataset.skyGrid = gridToggle.gridKey;
     input.checked = gridToggle.checked;
     input.setAttribute("aria-label", gridToggle.title);
+    input.setAttribute("aria-keyshortcuts", "G");
 
     const text = document.createElement("span");
     text.textContent = label;
@@ -8202,6 +8291,7 @@ function targetMatchesActiveDatasetPreset(target) {
 }
 
 function targetIsPickable(target) {
+  if (target?.kind === "redclump") return false;
   return targetDatasetIsVisible(target) && targetMatchesActiveDatasetPreset(target);
 }
 
@@ -8306,8 +8396,7 @@ function applyPulsatorPreset(preset) {
     });
     state.radiusScale = defaultRadiusScaleForPreset(preset);
     state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(preset);
-    state.pulsationSpeed = defaultPulsationSpeedForPreset(preset);
-    state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
+    setPulsationSpeed(defaultPulsationSpeedForPreset(preset));
     syncDatasetPresetStateChange();
     return;
   }
@@ -8331,8 +8420,7 @@ function applyPulsatorPreset(preset) {
     preset === PULSATOR_DEFAULT_PRESET ? DATASET_EXPOSURE_DEFAULT : CLUSTER_PRESET_CONTEXT_EXPOSURE;
   state.radiusScale = defaultRadiusScaleForPreset(preset);
   state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(preset);
-  state.pulsationSpeed = defaultPulsationSpeedForPreset(preset);
-  state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
+  setPulsationSpeed(defaultPulsationSpeedForPreset(preset));
 
   syncDatasetPresetStateChange();
 }
@@ -8352,8 +8440,7 @@ function applyAuxiliaryDatasetPreset(preset) {
 
   state.radiusScale = defaultRadiusScaleForPreset(PULSATOR_DEFAULT_PRESET);
   state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(PULSATOR_DEFAULT_PRESET);
-  state.pulsationSpeed = defaultPulsationSpeedForPreset(PULSATOR_DEFAULT_PRESET);
-  state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
+  setPulsationSpeed(defaultPulsationSpeedForPreset(PULSATOR_DEFAULT_PRESET));
 
   syncDatasetPresetStateChange();
 }
@@ -8386,8 +8473,7 @@ function restoreDatasetPresetState(snapshot) {
   state.datasetExposure = { ...snapshot.datasetExposure };
   state.radiusScale = snapshot.radiusScale;
   state.pulsationAmplitudeScale = snapshot.pulsationAmplitudeScale;
-  state.pulsationSpeed = snapshot.pulsationSpeed;
-  state.pulsationSpeedLog = snapshot.pulsationSpeedLog;
+  setPulsationSpeed(snapshot.pulsationSpeed);
   syncDatasetPresetStateChange();
 }
 
@@ -8772,8 +8858,8 @@ function resetAppState() {
   };
   state.depthScale = 1;
   state.density = 100;
-  state.pulsationSpeed = INITIAL_PULSATION_SPEED;
-  state.pulsationSpeedLog = Math.log10(INITIAL_PULSATION_SPEED);
+  resetSimulationClock();
+  setPulsationSpeed(INITIAL_PULSATION_SPEED, { preserveDay: false });
   state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(PULSATOR_DEFAULT_PRESET);
   state.uncertaintySeed = DEFAULT_UNCERTAINTY_SEED;
   state.datasetPreset = null;
@@ -8802,6 +8888,7 @@ function resetAppState() {
   state.hovered = null;
   state.locked = null;
   state.cameraLocked = false;
+  previousCustomView = null;
   activeLightcurveInset = null;
   applyUncertaintyRealization({ updateTarget: false });
 
@@ -8818,6 +8905,164 @@ function resetAppState() {
   markProjectionDirty();
 }
 
+function shortcutHelpIsOpen() {
+  return Boolean(elements.shortcutHelp && !elements.shortcutHelp.hidden);
+}
+
+function setShortcutHelpOpen(open, { focusClose = false } = {}) {
+  if (!elements.shortcutHelp) return false;
+  const nextOpen = Boolean(open);
+  elements.shortcutHelp.hidden = !nextOpen;
+  elements.shortcutHelp.classList.toggle("open", nextOpen);
+  elements.shortcutHelp.setAttribute("aria-hidden", String(!nextOpen));
+  if (nextOpen && focusClose) {
+    window.requestAnimationFrame(() => {
+      elements.shortcutHelpClose?.focus({ preventScroll: true });
+    });
+  }
+  return true;
+}
+
+function toggleShortcutHelp() {
+  return setShortcutHelpOpen(!shortcutHelpIsOpen(), { focusClose: true });
+}
+
+function buildShortcutHelp() {
+  if (!elements.shortcutHelpList || elements.shortcutHelpList.dataset.built === "true") return;
+  const fragment = document.createDocumentFragment();
+  for (const item of SHORTCUT_HELP_ITEMS) {
+    const row = document.createElement("div");
+    row.className = "shortcutHelpRow";
+
+    const keys = document.createElement("span");
+    keys.className = "shortcutHelpKeys";
+    item.keys.forEach((key, index) => {
+      if (index > 0) keys.append(" ");
+      const keyElement = document.createElement("kbd");
+      keyElement.textContent = key;
+      keys.append(keyElement);
+    });
+
+    const label = document.createElement("span");
+    label.className = "shortcutHelpLabel";
+    label.textContent = item.label;
+
+    row.append(keys, label);
+    fragment.append(row);
+  }
+  elements.shortcutHelpList.append(fragment);
+  elements.shortcutHelpList.dataset.built = "true";
+}
+
+function focusTargetSearch() {
+  if (!controls.targetSearch) return false;
+  if (state.overlaysHidden) setOverlaysHidden(false);
+  if (MOBILE_CONTROLS_MEDIA.matches) {
+    setMobileControlsOpen(true, { focusClose: false });
+  }
+  window.requestAnimationFrame(() => {
+    controls.targetSearch.focus({ preventScroll: true });
+    controls.targetSearch.select();
+  });
+  return true;
+}
+
+function clearActiveTargetOrCamera() {
+  if (state.cameraLocked) {
+    setCameraLock(false);
+    return true;
+  }
+  if (state.locked || state.hovered) {
+    clearTargetSelection();
+    return true;
+  }
+  return false;
+}
+
+function toggleCameraLockShortcut() {
+  const target = state.locked || state.hovered;
+  if (!target) return false;
+  setCameraLock(!(state.cameraLocked && state.locked === target), target);
+  return true;
+}
+
+function activateKeyboardDatasetPreset(key) {
+  const preset = KEYBOARD_DATASET_PRESETS[key];
+  if (!preset) return false;
+  commitDatasetPreset(preset);
+  return true;
+}
+
+function cycleCoordinateGrids() {
+  const current =
+    state.equatorialGrid && state.galacticGrid
+      ? "both"
+      : state.equatorialGrid
+        ? "equatorial"
+        : state.galacticGrid
+          ? "galactic"
+          : "none";
+  const next = GRID_SHORTCUT_SEQUENCE[
+    (GRID_SHORTCUT_SEQUENCE.indexOf(current) + 1) % GRID_SHORTCUT_SEQUENCE.length
+  ];
+  state.equatorialGrid = next === "equatorial" || next === "both";
+  state.galacticGrid = next === "galactic" || next === "both";
+  syncCoordinateFrameControls();
+  queueRender();
+}
+
+function orientationSnapshot() {
+  return {
+    yaw: state.yaw,
+    pitch: state.pitch,
+    roll: state.roll,
+  };
+}
+
+function applyOrientationSnapshot(snapshot, { recenter = true } = {}) {
+  if (!snapshot) return;
+  markOrientationGridActive();
+  cancelIntroRotation();
+  cancelAxisSpinAnimation();
+  state.yaw = normalizeRadians(snapshot.yaw);
+  state.pitch = normalizeRadians(snapshot.pitch);
+  state.roll = normalizeRadians(snapshot.roll);
+  if (recenter) recenterViewport();
+  syncRangeOutputs();
+  markProjectionDirty();
+}
+
+function applyViewOrientation(angles) {
+  applyOrientationSnapshot(
+    {
+      yaw: degreesToRadians(angles.yaw),
+      pitch: degreesToRadians(angles.pitch),
+      roll: degreesToRadians(angles.roll),
+    },
+    { recenter: true },
+  );
+}
+
+function cycleViewOrientation() {
+  const faceActive = orbitAnglesMatchPreset(FACE_VIEW_ANGLES_DEGREES);
+  const edgeActive = orbitAnglesMatchPreset(EDGE_VIEW_ANGLES_DEGREES);
+  if (!faceActive && !edgeActive) {
+    previousCustomView = orientationSnapshot();
+    applyViewOrientation(FACE_VIEW_ANGLES_DEGREES);
+  } else if (faceActive) {
+    applyViewOrientation(EDGE_VIEW_ANGLES_DEGREES);
+  } else if (previousCustomView) {
+    applyOrientationSnapshot(previousCustomView, { recenter: true });
+  } else {
+    applyViewOrientation(FACE_VIEW_ANGLES_DEGREES);
+  }
+}
+
+function isActivatableKeyboardTarget(target) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest("button, a[href], input, select, textarea, [role='button']"));
+}
+
 function handleViewportKeydown(event) {
   if (
     event.defaultPrevented ||
@@ -8830,6 +9075,8 @@ function handleViewportKeydown(event) {
   }
 
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (shortcutHelpIsOpen() && key !== "Escape" && key !== "?") return;
+
   const multiplier = viewportKeyboardMultiplier(event);
   const panStep = VIEWPORT_PAN_STEP_PX * multiplier;
   const pageStep = VIEWPORT_PAGE_STEP_PX * multiplier;
@@ -8837,6 +9084,27 @@ function handleViewportKeydown(event) {
   let handled = true;
 
   switch (key) {
+    case "/":
+      handled = focusTargetSearch();
+      break;
+    case "?":
+      handled = toggleShortcutHelp();
+      break;
+    case "Escape":
+      if (shortcutHelpIsOpen()) {
+        handled = setShortcutHelpOpen(false);
+      } else {
+        handled = clearActiveTargetOrCamera();
+      }
+      break;
+    case " ":
+    case "Spacebar":
+      if (isActivatableKeyboardTarget(event.target)) {
+        handled = false;
+      } else {
+        togglePulsationPaused();
+      }
+      break;
     case "w":
       zoomViewportByStep(1, multiplier);
       break;
@@ -8888,6 +9156,33 @@ function handleViewportKeydown(event) {
       break;
     case "e":
       yawViewportByDegrees(yawStep);
+      break;
+    case "1":
+    case "2":
+    case "3":
+    case "4":
+    case "5":
+      handled = activateKeyboardDatasetPreset(key);
+      break;
+    case "l":
+      handled = toggleCameraLockShortcut();
+      break;
+    case "h":
+      setOverlaysHidden(!state.overlaysHidden);
+      break;
+    case "v":
+      cycleViewOrientation();
+      break;
+    case "g":
+      cycleCoordinateGrids();
+      break;
+    case ",":
+    case "<":
+      adjustPulsationSpeed(-1, event.shiftKey);
+      break;
+    case ".":
+    case ">":
+      adjustPulsationSpeed(1, event.shiftKey);
       break;
     case "0":
       resetAppState();
@@ -9196,6 +9491,7 @@ function setTarget(target) {
   lockInput.type = "checkbox";
   lockInput.checked = state.cameraLocked && state.locked === current;
   lockInput.setAttribute("aria-label", "Lock camera to target");
+  lockInput.setAttribute("aria-keyshortcuts", "L");
   lockInput.addEventListener("change", () => {
     setCameraLock(lockInput.checked, current);
   });
@@ -9888,8 +10184,7 @@ function resetRangeControl(controlId) {
       setUncertaintySeed(DEFAULT_UNCERTAINTY_SEED);
       break;
     case "pulsationSpeed":
-      state.pulsationSpeed = defaultPulsationSpeedForPreset(preset);
-      state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
+      setPulsationSpeed(defaultPulsationSpeedForPreset(preset));
       markCatalogStaticDirty();
       syncRangeOutputs();
       queueRender();
@@ -10034,6 +10329,13 @@ function bindMobileControls() {
 
 function bindControls() {
   bindMobileControls();
+  buildShortcutHelp();
+  elements.shortcutHelpClose?.addEventListener("click", () => setShortcutHelpOpen(false));
+  elements.shortcutHelp?.addEventListener("click", (event) => {
+    if (event.target === elements.shortcutHelp) setShortcutHelpOpen(false);
+  });
+  controls.targetSearch?.setAttribute("aria-keyshortcuts", "/");
+  elements.overlayToggle?.setAttribute("aria-keyshortcuts", "H");
 
   elements.overlayToggle?.addEventListener("click", () => {
     setOverlaysHidden(!state.overlaysHidden);
@@ -10094,8 +10396,7 @@ function bindControls() {
   });
 
   const updatePulsationSpeed = () => {
-    state.pulsationSpeed = clampPulsationSpeed(10 ** Number(controls.pulsationSpeed.value));
-    state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
+    setPulsationSpeed(10 ** Number(controls.pulsationSpeed.value));
     markCatalogStaticDirty();
     syncRangeOutputs();
     queueRender();
@@ -10157,33 +10458,15 @@ function bindControls() {
     queueRender();
   });
 
-  elements.faceView?.addEventListener("click", () => {
-    markOrientationGridActive();
-    cancelIntroRotation();
-    cancelAxisSpinAnimation();
-    state.yaw = degreesToRadians(FACE_VIEW_ANGLES_DEGREES.yaw);
-    state.pitch = degreesToRadians(FACE_VIEW_ANGLES_DEGREES.pitch);
-    state.roll = degreesToRadians(FACE_VIEW_ANGLES_DEGREES.roll);
-    recenterViewport();
-    syncRangeOutputs();
-    markProjectionDirty();
-  });
-
-  elements.edgeView?.addEventListener("click", () => {
-    markOrientationGridActive();
-    cancelIntroRotation();
-    cancelAxisSpinAnimation();
-    state.yaw = degreesToRadians(EDGE_VIEW_ANGLES_DEGREES.yaw);
-    state.pitch = degreesToRadians(EDGE_VIEW_ANGLES_DEGREES.pitch);
-    state.roll = degreesToRadians(EDGE_VIEW_ANGLES_DEGREES.roll);
-    recenterViewport();
-    syncRangeOutputs();
-    markProjectionDirty();
-  });
+  elements.faceView?.setAttribute("aria-keyshortcuts", "V");
+  elements.edgeView?.setAttribute("aria-keyshortcuts", "V");
+  elements.faceView?.addEventListener("click", () => applyViewOrientation(FACE_VIEW_ANGLES_DEGREES));
+  elements.edgeView?.addEventListener("click", () => applyViewOrientation(EDGE_VIEW_ANGLES_DEGREES));
 
   canvas.addEventListener("pointerdown", (event) => {
     if (handleCanvasTouchPointerDown(event)) return;
     event.preventDefault();
+    canvas.focus({ preventScroll: true });
     cancelIntroRotation();
     cancelAxisSpinAnimation();
     setCursorPosition(event);
