@@ -69,6 +69,9 @@ const PULSE_LOD_ALPHA_OFF = 0.98;
 const PULSE_LOD_VISUAL_WEIGHT_ON = 0.9;
 const PULSE_LOD_VISUAL_WEIGHT_OFF = 0.55;
 const CATALOG_PULSE_ALL_STARS = true;
+const NAVIGATION_PULSE_THROTTLE_SETTLE_MS = 400;
+const NAVIGATION_PULSE_UPDATE_INTERVAL_MS = 220;
+const NAVIGATION_SLOW_PULSE_PERIOD_SECONDS = 5;
 const STAR_RADIUS_ZOOM_GAIN = 0.18;
 const STAR_RADIUS_ZOOM_MAX_BOOST = 1.2;
 const STAR_RADIUS_ZOOM_BASE_GAIN = 0.75;
@@ -86,6 +89,7 @@ const LIMB_DARKENING_VISUAL_WEIGHT_MIN = 0.12;
 const LIMB_DARKENING_HIGH_RADIUS_SCALE = 2.1;
 const LIMB_DARKENING_HIGH_RADIUS_VISUAL_WEIGHT_MIN = 0.55;
 const CATALOG_GPU_VERTEX_FLOATS = 8;
+const CLUSTER_STAR_GPU_VERTEX_FLOATS = 9;
 const RED_CLUMP_GPU_VERTEX_FLOATS = 6;
 // User-facing yaw zero is the observer-side OGLE view.
 const OBSERVED_VIEW_YAW_DEGREES = -180;
@@ -288,6 +292,14 @@ const INTRO_CLOUD_LABELS = [
 const DATASET_LABELS = ["Classical Cepheid", "RR Lyrae", "Anomalous Cepheid", "Mira"];
 const DATASET_KEYS = ["cepheids", "rrlyrae", "anomalousCepheids", "miras"];
 const CEPHEID_DATASET_KEYS = ["cepheids", "anomalousCepheids"];
+const CLUSTER_PULSATOR_STRIP_DATASET_KEYS = ["cepheids", "rrlyrae", "anomalousCepheids"];
+const CLUSTER_PULSATOR_STRIP_BIN_COUNT = 14;
+const CLUSTER_PULSATOR_STRIP_MIN_BIN_STARS = 12;
+const CLUSTER_PULSATOR_STRIP_COLOR_LOW_QUANTILE = 0.08;
+const CLUSTER_PULSATOR_STRIP_COLOR_HIGH_QUANTILE = 0.92;
+const CLUSTER_PULSATOR_STRIP_COLOR_MARGIN = 0.045;
+const CLUSTER_PULSATOR_STRIP_LOG_LUM_MARGIN = 0.08;
+const CLUSTER_PULSATOR_NEAREST_REFERENCE_COUNT = 160;
 const PULSATOR_DEFAULT_PRESET = "default";
 const PULSATOR_PRESETS = ["cepheids", "rrlyrae", "miras"];
 const PULSATOR_PRESET_SEQUENCE = [...PULSATOR_PRESETS, PULSATOR_DEFAULT_PRESET];
@@ -369,6 +381,11 @@ const CLUSTER_GLOW_ALPHA_MAX = 0.16;
 const CLUSTER_GLOW_RADIUS_SCALE = 1.15;
 const CLUSTER_GLOW_EDGE_FEATHER = 0.7;
 const CLUSTER_GLOW_PROFILE_STOPS = 14;
+const CLUSTER_STAR_LOD_CORE_RADIUS_START = 8;
+const CLUSTER_STAR_LOD_CORE_RADIUS_END = 18;
+const CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_SCALE = 0.16;
+const CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_MAX = 0.18;
+const CLUSTER_STAR_RESOLVED_GLOW_FLOOR = 0.18;
 const MAX_DISPLAY_LUMINOSITY_RATIO = 500;
 const DISPLAY_LUMINOSITY_BASE_BOOST = 112;
 const DISPLAY_ALPHA_MAX = 0.78;
@@ -1088,6 +1105,12 @@ const scene = {
   activeRedClump: [],
   activeClusters: [],
   activeClusterStars: [],
+  activeClusterPulsatorStars: [],
+  activeClusterStarsByCluster: [],
+  activeClusterStarCountsByCluster: [],
+  activeClusterStarRenderCount: 0,
+  clusterStarLodAlphaByCluster: [],
+  clusterPulsatorStats: null,
   catalogDrawList: [],
   catalogAnimatedDrawList: [],
   redClumpDrawList: [],
@@ -1100,10 +1123,12 @@ const scene = {
   catalogStaticRadiusScale: null,
   catalogStaticExposureSignature: null,
   catalogStaticPulsationSpeed: null,
+  catalogStaticPulseLodActive: null,
   catalogStaticRenderer: null,
   catalogRenderer: null,
   redClumpRenderer: null,
   redClumpGpuDirty: true,
+  clusterStarGpuDirty: true,
   redClumpStaticCanvas: redClumpCanvas || document.createElement("canvas"),
   redClumpStaticCtx: null,
   redClumpStaticDirty: true,
@@ -1150,6 +1175,8 @@ let axisSpinAnimation = null;
 let datasetPresetPreview = null;
 const animationStartMs = performance.now();
 let orientationGridLastActivityMs = animationStartMs;
+let navigationPulseThrottleUntilMs = 0;
+let lastCatalogPulseUpdateMs = 0;
 const animationEpoch = 6000;
 const WAVEFORM_SAMPLES = 96;
 const LIGHTCURVE_INSET_CYCLES = 2;
@@ -1219,6 +1246,37 @@ function orientationGridAlpha(now = performance.now()) {
   const elapsed = now - orientationGridLastActivityMs;
   if (elapsed <= ORIENTATION_GRID_VISIBLE_MS) return 1;
   return 1 - smoothStep((elapsed - ORIENTATION_GRID_VISIBLE_MS) / ORIENTATION_GRID_FADE_MS);
+}
+
+function navigationPulseThrottleActive(now = performance.now()) {
+  return PULSE_LOD_ENABLED && CATALOG_PULSE_ALL_STARS && now < navigationPulseThrottleUntilMs;
+}
+
+function shouldUseCatalogPulseLod(now = performance.now()) {
+  void now;
+  return PULSE_LOD_ENABLED && !CATALOG_PULSE_ALL_STARS;
+}
+
+function catalogPulseModeLabel(now = performance.now()) {
+  if (!PULSE_LOD_ENABLED) return "all";
+  if (!CATALOG_PULSE_ALL_STARS) return "lod";
+  return navigationPulseThrottleActive(now) ? "nav slow throttle" : "all";
+}
+
+function markNavigationPulseThrottleActive(now = performance.now()) {
+  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS) return;
+  navigationPulseThrottleUntilMs = Math.max(
+    navigationPulseThrottleUntilMs,
+    now + NAVIGATION_PULSE_THROTTLE_SETTLE_MS,
+  );
+}
+
+function shouldUpdateCatalogPulseState(now = performance.now()) {
+  return !navigationPulseThrottleActive(now) || now - lastCatalogPulseUpdateMs >= NAVIGATION_PULSE_UPDATE_INTERVAL_MS;
+}
+
+function markCatalogPulseStateUpdated(now = performance.now()) {
+  lastCatalogPulseUpdateMs = now;
 }
 
 function clampDatasetExposure(value) {
@@ -1670,7 +1728,7 @@ function updatePerfHud({ catalogMs, redClumpMs, animatedCatalog, staticCatalog }
     document.createElement("br"),
     `renderer ${scene.catalogRenderer && scene.catalogStaticRenderer ? "gpu" : "canvas"}`,
     document.createElement("br"),
-    `pulse mode ${CATALOG_PULSE_ALL_STARS || !PULSE_LOD_ENABLED ? "all" : "lod"}`,
+    `pulse mode ${catalogPulseModeLabel(now)}`,
     document.createElement("br"),
     `pulse ${formatInteger(perfState.animatedCatalog)} / ${formatInteger(totalCatalog)} (${animatedPercent.toFixed(1)}%)`,
     document.createElement("br"),
@@ -2220,6 +2278,7 @@ function rebuildCoordinateCache(reference = activeCoordinateReference()) {
 
 function invalidateCoordinateCache() {
   scene.coordinateCacheKey = null;
+  scene.clusterStarGpuDirty = true;
 }
 
 function coordinatesForPoint(point) {
@@ -2895,6 +2954,28 @@ function positiveModulo(value, divisor) {
   return ((value % divisor) + divisor) % divisor;
 }
 
+function sortedQuantile(sortedValues, quantile) {
+  if (!sortedValues.length) return null;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const bounded = clamp(quantile, 0, 1);
+  const position = bounded * (sortedValues.length - 1);
+  const lowIndex = Math.floor(position);
+  const highIndex = Math.ceil(position);
+  const fraction = position - lowIndex;
+  return sortedValues[lowIndex] * (1 - fraction) + sortedValues[highIndex] * fraction;
+}
+
+function lowerBoundByLogLum(samples, logLuminosity) {
+  let low = 0;
+  let high = samples.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (samples[mid].logLum < logLuminosity) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
 function currentSimulationDay() {
   const elapsedMs = performance.now() - animationStartMs;
   return animationEpoch + (elapsedMs / 86400000) * state.pulsationSpeed;
@@ -3240,13 +3321,273 @@ function makeWaveform(row) {
   };
 }
 
+function observedInstabilityStripSample(row) {
+  const datasetIndex = Math.trunc(Number(row?.[IDX.dataset]));
+  const datasetKey = DATASET_KEYS[datasetIndex];
+  if (!CLUSTER_PULSATOR_STRIP_DATASET_KEYS.includes(datasetKey)) return null;
+
+  const logLum = Number(row[IDX.logLum]);
+  const color = intrinsicVMinusIForRow(row);
+  const period = Number(row[IDX.period]);
+  if (!Number.isFinite(logLum) || !Number.isFinite(color) || !Number.isFinite(period) || period <= 0) {
+    return null;
+  }
+
+  return {
+    row,
+    datasetIndex,
+    datasetKey,
+    logLum,
+    color,
+    period,
+  };
+}
+
+function buildObservedInstabilityStripModel(catalogRows) {
+  const grouped = new Map();
+  for (const row of catalogRows || []) {
+    const sample = observedInstabilityStripSample(row);
+    if (!sample) continue;
+    if (!grouped.has(sample.datasetKey)) grouped.set(sample.datasetKey, []);
+    grouped.get(sample.datasetKey).push(sample);
+  }
+
+  const strips = [];
+  for (const datasetKey of CLUSTER_PULSATOR_STRIP_DATASET_KEYS) {
+    const samples = grouped.get(datasetKey) || [];
+    if (samples.length < CLUSTER_PULSATOR_STRIP_MIN_BIN_STARS) continue;
+
+    samples.sort((left, right) => left.logLum - right.logLum);
+    const logLumValues = samples.map((sample) => sample.logLum);
+    const colorValues = samples.map((sample) => sample.color).sort((left, right) => left - right);
+    const logLumLow = sortedQuantile(logLumValues, 0.01);
+    const logLumHigh = sortedQuantile(logLumValues, 0.99);
+    const binStart = Number.isFinite(logLumLow) ? logLumLow : logLumValues[0];
+    const binEnd = Number.isFinite(logLumHigh) ? logLumHigh : logLumValues[logLumValues.length - 1];
+    const binWidth = Math.max(0.001, (binEnd - binStart) / CLUSTER_PULSATOR_STRIP_BIN_COUNT);
+    const bins = [];
+
+    for (let binIndex = 0; binIndex < CLUSTER_PULSATOR_STRIP_BIN_COUNT; binIndex += 1) {
+      const low = binStart + binIndex * binWidth;
+      const high = binIndex === CLUSTER_PULSATOR_STRIP_BIN_COUNT - 1 ? binEnd + 1e-9 : low + binWidth;
+      const binColors = samples
+        .filter((sample) => sample.logLum >= low && sample.logLum < high)
+        .map((sample) => sample.color)
+        .sort((left, right) => left - right);
+      if (binColors.length < CLUSTER_PULSATOR_STRIP_MIN_BIN_STARS) continue;
+
+      bins.push({
+        center: (low + high) * 0.5,
+        lower: sortedQuantile(binColors, CLUSTER_PULSATOR_STRIP_COLOR_LOW_QUANTILE),
+        upper: sortedQuantile(binColors, CLUSTER_PULSATOR_STRIP_COLOR_HIGH_QUANTILE),
+        count: binColors.length,
+      });
+    }
+
+    if (!bins.length) {
+      bins.push({
+        center: (binStart + binEnd) * 0.5,
+        lower: sortedQuantile(colorValues, CLUSTER_PULSATOR_STRIP_COLOR_LOW_QUANTILE),
+        upper: sortedQuantile(colorValues, CLUSTER_PULSATOR_STRIP_COLOR_HIGH_QUANTILE),
+        count: samples.length,
+      });
+    }
+
+    const colorP16 = sortedQuantile(colorValues, 0.16);
+    const colorP84 = sortedQuantile(colorValues, 0.84);
+    strips.push({
+      datasetKey,
+      datasetIndex: DATASET_KEYS.indexOf(datasetKey),
+      samples,
+      bins,
+      logLumMin: binStart - CLUSTER_PULSATOR_STRIP_LOG_LUM_MARGIN,
+      logLumMax: binEnd + CLUSTER_PULSATOR_STRIP_LOG_LUM_MARGIN,
+      logLumScale: Math.max(0.12, (binEnd - binStart) * 0.5),
+      colorScale: Math.max(0.05, (colorP84 || 0) - (colorP16 || 0)),
+    });
+  }
+
+  return { strips };
+}
+
+function interpolatedInstabilityStripBounds(strip, logLuminosity) {
+  const bins = strip?.bins || [];
+  if (!bins.length) return null;
+  if (bins.length === 1 || logLuminosity <= bins[0].center) {
+    return {
+      lower: bins[0].lower - CLUSTER_PULSATOR_STRIP_COLOR_MARGIN,
+      upper: bins[0].upper + CLUSTER_PULSATOR_STRIP_COLOR_MARGIN,
+    };
+  }
+  const last = bins[bins.length - 1];
+  if (logLuminosity >= last.center) {
+    return {
+      lower: last.lower - CLUSTER_PULSATOR_STRIP_COLOR_MARGIN,
+      upper: last.upper + CLUSTER_PULSATOR_STRIP_COLOR_MARGIN,
+    };
+  }
+
+  for (let index = 0; index < bins.length - 1; index += 1) {
+    const left = bins[index];
+    const right = bins[index + 1];
+    if (logLuminosity < left.center || logLuminosity > right.center) continue;
+    const fraction = (logLuminosity - left.center) / Math.max(0.000001, right.center - left.center);
+    return {
+      lower:
+        left.lower * (1 - fraction) +
+        right.lower * fraction -
+        CLUSTER_PULSATOR_STRIP_COLOR_MARGIN,
+      upper:
+        left.upper * (1 - fraction) +
+        right.upper * fraction +
+        CLUSTER_PULSATOR_STRIP_COLOR_MARGIN,
+    };
+  }
+
+  return null;
+}
+
+function nearestObservedPulsatorReference(strip, logLuminosity, color) {
+  const samples = strip?.samples || [];
+  if (!samples.length) return null;
+
+  let left = lowerBoundByLogLum(samples, logLuminosity) - 1;
+  let right = left + 1;
+  let checked = 0;
+  let best = null;
+
+  while (
+    checked < CLUSTER_PULSATOR_NEAREST_REFERENCE_COUNT &&
+    (left >= 0 || right < samples.length)
+  ) {
+    const useLeft =
+      right >= samples.length ||
+      (left >= 0 &&
+        Math.abs(samples[left].logLum - logLuminosity) <=
+          Math.abs(samples[right].logLum - logLuminosity));
+    const sample = useLeft ? samples[left] : samples[right];
+    if (useLeft) left -= 1;
+    else right += 1;
+
+    const logLumScore = (sample.logLum - logLuminosity) / strip.logLumScale;
+    const colorScore = (sample.color - color) / strip.colorScale;
+    const distance = logLumScore * logLumScore + colorScore * colorScore;
+    if (!best || distance < best.distance) best = { sample, distance };
+    checked += 1;
+  }
+
+  return best;
+}
+
+function clusterStarInstabilityStripMatch(row, stripModel) {
+  const logLum = Number(row?.[CS.logLum]);
+  const color = Number(row?.[CS.vMinusI0]);
+  if (!Number.isFinite(logLum) || !Number.isFinite(color)) return null;
+
+  let best = null;
+  for (const strip of stripModel?.strips || []) {
+    if (logLum < strip.logLumMin || logLum > strip.logLumMax) continue;
+    const bounds = interpolatedInstabilityStripBounds(strip, logLum);
+    if (!bounds || color < bounds.lower || color > bounds.upper) continue;
+
+    const reference = nearestObservedPulsatorReference(strip, logLum, color);
+    if (!reference) continue;
+    const center = (bounds.lower + bounds.upper) * 0.5;
+    const halfWidth = Math.max(0.02, (bounds.upper - bounds.lower) * 0.5);
+    const stripScore = reference.distance + (Math.abs(color - center) / halfWidth) * 0.05;
+    if (!best || stripScore < best.score) {
+      best = { strip, reference: reference.sample, score: stripScore };
+    }
+  }
+
+  return best;
+}
+
+function clusterLocationIndexForRow(clusterRow) {
+  const galaxy = String(clusterRow?.[CL.galaxy] || "").toUpperCase();
+  if (galaxy === "LMC") return 0;
+  if (galaxy === "SMC") return 1;
+  return 3;
+}
+
+function syntheticCatalogRowForClusterPulsator(clusterStarRow, clusterStarIndex, clusterRow, match) {
+  const referenceRow = match.reference.row;
+  const syntheticRow = referenceRow.slice();
+  const clusterName = String(clusterRow?.[CL.name] || `cluster-${clusterStarRow?.[CS.cluster] ?? "unknown"}`);
+  const period = Math.max(
+    0.05,
+    Number(referenceRow[IDX.period]) || PULSATOR_PRESET_MEDIAN_PERIOD_DAYS[match.strip.datasetKey] || 1,
+  );
+  const logAge = Number(clusterRow?.[CL.logAge]);
+
+  syntheticRow[IDX.x] = clusterStarRow[CS.x];
+  syntheticRow[IDX.y] = clusterStarRow[CS.y];
+  syntheticRow[IDX.z] = clusterStarRow[CS.z];
+  syntheticRow[IDX.logLum] = clusterStarRow[CS.logLum];
+  syntheticRow[IDX.lum] = clusterStarRow[CS.lum];
+  syntheticRow[IDX.radius] = clusterStarRow[CS.radius];
+  syntheticRow[IDX.spectral] = clusterStarRow[CS.spectral];
+  syntheticRow[IDX.dataset] = match.strip.datasetIndex;
+  syntheticRow[IDX.location] = clusterLocationIndexForRow(clusterRow);
+  syntheticRow[IDX.period] = period;
+  syntheticRow[IDX.distance] = clusterStarRow[CS.distance];
+  syntheticRow[IDX.vMinusI] = clusterStarRow[CS.vMinusI0];
+  syntheticRow[IDX.vMinusI0] = clusterStarRow[CS.vMinusI0];
+  syntheticRow[IDX.age] = Number.isFinite(logAge) ? 10 ** (logAge - 6) : syntheticRow[IDX.age];
+  syntheticRow[IDX.feh] = Number.isFinite(clusterRow?.[CL.feh]) ? clusterRow[CL.feh] : syntheticRow[IDX.feh];
+  syntheticRow[IDX.mode] = referenceRow[IDX.mode] || referenceRow[IDX.lightCurveSubtype] || DATASET_LABELS[match.strip.datasetIndex];
+  syntheticRow[IDX.id] = `MIST-${clusterName}-${clusterStarIndex}`;
+  syntheticRow[IDX.t0] = animationEpoch + seededUnit(`${syntheticRow[IDX.id]}-phase`) * period;
+  syntheticRow[IDX.raDeg] = clusterStarRow[CS.raDeg];
+  syntheticRow[IDX.decDeg] = clusterStarRow[CS.decDeg];
+  syntheticRow[IDX.galLonDeg] = clusterStarRow[CS.galLonDeg];
+  syntheticRow[IDX.galLatDeg] = clusterStarRow[CS.galLatDeg];
+  syntheticRow[IDX.reddeningEVI] = 0;
+  syntheticRow[IDX.reddeningEVIError] = 0;
+  syntheticRow[IDX.distanceError] = 0;
+  syntheticRow[IDX.distanceSource] = "cluster";
+  syntheticRow[IDX.miraPeriods] = null;
+  syntheticRow[IDX.miraAmplitudesI] = null;
+  syntheticRow[IDX.miraPhasesI] = null;
+  syntheticRow[IDX.miraAmplitudesV] = null;
+  syntheticRow[IDX.miraPhasesV] = null;
+  syntheticRow[IDX.miraTeff] = null;
+  syntheticRow[IDX.miraTeffSourceIndex] = null;
+  return syntheticRow;
+}
+
+function makeClusterStarWaveform(clusterStarRow, clusterStarIndex, clusterRow, match) {
+  if (!match) return null;
+  const syntheticRow = syntheticCatalogRowForClusterPulsator(clusterStarRow, clusterStarIndex, clusterRow, match);
+  const lightCurve = makeWaveform(syntheticRow);
+  lightCurve.params.period = syntheticRow[IDX.period];
+  lightCurve.syntheticClusterPulsator = true;
+  lightCurve.referenceId = match.reference.row[IDX.id];
+  lightCurve.referenceDatasetKey = match.strip.datasetKey;
+  lightCurve.syntheticRow = syntheticRow;
+  return lightCurve;
+}
+
 function pulsationPeriodDays(point) {
-  return Math.max(0.05, Number(point?.row?.[IDX.period] || point?.lightCurve?.params?.period || 1));
+  return Math.max(0.05, Number(point?.lightCurve?.params?.period || point?.row?.[IDX.period] || 1));
 }
 
 function renderedPulsationFrequencyHz(point) {
-  if (point?.kind !== "catalog" || !point.lightCurve) return 0;
+  if (!point?.lightCurve) return 0;
   return state.pulsationSpeed / (pulsationPeriodDays(point) * SECONDS_PER_DAY);
+}
+
+function renderedPulsationPeriodSeconds(point) {
+  const frequencyHz = renderedPulsationFrequencyHz(point);
+  return frequencyHz > 0 ? 1 / frequencyHz : Infinity;
+}
+
+function shouldNavigationThrottlePulsator(point) {
+  return (
+    point?.kind === "catalog" &&
+    Boolean(point.lightCurve) &&
+    renderedPulsationPeriodSeconds(point) >= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS
+  );
 }
 
 function pulsationTooFastForAnimation(point) {
@@ -4355,6 +4696,117 @@ function createCatalogProgram(gl) {
   return null;
 }
 
+function createClusterStarProgram(gl) {
+  const vertexShader = compileCatalogShader(
+    gl,
+    gl.VERTEX_SHADER,
+    `
+      precision highp float;
+
+      attribute vec3 a_position;
+      attribute float a_radiusUnit;
+      attribute float a_alphaBaseUnit;
+      attribute float a_lodAlpha;
+      attribute vec3 a_color;
+
+      uniform vec2 u_resolution;
+      uniform vec2 u_center;
+      uniform vec4 u_yawPitch;
+      uniform vec2 u_roll;
+      uniform float u_scale;
+      uniform float u_depthScale;
+      uniform float u_dpr;
+      uniform float u_radiusZoomSize;
+      uniform float u_radiusScale;
+      uniform float u_starBaseRadiusViewportScale;
+      uniform float u_exposure;
+      uniform float u_displayLuminosityBaseBoost;
+      uniform float u_starAlphaHeadroomExposure;
+      uniform float u_starPulseAlphaMax;
+      uniform float u_starRadiusBaseMax;
+
+      varying vec3 v_color;
+      varying float v_alpha;
+
+      void main() {
+        float cosy = u_yawPitch.x;
+        float siny = u_yawPitch.y;
+        float cosp = u_yawPitch.z;
+        float sinp = u_yawPitch.w;
+        float cosr = u_roll.x;
+        float sinr = u_roll.y;
+        float depthZ = a_position.z * u_depthScale;
+
+        float x1 = a_position.x * cosy - depthZ * siny;
+        float z1 = a_position.x * siny + depthZ * cosy;
+        float y1 = a_position.y * cosp - z1 * sinp;
+        float z2 = a_position.y * sinp + z1 * cosp;
+        float x2 = x1 * cosr - y1 * sinr;
+        float y2 = x1 * sinr + y1 * cosr;
+        float perspective = clamp(140.0 / (140.0 - z2), 0.45, 2.2);
+        vec2 screen = u_center + vec2(x2, -y2) * u_scale * perspective;
+        vec2 clip = (screen / u_resolution) * 2.0 - 1.0;
+
+        float baseRadius = clamp(
+          a_radiusUnit * u_radiusZoomSize * perspective,
+          0.35,
+          u_starRadiusBaseMax
+        ) * u_starBaseRadiusViewportScale;
+        float radius = clamp(
+          baseRadius * ${PULSATOR_RADIUS_BASE_SCALE.toFixed(5)} * ${PULSATOR_BASE_RADIUS_FACTOR.toFixed(2)} * u_radiusScale,
+          0.18,
+          28.0
+        );
+        float alphaUnit = a_alphaBaseUnit * (0.64 + perspective * 0.24);
+        float exposure = (u_exposure / 10.0) * u_displayLuminosityBaseBoost * alphaUnit;
+        float alpha = clamp(
+          u_starPulseAlphaMax * (1.0 - exp(-exposure / u_starAlphaHeadroomExposure)),
+          0.0005,
+          u_starPulseAlphaMax
+        ) * a_lodAlpha;
+
+        gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+        gl_PointSize = max(1.0, radius * 2.0 * u_dpr);
+        v_color = a_color;
+        v_alpha = alpha;
+      }
+    `,
+  );
+  const fragmentShader = compileCatalogShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    `
+      precision mediump float;
+
+      varying vec3 v_color;
+      varying float v_alpha;
+
+      void main() {
+        vec2 uv = gl_PointCoord * 2.0 - 1.0;
+        float radiusSquared = dot(uv, uv);
+        if (radiusSquared > 1.0) discard;
+
+        float edgeAlpha = 1.0 - smoothstep(0.94, 1.0, radiusSquared);
+        float alpha = clamp(v_alpha * edgeAlpha, 0.0, 1.0);
+        gl_FragColor = vec4(v_color * alpha, alpha);
+      }
+    `,
+  );
+  if (!vertexShader || !fragmentShader) return null;
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+  if (gl.getProgramParameter(program, gl.LINK_STATUS)) return program;
+
+  console.warn("Cluster star WebGL program link failed", gl.getProgramInfoLog(program));
+  gl.deleteProgram(program);
+  return null;
+}
+
 function createRedClumpProgram(gl) {
   const vertexShader = compileCatalogShader(
     gl,
@@ -4479,6 +4931,37 @@ function createCatalogRenderer(canvasElement, options = {}) {
     limbCoefficient: gl.getUniformLocation(catalogProgram, "u_limbCoefficient"),
     limbFluxNormalization: gl.getUniformLocation(catalogProgram, "u_limbFluxNormalization"),
   };
+  const clusterStarProgram = createClusterStarProgram(gl);
+  const clusterStarBuffer = clusterStarProgram ? gl.createBuffer() : null;
+  const clusterStarStride = CLUSTER_STAR_GPU_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+  const clusterStarAttributes = clusterStarProgram
+    ? {
+        position: gl.getAttribLocation(clusterStarProgram, "a_position"),
+        radiusUnit: gl.getAttribLocation(clusterStarProgram, "a_radiusUnit"),
+        alphaBaseUnit: gl.getAttribLocation(clusterStarProgram, "a_alphaBaseUnit"),
+        lodAlpha: gl.getAttribLocation(clusterStarProgram, "a_lodAlpha"),
+        color: gl.getAttribLocation(clusterStarProgram, "a_color"),
+      }
+    : null;
+  const clusterStarUniforms = clusterStarProgram
+    ? {
+        resolution: gl.getUniformLocation(clusterStarProgram, "u_resolution"),
+        center: gl.getUniformLocation(clusterStarProgram, "u_center"),
+        yawPitch: gl.getUniformLocation(clusterStarProgram, "u_yawPitch"),
+        roll: gl.getUniformLocation(clusterStarProgram, "u_roll"),
+        scale: gl.getUniformLocation(clusterStarProgram, "u_scale"),
+        depthScale: gl.getUniformLocation(clusterStarProgram, "u_depthScale"),
+        dpr: gl.getUniformLocation(clusterStarProgram, "u_dpr"),
+        radiusZoomSize: gl.getUniformLocation(clusterStarProgram, "u_radiusZoomSize"),
+        radiusScale: gl.getUniformLocation(clusterStarProgram, "u_radiusScale"),
+        starBaseRadiusViewportScale: gl.getUniformLocation(clusterStarProgram, "u_starBaseRadiusViewportScale"),
+        exposure: gl.getUniformLocation(clusterStarProgram, "u_exposure"),
+        displayLuminosityBaseBoost: gl.getUniformLocation(clusterStarProgram, "u_displayLuminosityBaseBoost"),
+        starAlphaHeadroomExposure: gl.getUniformLocation(clusterStarProgram, "u_starAlphaHeadroomExposure"),
+        starPulseAlphaMax: gl.getUniformLocation(clusterStarProgram, "u_starPulseAlphaMax"),
+        starRadiusBaseMax: gl.getUniformLocation(clusterStarProgram, "u_starRadiusBaseMax"),
+      }
+    : null;
 
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
@@ -4488,6 +4971,7 @@ function createCatalogRenderer(canvasElement, options = {}) {
     scene.catalogStaticRenderer = null;
     scene.catalogRenderer = null;
     markCatalogStaticDirty();
+    markClusterStarGpuDirty();
   });
 
   return {
@@ -4499,11 +4983,21 @@ function createCatalogRenderer(canvasElement, options = {}) {
     catalogStaticBuffer,
     catalogAttributes,
     catalogUniforms,
+    clusterStarProgram,
+    clusterStarBuffer,
+    clusterStarAttributes,
+    clusterStarUniforms,
+    projectsClusterStarsInShader: Boolean(clusterStarProgram),
     catalogDynamicCapacity: 0,
     catalogDynamicData: new Float32Array(0),
     catalogStaticCapacity: 0,
     catalogStaticData: new Float32Array(0),
     catalogStaticCount: 0,
+    clusterStarCapacity: 0,
+    clusterStarData: new Float32Array(0),
+    clusterStarCount: 0,
+    clusterStarSourceCount: 0,
+    clusterStarCoordinateCacheKey: null,
     ensureCatalogCapacity(count) {
       if (this.catalogDynamicCapacity >= count) return this.catalogDynamicData;
       this.catalogDynamicCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, count)));
@@ -4515,6 +5009,12 @@ function createCatalogRenderer(canvasElement, options = {}) {
       this.catalogStaticCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, count)));
       this.catalogStaticData = new Float32Array(this.catalogStaticCapacity * CATALOG_GPU_VERTEX_FLOATS);
       return this.catalogStaticData;
+    },
+    ensureClusterStarCapacity(count) {
+      if (this.clusterStarCapacity >= count) return this.clusterStarData;
+      this.clusterStarCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, count)));
+      this.clusterStarData = new Float32Array(this.clusterStarCapacity * CLUSTER_STAR_GPU_VERTEX_FLOATS);
+      return this.clusterStarData;
     },
     resize() {
       const width = Math.round(scene.width * scene.dpr);
@@ -4569,6 +5069,125 @@ function createCatalogRenderer(canvasElement, options = {}) {
         catalogStride,
         7 * Float32Array.BYTES_PER_ELEMENT,
       );
+    },
+    bindClusterStarAttributes() {
+      if (!this.projectsClusterStarsInShader) return false;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.clusterStarBuffer);
+      this.gl.enableVertexAttribArray(this.clusterStarAttributes.position);
+      this.gl.vertexAttribPointer(this.clusterStarAttributes.position, 3, this.gl.FLOAT, false, clusterStarStride, 0);
+      this.gl.enableVertexAttribArray(this.clusterStarAttributes.radiusUnit);
+      this.gl.vertexAttribPointer(
+        this.clusterStarAttributes.radiusUnit,
+        1,
+        this.gl.FLOAT,
+        false,
+        clusterStarStride,
+        3 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      this.gl.enableVertexAttribArray(this.clusterStarAttributes.alphaBaseUnit);
+      this.gl.vertexAttribPointer(
+        this.clusterStarAttributes.alphaBaseUnit,
+        1,
+        this.gl.FLOAT,
+        false,
+        clusterStarStride,
+        4 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      this.gl.enableVertexAttribArray(this.clusterStarAttributes.lodAlpha);
+      this.gl.vertexAttribPointer(
+        this.clusterStarAttributes.lodAlpha,
+        1,
+        this.gl.FLOAT,
+        false,
+        clusterStarStride,
+        5 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      this.gl.enableVertexAttribArray(this.clusterStarAttributes.color);
+      this.gl.vertexAttribPointer(
+        this.clusterStarAttributes.color,
+        3,
+        this.gl.FLOAT,
+        false,
+        clusterStarStride,
+        6 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      return true;
+    },
+    updateClusterStarBuffer() {
+      if (!this.projectsClusterStarsInShader) return false;
+      const data = this.ensureClusterStarCapacity(scene.activeClusterStarRenderCount);
+      const buckets = scene.activeClusterStarsByCluster;
+      const lodAlphaByCluster = scene.clusterStarLodAlphaByCluster;
+      let offset = 0;
+      let count = 0;
+      for (let clusterIndex = 0; clusterIndex < buckets.length; clusterIndex += 1) {
+        const lodAlpha = lodAlphaByCluster[clusterIndex] || 0;
+        if (lodAlpha <= 0.001) continue;
+        const stars = buckets[clusterIndex];
+        if (!stars || stars.length === 0) continue;
+        for (const point of stars) {
+          const coordinates = point.activeCoordinates || coordinatesForPoint(point);
+          const rgbValue = normalizedRgbFromCssColor(point.color);
+          data[offset] = coordinates[0];
+          data[offset + 1] = coordinates[1];
+          data[offset + 2] = coordinates[2];
+          data[offset + 3] = point.radiusUnit;
+          data[offset + 4] = point.alphaBaseUnit;
+          data[offset + 5] = lodAlpha;
+          data[offset + 6] = rgbValue[0];
+          data[offset + 7] = rgbValue[1];
+          data[offset + 8] = rgbValue[2];
+          offset += CLUSTER_STAR_GPU_VERTEX_FLOATS;
+          count += 1;
+        }
+      }
+      this.clusterStarCount = count;
+      this.clusterStarSourceCount = scene.activeClusterStarRenderCount;
+      this.clusterStarCoordinateCacheKey = scene.coordinateCacheKey;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.clusterStarBuffer);
+      this.gl.bufferData(
+        this.gl.ARRAY_BUFFER,
+        data.subarray(0, count * CLUSTER_STAR_GPU_VERTEX_FLOATS),
+        this.gl.STATIC_DRAW,
+      );
+      scene.clusterStarGpuDirty = false;
+      return true;
+    },
+    drawClusterStars() {
+      if (!this.projectsClusterStarsInShader) return false;
+      this.resize();
+      rebuildActivePointLists();
+      rebuildCoordinateCache();
+      if (
+        scene.clusterStarGpuDirty ||
+        this.clusterStarSourceCount !== scene.activeClusterStarRenderCount ||
+        this.clusterStarCoordinateCacheKey !== scene.coordinateCacheKey
+      ) {
+        this.updateClusterStarBuffer();
+      }
+      if (this.clusterStarCount <= 0) return true;
+
+      const transform = makeProjectionTransform();
+      this.gl.useProgram(this.clusterStarProgram);
+      this.bindClusterStarAttributes();
+      this.gl.uniform2f(this.clusterStarUniforms.resolution, scene.width, scene.height);
+      this.gl.uniform2f(this.clusterStarUniforms.center, scene.centerX, scene.centerY);
+      this.gl.uniform4f(this.clusterStarUniforms.yawPitch, transform.cosy, transform.siny, transform.cosp, transform.sinp);
+      this.gl.uniform2f(this.clusterStarUniforms.roll, transform.cosr, transform.sinr);
+      this.gl.uniform1f(this.clusterStarUniforms.scale, transform.scale);
+      this.gl.uniform1f(this.clusterStarUniforms.depthScale, transform.depthScale);
+      this.gl.uniform1f(this.clusterStarUniforms.dpr, scene.dpr);
+      this.gl.uniform1f(this.clusterStarUniforms.radiusZoomSize, starRadiusZoomSize());
+      this.gl.uniform1f(this.clusterStarUniforms.radiusScale, state.radiusScale);
+      this.gl.uniform1f(this.clusterStarUniforms.starBaseRadiusViewportScale, starBaseRadiusViewportScale());
+      this.gl.uniform1f(this.clusterStarUniforms.exposure, datasetExposureValue("clusters"));
+      this.gl.uniform1f(this.clusterStarUniforms.displayLuminosityBaseBoost, DISPLAY_LUMINOSITY_BASE_BOOST);
+      this.gl.uniform1f(this.clusterStarUniforms.starAlphaHeadroomExposure, STAR_ALPHA_HEADROOM_EXPOSURE);
+      this.gl.uniform1f(this.clusterStarUniforms.starPulseAlphaMax, STAR_PULSE_ALPHA_MAX);
+      this.gl.uniform1f(this.clusterStarUniforms.starRadiusBaseMax, STAR_RADIUS_BASE_MAX);
+      this.gl.blendFunc(this.gl.ONE, this.gl.ONE);
+      this.gl.drawArrays(this.gl.POINTS, 0, this.clusterStarCount);
+      return true;
     },
     prepareCatalogDraw(buffer) {
       this.resize();
@@ -4866,6 +5485,10 @@ function prepareGpuSceneLayer() {
 
 function markCatalogStaticDirty() {
   scene.catalogStaticDirty = true;
+}
+
+function markClusterStarGpuDirty() {
+  scene.clusterStarGpuDirty = true;
 }
 
 function markRedClumpLayerDirty() {
@@ -5412,6 +6035,9 @@ function projectCatalogItemsForCache(points, catalogDrawList, catalogStats, tran
     const point = points[index];
     const coordinates = point.activeCoordinates;
     if (!coordinates) continue;
+    const clusterStarLodAlpha =
+      point.kind === "clusterStar" ? scene.clusterStarLodAlphaByCluster[point.clusterIndex] || 0 : 1;
+    if (clusterStarLodAlpha <= 0.001) continue;
 
     const x = coordinates[0];
     const y = coordinates[1];
@@ -5434,6 +6060,7 @@ function projectCatalogItemsForCache(points, catalogDrawList, catalogStats, tran
     const item = point.drawItem;
     item.baseRadius = starRadiusFromUnitAtPerspective(point.radiusUnit, perspective, zoomSize);
     item.alphaUnit = point.alphaBaseUnit * (0.64 + perspective * 0.24);
+    item.clusterStarLodAlpha = clusterStarLodAlpha;
     catalogDrawList.push(item);
     catalogStats.count += 1;
     catalogStats.minDepth = Math.min(catalogStats.minDepth, z2);
@@ -5462,20 +6089,44 @@ function isClusterVisible() {
   return state.datasets.clusters;
 }
 
+function clusterStarLodAlphaForCoreRadius(coreRadiusPx) {
+  return smoothStep(
+    (coreRadiusPx - CLUSTER_STAR_LOD_CORE_RADIUS_START) /
+      (CLUSTER_STAR_LOD_CORE_RADIUS_END - CLUSTER_STAR_LOD_CORE_RADIUS_START),
+  );
+}
+
 function rebuildActivePointLists() {
   if (!scene.activePointsDirty) return;
 
   scene.activeCatalog.length = 0;
   scene.activeRedClump.length = 0;
   scene.activeClusterStars.length = 0;
+  scene.activeClusterPulsatorStars.length = 0;
   scene.activeClusters.length = 0;
+  scene.activeClusterStarsByCluster.length = scene.clusters.length;
+  scene.activeClusterStarCountsByCluster.length = scene.clusters.length;
+  for (let index = 0; index < scene.clusters.length; index += 1) {
+    if (!scene.activeClusterStarsByCluster[index]) scene.activeClusterStarsByCluster[index] = [];
+    else scene.activeClusterStarsByCluster[index].length = 0;
+    scene.activeClusterStarCountsByCluster[index] = 0;
+  }
 
   for (const point of scene.catalog) {
     if (isCatalogVisible(point)) scene.activeCatalog.push(point);
   }
 
   for (const point of scene.clusterStars) {
-    if (isClusterStarVisible(point)) scene.activeClusterStars.push(point);
+    if (!isClusterStarVisible(point)) continue;
+    scene.activeClusterStars.push(point);
+    if (point.lightCurve) {
+      scene.activeClusterPulsatorStars.push(point);
+      continue;
+    }
+    const bucket = scene.activeClusterStarsByCluster[point.clusterIndex];
+    if (bucket) bucket.push(point);
+    scene.activeClusterStarCountsByCluster[point.clusterIndex] =
+      (scene.activeClusterStarCountsByCluster[point.clusterIndex] || 0) + 1;
   }
 
   if (isClusterVisible()) {
@@ -5496,6 +6147,7 @@ function rebuildActivePointLists() {
 
 function invalidateActivePointLists() {
   scene.activePointsDirty = true;
+  markClusterStarGpuDirty();
 }
 
 function targetCoordinates(target) {
@@ -5544,6 +6196,7 @@ function rebuildProjectionCache() {
   const clusterTargetDrawList = scene.clusterTargetDrawList;
   const projectionTransform = makeProjectionTransform();
   const redClumpProjectsInShader = Boolean(scene.redClumpRenderer?.projectsInShader);
+  const clusterStarsProjectInShader = Boolean(scene.catalogStaticRenderer?.projectsClusterStarsInShader);
   const project = (target, x, y, z) => {
     projectOffsetWithTransformInto(target, x, y, z, projectionTransform);
     target.x += scene.centerX;
@@ -5559,6 +6212,9 @@ function rebuildProjectionCache() {
   redClumpSurfaceDrawList.length = 0;
   catalogDrawList.length = 0;
   clusterTargetDrawList.length = 0;
+  scene.activeClusterStarRenderCount = 0;
+  scene.clusterStarLodAlphaByCluster.length = scene.clusters.length;
+  scene.clusterStarLodAlphaByCluster.fill(0);
   rebuildActivePointLists();
   rebuildCoordinateCache();
 
@@ -5652,16 +6308,6 @@ function rebuildProjectionCache() {
     catalogRadiusZoomSize,
     catalogViewportMargin,
   );
-  projectCatalogItemsForCache(
-    scene.activeClusterStars,
-    catalogDrawList,
-    catalogStats,
-    projectionTransform,
-    scene.centerX,
-    scene.centerY,
-    catalogRadiusZoomSize,
-    catalogViewportMargin,
-  );
 
   for (const point of scene.activeClusters) {
     const coordinates = point.activeCoordinates || coordinatesForPoint(point);
@@ -5669,10 +6315,46 @@ function rebuildProjectionCache() {
     point.activeProjected = projected;
     const item = point.drawItem;
     const physicalRadius = (point.radiusPc / 1000) * scene.scale * projected.perspective;
+    const clusterStarLodAlpha = clusterStarLodAlphaForCoreRadius(physicalRadius);
     item.screenRadius = clamp(physicalRadius, 8, 260);
     item.glowAlphaUnit = pointAlphaUnitFromBaseAtPerspective(point.glowAlphaBaseUnit, projected.perspective);
+    item.renderedStarGlowAlphaUnit = pointAlphaUnitFromBaseAtPerspective(
+      point.renderedStarGlowAlphaBaseUnit,
+      projected.perspective,
+    );
+    item.clusterStarLodAlpha = clusterStarLodAlpha;
     if (!withinViewport(projected, item.screenRadius + 24)) continue;
+    scene.clusterStarLodAlphaByCluster[point.index] = clusterStarLodAlpha;
+    if (clusterStarLodAlpha > 0.001) {
+      scene.activeClusterStarRenderCount += scene.activeClusterStarCountsByCluster[point.index] || 0;
+    }
     clusterTargetDrawList.push(item);
+  }
+
+  if (clusterStarsProjectInShader) {
+    catalogStats.count += scene.activeClusterStarRenderCount;
+    markClusterStarGpuDirty();
+    projectCatalogItemsForCache(
+      scene.activeClusterPulsatorStars,
+      catalogDrawList,
+      catalogStats,
+      projectionTransform,
+      scene.centerX,
+      scene.centerY,
+      catalogRadiusZoomSize,
+      catalogViewportMargin,
+    );
+  } else {
+    projectCatalogItemsForCache(
+      scene.activeClusterStars,
+      catalogDrawList,
+      catalogStats,
+      projectionTransform,
+      scene.centerX,
+      scene.centerY,
+      catalogRadiusZoomSize,
+      catalogViewportMargin,
+    );
   }
 
   if (!redClumpProjectsInShader) markRedClumpLayerDirty();
@@ -5922,18 +6604,22 @@ function clusterGlowHalfLightFraction(bins) {
   let previousOuter = 0;
 
   for (const bin of bins) {
-    const outer = clamp(bin.outerRadius, previousOuter + 0.001, 1);
+    const outer = Math.max(previousOuter + 0.001, Number.isFinite(bin.outerRadius) ? bin.outerRadius : previousOuter);
     const nextLuminosity = cumulativeLuminosity + bin.luminosity;
     if (nextLuminosity >= targetLuminosity) {
       const fraction = clamp((targetLuminosity - cumulativeLuminosity) / Math.max(bin.luminosity, 0.0001), 0, 1);
       const radiusSquared = previousOuter * previousOuter + fraction * (outer * outer - previousOuter * previousOuter);
-      return clamp(Math.sqrt(Math.max(0, radiusSquared)), 0.08, 0.95);
+      return clamp(Math.sqrt(Math.max(0, radiusSquared)), 0.08, outer);
     }
     cumulativeLuminosity = nextLuminosity;
     previousOuter = outer;
   }
 
-  return 0.95;
+  return Math.max(0.95, previousOuter * 0.5);
+}
+
+function clusterGlowOuterRadiusFraction(point) {
+  return Math.max(1, point.glowOuterRadiusFraction || 1);
 }
 
 function drawClusterGlows() {
@@ -5945,21 +6631,40 @@ function drawClusterGlows() {
   for (const item of scene.clusterTargetDrawList) {
     const row = item.point.row;
     const luminosity = row[CL.unresolvedLum];
-    if (!Number.isFinite(luminosity) || luminosity <= 0) continue;
+    const hasUnresolvedGlow = Number.isFinite(luminosity) && luminosity > 0;
+    const hasCollapsedStarGlow = (item.renderedStarGlowAlphaUnit || 0) > 0;
+    if (!hasUnresolvedGlow && !hasCollapsedStarGlow) continue;
     const bins = item.point.glowBins;
-    if (!bins || bins.length === 0) continue;
 
-    const alpha = Math.min(
-      CLUSTER_GLOW_ALPHA_MAX,
-      pointAlphaFromUnit(item.glowAlphaUnit, datasetExposureValue("clusters")) * CLUSTER_GLOW_ALPHA_SCALE,
-    );
+    const unresolvedAlpha = hasUnresolvedGlow
+      ? Math.min(
+          CLUSTER_GLOW_ALPHA_MAX,
+          pointAlphaFromUnit(item.glowAlphaUnit, datasetExposureValue("clusters")) * CLUSTER_GLOW_ALPHA_SCALE,
+        )
+      : 0;
+    const clusterStarLodAlpha = item.clusterStarLodAlpha || 0;
+    const collapsedStarFraction =
+      CLUSTER_STAR_RESOLVED_GLOW_FLOOR + (1 - CLUSTER_STAR_RESOLVED_GLOW_FLOOR) * (1 - clusterStarLodAlpha);
+    const collapsedStarAlpha = hasCollapsedStarGlow
+      ? Math.min(
+          CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_MAX,
+          pointAlphaFromUnit(item.renderedStarGlowAlphaUnit || 0, datasetExposureValue("clusters")) *
+            CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_SCALE *
+            collapsedStarFraction,
+        )
+      : 0;
+    const alpha = Math.min(CLUSTER_GLOW_ALPHA_MAX + CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_MAX, unresolvedAlpha + collapsedStarAlpha);
     if (alpha <= 0.001) continue;
 
-    const profileRadius = Math.max(7, item.screenRadius * CLUSTER_GLOW_RADIUS_SCALE);
-    const radius = clusterGlowOuterRadiusFromCoreRadius(item.screenRadius);
-    const halfLightFraction = clusterGlowHalfLightFraction(bins);
-    const scaleRadius = Math.max(0.08, halfLightFraction) * profileRadius;
-    const glowColor = cssColorToRgb(colorForVMinusI(row[CL.unresolvedVMinusI0], 4));
+    const glowOuterRadiusFraction = clusterGlowOuterRadiusFraction(item.point);
+    const profileRadius = Math.max(7, item.screenRadius * CLUSTER_GLOW_RADIUS_SCALE * glowOuterRadiusFraction);
+    const radius = clusterGlowOuterRadiusFromCoreRadius(item.screenRadius, glowOuterRadiusFraction);
+    const halfLightFraction = bins && bins.length > 0 ? clusterGlowHalfLightFraction(bins) : 0.45;
+    const scaleRadius = Math.max(0.08, halfLightFraction) * item.screenRadius * CLUSTER_GLOW_RADIUS_SCALE;
+    const unresolvedColor = cssColorToRgb(colorForVMinusI(row[CL.unresolvedVMinusI0], 4));
+    const renderedColor = item.point.renderedStarGlowRgb || unresolvedColor;
+    const collapsedMix = alpha > 0 ? collapsedStarAlpha / alpha : 0;
+    const glowColor = mixRgb(unresolvedColor, renderedColor, collapsedMix);
     const gradient = ctx.createRadialGradient(
       item.projected.x,
       item.projected.y,
@@ -6100,7 +6805,7 @@ function drawRedClump(forceDirect = false) {
 }
 
 function starRadiusFactorForPoint(point) {
-  return point.kind === "catalog" ? PULSATOR_BASE_RADIUS_FACTOR : 1;
+  return point.kind === "catalog" || point.kind === "clusterStar" ? PULSATOR_BASE_RADIUS_FACTOR : 1;
 }
 
 function rawStarRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1) {
@@ -6261,27 +6966,35 @@ function redClumpSurfaceAlpha(item, pointIndex = -1) {
   );
 }
 
+function catalogItemLodAlpha(item) {
+  return item.point.kind === "clusterStar" ? item.clusterStarLodAlpha || 0 : 1;
+}
+
 function updateCatalogStaticStyle(item) {
   const radiusFactor = starRadiusFactorForPoint(item.point);
+  const lodAlpha = catalogItemLodAlpha(item);
+  item.navigationPulseThrottle = shouldNavigationThrottlePulsator(item.point);
   if (
     item.staticBaseRadius !== item.baseRadius ||
     item.staticAlphaUnit !== item.alphaUnit ||
+    item.staticLodAlpha !== lodAlpha ||
     item.staticRadiusFactor !== radiusFactor ||
     item.staticRadiusScale !== state.radiusScale ||
     item.staticExposure !== datasetExposureForPoint(item.point)
   ) {
     item.staticBaseRadius = item.baseRadius;
     item.staticAlphaUnit = item.alphaUnit;
+    item.staticLodAlpha = lodAlpha;
     item.staticRadiusFactor = radiusFactor;
     item.staticRadiusScale = state.radiusScale;
     item.staticExposure = datasetExposureForPoint(item.point);
     item.staticRadius = starRadiusFromBase(item.baseRadius, 1, radiusFactor);
-    item.staticAlpha = starAlphaFromUnit(item.alphaUnit, 1, item.point.lightCurve, item.point, item.staticExposure);
+    item.staticAlpha = starAlphaFromUnit(item.alphaUnit, 1, item.point.lightCurve, item.point, item.staticExposure) * lodAlpha;
   }
 }
 
-function shouldAnimateCatalogItem(item, baseRadius, baseAlpha) {
-  if (item.point.kind === "clusterStar") return false;
+function shouldAnimateCatalogItem(item, baseRadius, baseAlpha, usePulseLod = shouldUseCatalogPulseLod()) {
+  if (item.point.kind === "clusterStar" && !item.point.lightCurve) return false;
   if (item.point === state.locked || item.point === state.hovered) {
     item.point.animatePulse = true;
     return true;
@@ -6292,7 +7005,7 @@ function shouldAnimateCatalogItem(item, baseRadius, baseAlpha) {
     return false;
   }
 
-  if (CATALOG_PULSE_ALL_STARS || !PULSE_LOD_ENABLED) {
+  if (!usePulseLod) {
     item.point.animatePulse = true;
     return true;
   }
@@ -6344,36 +7057,90 @@ function drawCatalogBuckets(context, colorBuckets) {
 function updateAnimatedCatalogItem(item, simulationDay) {
   const pulseSample = pulseState(item.point, simulationDay);
   item.currentPulse = pulseSample.pulse;
+  item.currentAreaPulse = pulseSample.areaPulse;
+  item.currentOpacityPulse = pulseSample.opacityPulse;
   item.currentAlpha = starAlphaFromUnit(
     item.alphaUnit,
-    pulseSample.opacityPulse,
+    item.currentOpacityPulse,
     item.point.lightCurve,
     item.point,
     item.staticExposure,
   );
-  item.currentRadius = catalogRenderVisualRadius(item, pulseSample.areaPulse);
-  return pulseSample.color;
+  item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+  item.currentColor = pulseSample.color;
+  return item.currentColor;
 }
 
-function updateStaticCatalogItem(item) {
+function cachedAnimatedCatalogItemColor(item, simulationDay) {
+  if (
+    !item.currentColor ||
+    !Number.isFinite(item.currentAreaPulse) ||
+    item.currentAreaPulse <= 0 ||
+    !Number.isFinite(item.currentOpacityPulse) ||
+    item.currentOpacityPulse <= 0
+  ) {
+    return updateAnimatedCatalogItem(item, simulationDay);
+  }
+  item.currentAlpha = starAlphaFromUnit(
+    item.alphaUnit,
+    item.currentOpacityPulse,
+    item.point.lightCurve,
+    item.point,
+    item.staticExposure,
+  );
+  item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+  return item.currentColor;
+}
+
+function animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState) {
+  if (throttleSlowPulse && item.navigationPulseThrottle && !updateThrottledPulseState) {
+    return cachedAnimatedCatalogItemColor(item, simulationDay);
+  }
+  return updateAnimatedCatalogItem(item, simulationDay);
+}
+
+function updateStaticCatalogItem(item, { freezePulse = false, simulationDay = currentSimulationDay() } = {}) {
   if (pulsationTooFastForAnimation(item.point)) {
     const pulseSample = meanPulseState(item.point);
     item.currentPulse = pulseSample.pulse;
+    item.currentAreaPulse = pulseSample.areaPulse;
+    item.currentOpacityPulse = pulseSample.opacityPulse;
     item.currentAlpha = starAlphaFromUnit(
       item.alphaUnit,
-      pulseSample.opacityPulse,
+      item.currentOpacityPulse,
       item.point.lightCurve,
       item.point,
       item.staticExposure,
     );
-    item.currentRadius = catalogRenderVisualRadius(item, pulseSample.areaPulse);
-    return pulseSample.color;
+    item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+    item.currentColor = pulseSample.color;
+    return item.currentColor;
+  }
+
+  if (freezePulse && item.point.lightCurve) {
+    const pulseSample = pulseState(item.point, simulationDay);
+    item.currentPulse = pulseSample.pulse;
+    item.currentAreaPulse = pulseSample.areaPulse;
+    item.currentOpacityPulse = pulseSample.opacityPulse;
+    item.currentAlpha = starAlphaFromUnit(
+      item.alphaUnit,
+      item.currentOpacityPulse,
+      item.point.lightCurve,
+      item.point,
+      item.staticExposure,
+    );
+    item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+    item.currentColor = pulseSample.color;
+    return item.currentColor;
   }
 
   item.currentPulse = 1;
+  item.currentAreaPulse = 1;
+  item.currentOpacityPulse = 1;
   item.currentAlpha = item.staticAlpha;
   item.currentRadius = item.staticRadius;
-  return item.point.color;
+  item.currentColor = item.point.color;
+  return item.currentColor;
 }
 
 function writeCatalogGpuItem(data, offset, item, color) {
@@ -6390,37 +7157,50 @@ function writeCatalogGpuItem(data, offset, item, color) {
 }
 
 function catalogStaticCacheMatches() {
+  const pulseLodActive = shouldUseCatalogPulseLod();
   return (
     !scene.catalogStaticDirty &&
+    (!scene.catalogStaticRenderer?.projectsClusterStarsInShader || !scene.clusterStarGpuDirty) &&
     scene.catalogStaticRadiusScale === state.radiusScale &&
     scene.catalogStaticExposureSignature === catalogExposureSignature() &&
-    scene.catalogStaticPulsationSpeed === state.pulsationSpeed
+    scene.catalogStaticPulsationSpeed === state.pulsationSpeed &&
+    scene.catalogStaticPulseLodActive === pulseLodActive
   );
 }
 
-function stampCatalogStaticCache(animatedCatalog, staticCatalog) {
+function stampCatalogStaticCache(animatedCatalog, staticCatalog, pulseLodActive = shouldUseCatalogPulseLod()) {
   scene.catalogStaticCounts.animated = animatedCatalog;
   scene.catalogStaticCounts.static = staticCatalog;
   scene.catalogStaticRadiusScale = state.radiusScale;
   scene.catalogStaticExposureSignature = catalogExposureSignature();
   scene.catalogStaticPulsationSpeed = state.pulsationSpeed;
+  scene.catalogStaticPulseLodActive = pulseLodActive;
   scene.catalogStaticDirty = false;
 }
 
-function drawAnimatedCatalogItems(items, simulationDay) {
+function drawAnimatedCatalogItems(
+  items,
+  simulationDay,
+  throttleSlowPulse = false,
+  updateThrottledPulseState = true,
+) {
   const colorBuckets = scene.colorBuckets;
   clearColorBuckets(colorBuckets);
 
   for (const item of items) {
-    pushColorBucket(colorBuckets, updateAnimatedCatalogItem(item, simulationDay), item);
+    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState);
+    pushColorBucket(colorBuckets, color, item);
   }
 
   drawCatalogBuckets(ctx, colorBuckets);
 }
 
-function rebuildCatalogGpuStaticLayer(renderer) {
+function rebuildCatalogGpuStaticLayer(renderer, simulationDay = currentSimulationDay()) {
   const data = renderer.ensureCatalogStaticCapacity(scene.catalogDrawList.length);
   scene.catalogAnimatedDrawList.length = 0;
+  const now = performance.now();
+  const usePulseLod = shouldUseCatalogPulseLod(now);
+  const freezeStaticPulse = navigationPulseThrottleActive(now);
 
   let offset = 0;
   let staticCount = 0;
@@ -6429,12 +7209,17 @@ function rebuildCatalogGpuStaticLayer(renderer) {
 
   for (const item of scene.catalogDrawList) {
     updateCatalogStaticStyle(item);
-    const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha);
+    const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     if (animates) {
       scene.catalogAnimatedDrawList.push(item);
       animatedCatalog += 1;
     } else {
-      offset = writeCatalogGpuItem(data, offset, item, updateStaticCatalogItem(item));
+      offset = writeCatalogGpuItem(
+        data,
+        offset,
+        item,
+        updateStaticCatalogItem(item, { freezePulse: freezeStaticPulse, simulationDay }),
+      );
       staticCount += 1;
       staticCatalog += 1;
     }
@@ -6444,49 +7229,63 @@ function rebuildCatalogGpuStaticLayer(renderer) {
   renderer.clear();
   renderer.uploadCatalogStatic(staticCount);
   renderer.drawCatalogStatic();
-  stampCatalogStaticCache(animatedCatalog, staticCatalog);
+  if (renderer.projectsClusterStarsInShader) {
+    renderer.drawClusterStars();
+    staticCatalog += renderer.clusterStarCount;
+  }
+  stampCatalogStaticCache(animatedCatalog, staticCatalog, usePulseLod);
 }
 
-function rebuildCatalogStaticLayer() {
+function rebuildCatalogStaticLayer(simulationDay = currentSimulationDay()) {
   resizeCatalogStaticCanvas();
   clearCatalogStaticCanvas();
   clearColorBuckets(scene.staticColorBuckets);
   scene.catalogAnimatedDrawList.length = 0;
+  const now = performance.now();
+  const usePulseLod = shouldUseCatalogPulseLod(now);
+  const freezeStaticPulse = navigationPulseThrottleActive(now);
 
   let animatedCatalog = 0;
   let staticCatalog = 0;
 
   for (const item of scene.catalogDrawList) {
     updateCatalogStaticStyle(item);
-    const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha);
+    const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     if (animates) {
       scene.catalogAnimatedDrawList.push(item);
       animatedCatalog += 1;
     } else {
-      pushColorBucket(scene.staticColorBuckets, updateStaticCatalogItem(item), item);
+      pushColorBucket(
+        scene.staticColorBuckets,
+        updateStaticCatalogItem(item, { freezePulse: freezeStaticPulse, simulationDay }),
+        item,
+      );
       staticCatalog += 1;
     }
   }
 
   drawCatalogBuckets(scene.catalogStaticCtx, scene.staticColorBuckets);
-  stampCatalogStaticCache(animatedCatalog, staticCatalog);
+  stampCatalogStaticCache(animatedCatalog, staticCatalog, usePulseLod);
 }
 
-function drawCatalogDirect(simulationDay) {
+function drawCatalogDirect(simulationDay, throttleSlowPulse = false, updateThrottledPulseState = true) {
   const colorBuckets = scene.colorBuckets;
   clearColorBuckets(colorBuckets);
+  const now = performance.now();
+  const usePulseLod = shouldUseCatalogPulseLod(now);
+  const freezeStaticPulse = navigationPulseThrottleActive(now);
   let animatedCatalog = 0;
   let staticCatalog = 0;
 
   for (const item of scene.catalogDrawList) {
     updateCatalogStaticStyle(item);
-    const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha);
+    const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     let color = item.point.color;
     if (animates) {
-      color = updateAnimatedCatalogItem(item, simulationDay);
+      color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState);
       animatedCatalog += 1;
     } else {
-      color = updateStaticCatalogItem(item);
+      color = updateStaticCatalogItem(item, { freezePulse: freezeStaticPulse, simulationDay });
       staticCatalog += 1;
     }
     pushColorBucket(colorBuckets, color, item);
@@ -6496,14 +7295,14 @@ function drawCatalogDirect(simulationDay) {
   return { animatedCatalog, staticCatalog };
 }
 
-function drawCatalogGpu(simulationDay) {
+function drawCatalogGpu(simulationDay, throttleSlowPulse = false, updateThrottledPulseState = true) {
   const renderer = prepareGpuSceneLayer();
   if (!renderer) return null;
   const staticRenderer = scene.catalogStaticRenderer;
   if (!staticRenderer) return null;
 
   if (!catalogStaticCacheMatches()) {
-    rebuildCatalogGpuStaticLayer(staticRenderer);
+    rebuildCatalogGpuStaticLayer(staticRenderer, simulationDay);
   }
 
   const data = renderer.ensureCatalogCapacity(scene.catalogAnimatedDrawList.length);
@@ -6511,7 +7310,8 @@ function drawCatalogGpu(simulationDay) {
   let count = 0;
 
   for (const item of scene.catalogAnimatedDrawList) {
-    offset = writeCatalogGpuItem(data, offset, item, updateAnimatedCatalogItem(item, simulationDay));
+    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState);
+    offset = writeCatalogGpuItem(data, offset, item, color);
     count += 1;
   }
 
@@ -6525,26 +7325,44 @@ function drawCatalogGpu(simulationDay) {
 function drawCatalog(useStaticCache = true) {
   const catalogStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
   const simulationDay = currentSimulationDay();
+  const pulseNow = performance.now();
+  const throttleSlowPulse = navigationPulseThrottleActive(pulseNow);
+  const updateThrottledPulseState = !throttleSlowPulse || shouldUpdateCatalogPulseState(pulseNow);
+  if (throttleSlowPulse && updateThrottledPulseState) markCatalogPulseStateUpdated(pulseNow);
   let animatedCatalog = 0;
   let staticCatalog = 0;
 
-  const gpuResult = drawCatalogGpu(simulationDay);
+  const gpuResult = drawCatalogGpu(simulationDay, throttleSlowPulse, updateThrottledPulseState);
   if (gpuResult) {
     ({ animatedCatalog, staticCatalog } = gpuResult);
   } else if (useStaticCache && PULSE_LOD_ENABLED && catalogStaticCacheMatches()) {
-    if (scene.catalogStaticDirty) rebuildCatalogStaticLayer();
+    if (scene.catalogStaticDirty) rebuildCatalogStaticLayer(simulationDay);
     ctx.drawImage(scene.catalogStaticCanvas, 0, 0, scene.width, scene.height);
     animatedCatalog = scene.catalogStaticCounts.animated;
     staticCatalog = scene.catalogStaticCounts.static;
-    drawAnimatedCatalogItems(scene.catalogAnimatedDrawList, simulationDay);
+    drawAnimatedCatalogItems(
+      scene.catalogAnimatedDrawList,
+      simulationDay,
+      throttleSlowPulse,
+      updateThrottledPulseState,
+    );
   } else if (useStaticCache && PULSE_LOD_ENABLED) {
-    rebuildCatalogStaticLayer();
+    rebuildCatalogStaticLayer(simulationDay);
     ctx.drawImage(scene.catalogStaticCanvas, 0, 0, scene.width, scene.height);
     animatedCatalog = scene.catalogStaticCounts.animated;
     staticCatalog = scene.catalogStaticCounts.static;
-    drawAnimatedCatalogItems(scene.catalogAnimatedDrawList, simulationDay);
+    drawAnimatedCatalogItems(
+      scene.catalogAnimatedDrawList,
+      simulationDay,
+      throttleSlowPulse,
+      updateThrottledPulseState,
+    );
   } else {
-    ({ animatedCatalog, staticCatalog } = drawCatalogDirect(simulationDay));
+    ({ animatedCatalog, staticCatalog } = drawCatalogDirect(
+      simulationDay,
+      throttleSlowPulse,
+      updateThrottledPulseState,
+    ));
   }
 
   if (PERF_HUD_ENABLED) {
@@ -6563,8 +7381,8 @@ function targetProjectedAtZoom(target, zoom = state.zoom) {
   return projectOffsetWithTransform(coordinates[0], coordinates[1], coordinates[2], transform);
 }
 
-function clusterGlowOuterRadiusFromCoreRadius(coreRadius) {
-  const profileRadius = Math.max(7, coreRadius * CLUSTER_GLOW_RADIUS_SCALE);
+function clusterGlowOuterRadiusFromCoreRadius(coreRadius, outerRadiusFraction = 1) {
+  const profileRadius = Math.max(7, coreRadius * CLUSTER_GLOW_RADIUS_SCALE * Math.max(1, outerRadiusFraction));
   return profileRadius * (1 + CLUSTER_GLOW_EDGE_FEATHER);
 }
 
@@ -6587,8 +7405,9 @@ function targetVisualRadiusAtZoom(target, zoom = state.zoom) {
   const projected = targetProjectedAtZoom(target, zoom);
   if (target.kind === "catalog") return catalogTargetVisualRadiusAtZoom(target, projected, zoom);
   if (target.kind === "cluster") {
-    const boundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom, { bounded: true }));
-    const unboundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom));
+    const outerRadiusFraction = clusterGlowOuterRadiusFraction(target);
+    const boundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom, { bounded: true }), outerRadiusFraction);
+    const unboundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom), outerRadiusFraction);
     return Math.max(boundedRadius, unboundedRadius);
   }
   if (target.kind === "redclump") return redClumpTargetVisualRadiusAtZoom(projected, zoom);
@@ -6705,7 +7524,10 @@ function render(timestamp) {
   drawGrid(timestamp);
 
   const rebuiltProjection = projectionDirty;
-  if (projectionDirty) rebuildProjectionCache();
+  if (projectionDirty) {
+    markNavigationPulseThrottleActive(timestamp);
+    rebuildProjectionCache();
+  }
   drawClusterGlows();
   beginGpuSceneLayer();
   const redStats = drawRedClump(rebuiltProjection);
@@ -7652,7 +8474,10 @@ function handleCanvasTouchPointerCancel(event) {
 function isEditableKeyboardTarget(target) {
   if (!(target instanceof Element)) return false;
   if (target.isContentEditable) return true;
-  return ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName);
+  if (target.tagName === "INPUT") {
+    return !["checkbox", "radio", "button", "submit", "reset"].includes(target.type);
+  }
+  return ["SELECT", "TEXTAREA"].includes(target.tagName);
 }
 
 function viewportKeyboardMultiplier(event) {
@@ -9391,10 +10216,15 @@ function preparePoints(payload) {
       baseRadius: 0,
       alphaUnit: 0,
       currentPulse: 1,
+      currentAreaPulse: 1,
+      currentOpacityPulse: 1,
       currentAlpha: 0,
       currentRadius: 0,
+      currentColor: null,
+      navigationPulseThrottle: false,
       staticBaseRadius: -1,
       staticAlphaUnit: -1,
+      staticLodAlpha: -1,
       staticRadiusFactor: -1,
       staticRadiusScale: -1,
       staticExposure: -1,
@@ -9442,10 +10272,22 @@ function preparePoints(payload) {
   for (const bins of clusterHrBinsByIndex.values()) {
     bins.sort((left, right) => left.logLum - right.logLum);
   }
-  const clusterBaseCoordinatesByIndex = (payload.datasets.clusters || []).map((row) => clusterCoordinates(row));
+  const clusterRows = payload.datasets.clusters || [];
+  const clusterBaseCoordinatesByIndex = clusterRows.map((row) => clusterCoordinates(row));
+  const clusterRenderedLuminosityByIndex = new Array(clusterBaseCoordinatesByIndex.length).fill(0);
+  const clusterRenderedColorSumsByIndex = clusterBaseCoordinatesByIndex.map(() => [0, 0, 0]);
+  const clusterPulsatorStripModel = buildObservedInstabilityStripModel(payload.datasets.catalog || []);
+  const clusterPulsatorStats = {
+    total: 0,
+    byDataset: Object.fromEntries(CLUSTER_PULSATOR_STRIP_DATASET_KEYS.map((key) => [key, 0])),
+    referenceModelStars: Object.fromEntries(
+      clusterPulsatorStripModel.strips.map((strip) => [strip.datasetKey, strip.samples.length]),
+    ),
+  };
   scene.clusterStarsByCluster = new Map();
   scene.clusterStars = (payload.datasets.clusterStars || []).map((row, index) => {
     const clusterIndex = row[CS.cluster];
+    const clusterRow = clusterRows[clusterIndex];
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const baseCoordinates = clusterStarCoordinates(row);
     const clusterBaseCoordinates = clusterBaseCoordinatesByIndex[clusterIndex];
@@ -9456,25 +10298,50 @@ function preparePoints(payload) {
           baseCoordinates.galacticVector[2] - clusterBaseCoordinates.galacticVector[2],
         ]
       : [0, 0, 0];
+    const pulsatorMatch = clusterStarInstabilityStripMatch(row, clusterPulsatorStripModel);
+    const lightCurve = makeClusterStarWaveform(row, index, clusterRow, pulsatorMatch);
+    if (lightCurve) {
+      clusterPulsatorStats.total += 1;
+      clusterPulsatorStats.byDataset[lightCurve.referenceDatasetKey] =
+        (clusterPulsatorStats.byDataset[lightCurve.referenceDatasetKey] || 0) + 1;
+    }
     const point = {
       kind: "clusterStar",
       row,
       clusterIndex,
+      clusterPulsatorMatch: lightCurve
+        ? {
+            datasetKey: lightCurve.referenceDatasetKey,
+            referenceId: lightCurve.referenceId,
+            score: pulsatorMatch.score,
+          }
+        : null,
       baseCoordinates,
       coordinates: baseCoordinates,
       clusterOffsetVector,
       activeCoordinates: null,
       projected,
       currentDistance: row[CS.distance],
+      currentLum: row[CS.lum],
+      currentLogLum: row[CS.logLum],
       radiusUnit: pointRadiusUnitFromStellarRadius(row[CS.radius]),
-      alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CS.lum]),
+      alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CS.lum]) * BASE_LUMINOSITY_FACTOR,
       vMinusI0: Number.isFinite(row[CS.vMinusI0]) ? row[CS.vMinusI0] : null,
       color: Number.isFinite(row[CS.temperature])
         ? colorForTemperature(row[CS.temperature])
         : colorForVMinusI(row[CS.vMinusI0], row[CS.spectral]),
       sample: hashString(`cs-${row[CS.cluster]}-${index}`) % 100,
-      lightCurve: null,
+      lightCurve,
     };
+    const starLuminosity = Number.isFinite(row[CS.lum]) ? Math.max(0, row[CS.lum]) : 0;
+    const renderedColorSums = clusterRenderedColorSumsByIndex[clusterIndex];
+    if (starLuminosity > 0 && renderedColorSums) {
+      const rgbValue = cssColorToRgb(point.color);
+      clusterRenderedLuminosityByIndex[clusterIndex] += starLuminosity;
+      renderedColorSums[0] += rgbValue[0] * starLuminosity;
+      renderedColorSums[1] += rgbValue[1] * starLuminosity;
+      renderedColorSums[2] += rgbValue[2] * starLuminosity;
+    }
     let clusterStars = scene.clusterStarsByCluster.get(clusterIndex);
     if (!clusterStars) {
       clusterStars = [];
@@ -9487,10 +10354,15 @@ function preparePoints(payload) {
       baseRadius: 0,
       alphaUnit: 0,
       currentPulse: 1,
+      currentAreaPulse: 1,
+      currentOpacityPulse: 1,
       currentAlpha: 0,
       currentRadius: 0,
+      currentColor: null,
+      navigationPulseThrottle: false,
       staticBaseRadius: -1,
       staticAlphaUnit: -1,
+      staticLodAlpha: -1,
       staticRadiusFactor: -1,
       staticRadiusScale: -1,
       staticExposure: -1,
@@ -9499,9 +10371,18 @@ function preparePoints(payload) {
     };
     return point;
   });
-  scene.clusters = (payload.datasets.clusters || []).map((row, index) => {
+  scene.clusterPulsatorStats = clusterPulsatorStats;
+  scene.clusters = clusterRows.map((row, index) => {
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const baseCoordinates = clusterBaseCoordinatesByIndex[index] || clusterCoordinates(row);
+    const renderedLuminosity = clusterRenderedLuminosityByIndex[index] || 0;
+    const renderedColorSums = clusterRenderedColorSumsByIndex[index];
+    const renderedStarGlowRgb =
+      renderedLuminosity > 0 && renderedColorSums
+        ? renderedColorSums.map((value) => Math.round(value / renderedLuminosity))
+        : cssColorToRgb(colorForVMinusI(row[CL.unresolvedVMinusI0], 4));
+    const glowBins = clusterGlowBinsByIndex.get(index) || [];
+    const glowOuterRadiusFraction = glowBins.reduce((outer, bin) => Math.max(outer, bin.outerRadius || 0), 1);
     const point = {
       kind: "cluster",
       index,
@@ -9514,7 +10395,10 @@ function preparePoints(payload) {
       currentDistance: row[CL.distance],
       radiusPc: row[CL.radiusPc],
       glowAlphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CL.unresolvedLum] || 0),
-      glowBins: clusterGlowBinsByIndex.get(index) || [],
+      renderedStarGlowAlphaBaseUnit: pointAlphaUnitBaseFromLuminosity(renderedLuminosity) * BASE_LUMINOSITY_FACTOR,
+      renderedStarGlowRgb,
+      glowOuterRadiusFraction,
+      glowBins,
       hrBins: clusterHrBinsByIndex.get(index) || [],
       sample: hashString(`cluster-${row[CL.name]}-${index}`) % 100,
       searchText: clusterSearchTextForRow(row),
@@ -9524,6 +10408,8 @@ function preparePoints(payload) {
       projected,
       screenRadius: 10,
       glowAlphaUnit: 0,
+      renderedStarGlowAlphaUnit: 0,
+      clusterStarLodAlpha: 0,
     };
     return point;
   });

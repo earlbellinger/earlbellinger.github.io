@@ -4,7 +4,8 @@ This script keeps the existing OGLE ingestion/cache build intact and applies a
 separate, auditable policy layer using the trial diagnostics:
 
 * Fundamental-mode pulsators share one dictionary family across FU Cepheids,
-  anomalous Cepheids, and RRab stars.
+  anomalous Cepheids, and RRab stars, but RRab stars keep their older
+  empirical fits unless the shared dictionary is a clear residual improvement.
 * First-overtone pulsators share a second dictionary family across FO Cepheids,
   anomalous Cepheids, and future RRc stars.
 * V-band curves use independent cap-3 Fourier fits or the I-carrier convex
@@ -33,7 +34,7 @@ if str(SCRIPT_DIR) not in sys.path:
 import prepare_data as prep  # noqa: E402
 
 
-VERSION = 1
+VERSION = 2
 BASE_CACHE = prep.COLOR_CURVE_CACHE
 BACKUP_CACHE = prep.PROCESSED / f"ogle_color_curves_v{prep.COLOR_CURVE_VERSION}_before_template_promotion.json"
 CONVEX_CACHE = prep.PROCESSED / "convex_template_curves_v1.json"
@@ -217,6 +218,11 @@ def choose_i_source(
     dict_rms = metric(convex_row, "dictIRms") or finite_float(convex_curve.get("iRms"))
     dict_mad = metric(convex_row, "dictIMad")
 
+    if dataset == "rrlyrae" and family == prep.TEMPLATE_FAMILY_FUNDAMENTAL:
+        if ratio_ok(dict_rms, current_rms, 0.90) and ratio_ok(dict_mad, current_mad, 1.00):
+            return "convex-dictionary-v1", "rrab-clear-i-improvement"
+        return "current", "rrab-current-preferred"
+
     if family == prep.TEMPLATE_FAMILY_FUNDAMENTAL:
         if ratio_ok(dict_rms, current_rms, 1.15) and ratio_ok(dict_mad, current_mad, 1.60):
             return "convex-dictionary-v1", "fundamental-default"
@@ -257,6 +263,15 @@ def choose_v_source(
         if has_convex and has_current and ratio_ok(dict_rms, current_rms, 0.90) and ratio_ok(dict_mad, current_mad, 1.35):
             return "convex-i-carrier-v1", "first-overtone-convex-v-fallback"
         return ("current", "first-overtone-current-v-preferred") if has_current else ("none", "missing-v-source")
+
+    if dataset == "rrlyrae" and family == prep.TEMPLATE_FAMILY_FUNDAMENTAL:
+        cap_ok = has_cap and (
+            not has_current
+            or (ratio_ok(cap_rms, current_rms, 0.98) and ratio_ok(cap_mad, current_mad, 1.10))
+        )
+        if cap_ok:
+            return "v-fourier-cap3-v1", "rrab-cap3-preferred"
+        return ("current", "rrab-current-v-preferred") if has_current else ("none", "missing-v-source")
 
     if family == prep.TEMPLATE_FAMILY_FUNDAMENTAL:
         convex_ok = has_convex and (
@@ -422,6 +437,8 @@ def summarize_decisions(rows: list[dict[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "version": VERSION,
         "policy": {
+            "rrab_I": "keep current fit unless shared dictionary improves RMS by >=10% without increasing MAD",
+            "rrab_V": "use current or guarded cap-3 V; do not promote merged convex carrier for RRab",
             "fundamental_I": "convex dictionary unless RMS is >15% worse or MAD is >60% worse",
             "first_overtone_I": "convex dictionary only for clear RMS improvement with MAD guard",
             "fundamental_V": "choose guarded convex I-carrier or cap-3 Fourier by robust residual score",

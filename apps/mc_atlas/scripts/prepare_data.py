@@ -302,6 +302,16 @@ MIST_VI_LUMINOSITY_TEMPERATURE_VALUE_SCALE = 10000
 CLUSTER_SYNTHETIC_MASS_CUTOFF = 0.5
 CLUSTER_POINT_LUMINOSITY_CUTOFF = 1.0
 CLUSTER_GLOW_BIN_COUNT = 12
+CLUSTER_SPATIAL_RADIUS_CONTAINMENT_FRACTION = 0.82
+CLUSTER_SPATIAL_TRUNCATION_RADIUS_MULTIPLIER = 3.0
+CLUSTER_KING_MAX_TIDAL_RADIUS_MULTIPLIER = 8.0
+CLUSTER_EFF_MAX_LOG_AGE = 8.5
+CLUSTER_EFF_GAMMA = 2.7
+CLUSTER_EFF_TRUNCATION_RADIUS_MULTIPLIER = 4.0
+CLUSTER_DEFAULT_CORE_RADIUS_FRACTION = 0.33
+CLUSTER_MIN_CORE_RADIUS_FRACTION = 0.04
+CLUSTER_MAX_CORE_RADIUS_FRACTION = 0.85
+CLUSTER_SPATIAL_CDF_GRID_SIZE = 2048
 CLUSTER_HR_COLOR_MIN = -0.5
 CLUSTER_HR_COLOR_MAX = 3.2
 CLUSTER_HR_COLOR_BIN_COUNT = 64
@@ -432,6 +442,9 @@ class ClusterParameters:
     ci: float | None = None
     prob_cl: float | None = None
     fc: int | None = None
+    core_radius_pc: float | None = None
+    tidal_radius_pc: float | None = None
+    king_concentration: float | None = None
     quality_flags: str = "none"
     age_outlier: bool = False
     iso_specs: list[tuple[float, float, str]] | None = None
@@ -5021,6 +5034,88 @@ def cluster_mass_segregation_strength(log_age: float) -> float:
     return round_number(0.7 * smooth_unit(relaxed_unit), 3)
 
 
+_CLUSTER_PROFILE_CDF_CACHE: dict[tuple[str, float, float, float], tuple[np.ndarray, np.ndarray]] = {}
+
+
+def plummer_scale_fraction_for_containment(containment: float) -> float:
+    containment = clamp_float(containment, (0.01, 0.99))
+    containment_q = containment ** (2 / 3)
+    return math.sqrt((1 - containment_q) / containment_q)
+
+
+def cluster_spatial_profile(cluster: ClusterParameters) -> tuple[str, float, float, float]:
+    radius_pc = max(cluster.radius_pc, 0.5)
+    core_fraction = (
+        cluster.core_radius_pc / radius_pc
+        if cluster.core_radius_pc is not None and cluster.core_radius_pc > 0
+        else CLUSTER_DEFAULT_CORE_RADIUS_FRACTION
+    )
+    core_fraction = clamp_float(core_fraction, (CLUSTER_MIN_CORE_RADIUS_FRACTION, CLUSTER_MAX_CORE_RADIUS_FRACTION))
+
+    if (
+        cluster.log_age > CLUSTER_EFF_MAX_LOG_AGE
+        and cluster.core_radius_pc is not None
+        and cluster.tidal_radius_pc is not None
+        and cluster.king_concentration is not None
+        and cluster.tidal_radius_pc > cluster.core_radius_pc
+        and (cluster.fc is None or cluster.fc < 4)
+    ):
+        outer_fraction = clamp_float(
+            cluster.tidal_radius_pc / radius_pc,
+            (1.05, CLUSTER_KING_MAX_TIDAL_RADIUS_MULTIPLIER),
+        )
+        return "king", core_fraction, outer_fraction, cluster.king_concentration
+
+    if cluster.log_age <= CLUSTER_EFF_MAX_LOG_AGE:
+        return "eff", core_fraction, CLUSTER_EFF_TRUNCATION_RADIUS_MULTIPLIER, CLUSTER_EFF_GAMMA
+
+    scale_fraction = plummer_scale_fraction_for_containment(CLUSTER_SPATIAL_RADIUS_CONTAINMENT_FRACTION)
+    return "plummer", scale_fraction, CLUSTER_SPATIAL_TRUNCATION_RADIUS_MULTIPLIER, 0.0
+
+
+def cluster_profile_cdf(profile_type: str, core_fraction: float, outer_fraction: float, gamma: float) -> tuple[np.ndarray, np.ndarray]:
+    safe_core = max(core_fraction, CLUSTER_MIN_CORE_RADIUS_FRACTION)
+    safe_outer = max(outer_fraction, 1.01)
+    key = (profile_type, round(safe_core, 4), round(safe_outer, 4), round(gamma, 3))
+    cached = _CLUSTER_PROFILE_CDF_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    radii = np.linspace(0, safe_outer, CLUSTER_SPATIAL_CDF_GRID_SIZE)
+    scaled_radius_sq = (radii / safe_core) ** 2
+    if profile_type == "king":
+        tidal_term = 1 / math.sqrt(1 + (safe_outer / safe_core) ** 2)
+        density = np.maximum(1 / np.sqrt(1 + scaled_radius_sq) - tidal_term, 0) ** 2
+    elif profile_type == "eff":
+        density = (1 + scaled_radius_sq) ** (-(max(gamma, 2.05) + 1) / 2)
+    else:
+        density = (1 + scaled_radius_sq) ** -2.5
+
+    pdf = radii * radii * density
+    increments = (pdf[:-1] + pdf[1:]) * 0.5 * np.diff(radii)
+    cdf = np.concatenate(([0.0], np.cumsum(increments)))
+    if cdf[-1] <= 0:
+        cdf = (radii / safe_outer) ** 3
+    else:
+        cdf /= cdf[-1]
+    _CLUSTER_PROFILE_CDF_CACHE[key] = (radii, cdf)
+    return radii, cdf
+
+
+def sample_cluster_radial_distances(
+    rng: np.random.Generator,
+    radius_kpc: float,
+    mass_radius_scale: np.ndarray,
+    profile: tuple[str, float, float, float],
+) -> np.ndarray:
+    if mass_radius_scale.size == 0:
+        return mass_radius_scale.copy()
+
+    radii, cdf = cluster_profile_cdf(*profile)
+    unit_radius = np.interp(rng.random(mass_radius_scale.size), cdf, radii)
+    return radius_kpc * mass_radius_scale * unit_radius
+
+
 def load_asteca_cluster_flags(path: Path) -> dict[str, dict[str, object]]:
     flags: dict[str, dict[str, object]] = {}
     age_outlier_next = False
@@ -5046,6 +5141,10 @@ def load_asteca_cluster_flags(path: Path) -> dict[str, dict[str, object]]:
         }
         active_flags = [label for label, value in flag_values.items() if value]
         flags[name] = {
+            "r_cl": finite_float(parts[5]),
+            "r_c": finite_float(parts[7]),
+            "r_t": finite_float(parts[9]),
+            "kcp": finite_float(parts[11]),
             "ci": finite_float(parts[12]),
             "prob_cl": finite_float(parts[18]),
             "fc": int(parts[44]),
@@ -5067,13 +5166,18 @@ def parse_perren_clusters(path: Path, asteca_path: Path) -> list[ClusterParamete
         if len(parts) < 15:
             continue
         flag_info = asteca_flags.get(parts[0], {})
+        radius_pc = float(parts[4])
+        asteca_radius = flag_info.get("r_cl")
+        pixel_to_pc = radius_pc / asteca_radius if isinstance(asteca_radius, float) and asteca_radius > 0 else None
+        asteca_core = flag_info.get("r_c")
+        asteca_tidal = flag_info.get("r_t")
         clusters.append(
             ClusterParameters(
                 name=parts[0],
                 galaxy=parts[1],
                 ra=float(parts[2]),
                 dec=float(parts[3]),
-                radius_pc=float(parts[4]),
+                radius_pc=radius_pc,
                 feh=float(parts[5]),
                 e_feh=float(parts[6]),
                 log_age=float(parts[7]),
@@ -5087,6 +5191,9 @@ def parse_perren_clusters(path: Path, asteca_path: Path) -> list[ClusterParamete
                 ci=flag_info.get("ci"),  # type: ignore[arg-type]
                 prob_cl=flag_info.get("prob_cl"),  # type: ignore[arg-type]
                 fc=flag_info.get("fc"),  # type: ignore[arg-type]
+                core_radius_pc=asteca_core * pixel_to_pc if isinstance(asteca_core, float) and asteca_core > 0 and pixel_to_pc else None,
+                tidal_radius_pc=asteca_tidal * pixel_to_pc if isinstance(asteca_tidal, float) and asteca_tidal > 0 and pixel_to_pc else None,
+                king_concentration=flag_info.get("kcp") if isinstance(flag_info.get("kcp"), float) and flag_info.get("kcp") > 0 else None,
                 quality_flags=str(flag_info.get("quality_flags", "none")),
                 age_outlier=bool(flag_info.get("age_outlier", False)),
             )
@@ -6014,6 +6121,7 @@ def serialize_synthetic_clusters(
     total_synthetic_stars = 0
     total_unresolved_stars = 0
     total_unresolved_luminosity = 0.0
+    spatial_profile_counts: dict[str, int] = {}
 
     for cluster_index, cluster in enumerate(clusters):
         rng = np.random.default_rng(stable_seed_int(f"perren-cluster-{cluster.name}"))
@@ -6049,6 +6157,8 @@ def serialize_synthetic_clusters(
         hr_temperature_bins = np.zeros_like(hr_count_bins, dtype=float)
         hr_radius_bins = np.zeros_like(hr_count_bins, dtype=float)
         radius_kpc = max(cluster.radius_pc, 0.5) / 1000
+        spatial_profile = cluster_spatial_profile(cluster)
+        spatial_profile_counts[spatial_profile[0]] = spatial_profile_counts.get(spatial_profile[0], 0) + 1
 
         if star_count and cluster_isochrones:
             feh_low, feh_high = cluster_uncertainty_range(cluster.feh, cluster.e_feh, mist_files[0][0], mist_files[-1][0])
@@ -6094,8 +6204,8 @@ def serialize_synthetic_clusters(
                     0,
                     1,
                 )
-                effective_radius = radius_kpc * np.maximum(0.18, 1 - 0.58 * segregation * mass_weight)
-                radial_distance = effective_radius * rng.random(initial_masses.size) ** (1 / 3)
+                mass_radius_scale = np.maximum(0.18, 1 - 0.58 * segregation * mass_weight)
+                radial_distance = sample_cluster_radial_distances(rng, radius_kpc, mass_radius_scale, spatial_profile)
                 cos_theta = rng.uniform(-1, 1, initial_masses.size)
                 sin_theta = np.sqrt(np.maximum(0, 1 - cos_theta * cos_theta))
                 phi = rng.random(initial_masses.size) * math.tau
@@ -6120,8 +6230,9 @@ def serialize_synthetic_clusters(
                         unresolved_count += 1
                         unresolved_luminosity += luminosity
                         unresolved_color_luminosity += luminosity * v_minus_i
-                        radius_fraction = float(np.clip(radial_distance[item_index] / radius_kpc, 0, 0.999999))
-                        glow_bin = min(CLUSTER_GLOW_BIN_COUNT - 1, int(radius_fraction * CLUSTER_GLOW_BIN_COUNT))
+                        radius_fraction = max(0.0, float(radial_distance[item_index] / radius_kpc))
+                        glow_outer_fraction = max(spatial_profile[2], 1.0)
+                        glow_bin = min(CLUSTER_GLOW_BIN_COUNT - 1, int((radius_fraction / glow_outer_fraction) * CLUSTER_GLOW_BIN_COUNT))
                         glow_luminosity_bins[glow_bin] += luminosity
                         glow_color_bins[glow_bin] += luminosity * v_minus_i
                         log_luminosity = math.log10(max(luminosity, 1e-9))
@@ -6175,7 +6286,7 @@ def serialize_synthetic_clusters(
             glow_bin_rows.append(
                 [
                     cluster_index,
-                    round_number((bin_index + 1) / CLUSTER_GLOW_BIN_COUNT, 4),
+                    round_number(((bin_index + 1) / CLUSTER_GLOW_BIN_COUNT) * max(spatial_profile[2], 1.0), 4),
                     round_luminosity(float(bin_luminosity)),
                     round_number(float(glow_color_bins[bin_index] / bin_luminosity), 3),
                 ]
@@ -6245,6 +6356,14 @@ def serialize_synthetic_clusters(
         "clusterSyntheticExpectedStars": round_number(total_expected, 1),
         "clusterSyntheticMassCutoffSolar": CLUSTER_SYNTHETIC_MASS_CUTOFF,
         "clusterPointLuminosityCutoffSolar": CLUSTER_POINT_LUMINOSITY_CUTOFF,
+        "clusterSpatialProfile": "king-eff-plummer",
+        "clusterSpatialRadiusContainmentFraction": CLUSTER_SPATIAL_RADIUS_CONTAINMENT_FRACTION,
+        "clusterSpatialTruncationRadiusMultiplier": CLUSTER_SPATIAL_TRUNCATION_RADIUS_MULTIPLIER,
+        "clusterSpatialProfileModel": "king-eff-plummer",
+        "clusterSpatialProfileCounts": spatial_profile_counts,
+        "clusterKingMaxTidalRadiusMultiplier": CLUSTER_KING_MAX_TIDAL_RADIUS_MULTIPLIER,
+        "clusterEffMaxLogAge": CLUSTER_EFF_MAX_LOG_AGE,
+        "clusterEffGamma": CLUSTER_EFF_GAMMA,
         "clusterSyntheticTotalMassSolar": int(round(sum(cluster.mass for cluster in clusters))),
         "clusterSyntheticAgeOutliers": sum(1 for cluster in clusters if cluster.age_outlier),
         "clusterMistIsochroneBlocks": len(isochrones),
@@ -6616,7 +6735,7 @@ def main() -> None:
             "colorCurveNote": "Pulsation color is driven by validated OGLE V- and I-band template fits; compact phase templates store V-I offsets around the catalog mean observed color before subtracting E(V-I). Rendering evaluates the temperature calibration at each phase using instantaneous intrinsic V-I and I-band luminosity.",
             "brightnessCurveNote": "Cepheid, anomalous Cepheid, and RR Lyrae brightness uses compact I-band templates fitted from OGLE epoch photometry, with validated convex dictionary templates promoted where they improve the unmodulated lightcurve. Miras use OGLE LPV primary, secondary, and tertiary periods and I-band amplitudes as a time-domain multi-sine model with phases fitted to OGLE I-band epoch photometry; V-band Mira components are fitted where possible, and sparse or missing V curves are regularized or filled from empirical V/I amplitude-ratio and phase-lag priors learned from the highest-quality Mira V/I fits.",
             "redClumpDensityNote": "Optional XMC surface opacity uses a smoothed Gaia DR3 broad red-clump count proxy binned on the same 0.25 degree galactic grid; it is for visual density only, not a reproduced Oden et al. RC catalog.",
-            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. When UBVRIplus MIST CMD files are available, Bessell V and I magnitudes provide synthetic V-I colors and I-band luminosities; otherwise the build falls back to full MIST tracks with blackbody-derived display colors. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point radii come from MIST radii or from MIST luminosity plus Teff, and positions are drawn inside the reported cluster radius with an age-dependent mass-segregation bias.",
+            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. When UBVRIplus MIST CMD files are available, Bessell V and I magnitudes provide synthetic V-I colors and I-band luminosities; otherwise the build falls back to full MIST tracks with blackbody-derived display colors. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point radii come from MIST radii or from MIST luminosity plus Teff. Positions use the ASteCA structural fit where reliable: older clusters draw from a truncated King-like profile using the fitted core and tidal radii, young clusters draw from an EFF-like extended-halo profile, and sparse or unreliable fits fall back to a Plummer model. The reported cluster radius is treated as the main measured aperture rather than a hard edge, with an age-dependent mass-segregation bias.",
             "redClumpDensitySource": red_clump_density_meta,
             "viTemperatureCalibration": vi_temperature_calibration,
             "viLuminosityTemperatureCalibration": vi_luminosity_temperature_calibration,
