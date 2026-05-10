@@ -1622,7 +1622,7 @@ h2 {
 
   .mobileTargetPreview {
     position: fixed;
-    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 62px);
+    bottom: max(12px, env(safe-area-inset-bottom));
     left: max(12px, env(safe-area-inset-left));
     z-index: 5;
     display: grid;
@@ -1796,6 +1796,10 @@ h2 {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
+  }
+
+  .panLockOption {
+    display: none;
   }
 
   .scaleBar {

@@ -923,9 +923,10 @@ const MOBILE_CONTROLS_MEDIA = window.matchMedia("(max-width: 860px)");
 const MOBILE_TOUCH_MOVE_THRESHOLD = 7;
 const MOBILE_PINCH_MOVE_THRESHOLD = 3;
 const MOBILE_TARGET_PICK_RADIUS_SCALE = 2.25;
-const MOBILE_DOUBLE_TAP_MAX_MS = 520;
+const MOBILE_DOUBLE_TAP_MAX_MS = 620;
 const MOBILE_DOUBLE_TAP_MAX_DISTANCE = 28;
 const MOBILE_ROTATE_ANGLE_THRESHOLD = 0.035;
+const MOBILE_VIEWPORT_CENTER_SEQUENCE = ["bridge", "lmc", "smc"];
 const MOBILE_STAR_BASE_RADIUS_SCALE = 0.5;
 const MOBILE_DRAWER_SWIPE_CLOSE_DISTANCE = 58;
 let mobileControlsOpen = false;
@@ -1043,6 +1044,7 @@ const state = {
   hovered: null,
   locked: null,
   cameraLocked: false,
+  cameraFollowsLockedTarget: false,
   overlaysHidden: false,
   pulsationPaused: false,
 };
@@ -5915,7 +5917,7 @@ function updateSceneLayout() {
   const maxPanX = scene.width * 2.5 * panScale;
   const maxPanY = scene.height * 2.5 * panScale;
 
-  if (state.cameraLocked && state.locked) {
+  if (state.cameraLocked && state.cameraFollowsLockedTarget && state.locked) {
     const target = targetCoordinates(state.locked);
     const offset = projectedOffsetFor(target.x, target.y, target.z, base.scale);
     state.panX = -offset.x;
@@ -6492,7 +6494,7 @@ function updateStats(stats, depth) {
 }
 
 function markProjectionDirty() {
-  if (state.cameraLocked && state.locked) {
+  if (state.cameraLocked && state.cameraFollowsLockedTarget && state.locked) {
     updateSceneLayout();
   }
   updateCoordinateReadout();
@@ -8217,6 +8219,7 @@ function setCoordinateCenter(centerId) {
   state.locked = null;
   state.hovered = null;
   state.cameraLocked = false;
+  state.cameraFollowsLockedTarget = false;
   clearActiveLightcurveInsets();
   applyCoordinateChange();
 }
@@ -8227,10 +8230,25 @@ function clearCoordinateCenterSelection() {
   syncCoordinateFrameControls();
 }
 
-function clearCenterSelectionForTarget(target) {
-  if (state.cameraLocked && (target?.kind === "catalog" || target?.kind === "cluster")) {
-    state.customCoordinateContext = centerContext(target.coordinates.galacticVector);
-    clearCoordinateCenterSelection();
+function clearCenterSelectionForTarget(target, { preserveScreenPosition = false, previousReference = null } = {}) {
+  if (!state.cameraLocked || !target?.coordinates?.galacticVector) return;
+
+  const base = getBaseSceneLayout();
+  const transform = makeProjectionTransform(base.scale);
+  const referenceBeforeChange = previousReference || activeCoordinateReference();
+  const previousCoordinates = preserveScreenPosition ? coordinatesForReference(target, referenceBeforeChange) : null;
+  const previousProjected = previousCoordinates
+    ? projectOffsetWithTransform(previousCoordinates[0], previousCoordinates[1], previousCoordinates[2], transform)
+    : null;
+
+  state.customCoordinateContext = centerContext(target.coordinates.galacticVector);
+  clearCoordinateCenterSelection();
+
+  if (previousProjected) {
+    const nextCoordinates = coordinatesForReference(target, { context: state.customCoordinateContext });
+    const nextProjected = projectOffsetWithTransform(nextCoordinates[0], nextCoordinates[1], nextCoordinates[2], transform);
+    state.panX += previousProjected.x - nextProjected.x;
+    state.panY += previousProjected.y - nextProjected.y;
   }
 }
 
@@ -8744,26 +8762,35 @@ function applyMultiTouchGesture() {
   setCursorClientPosition(metrics.centerX, metrics.centerY);
 }
 
+function cycleMobileViewportCenter() {
+  const currentCenter = state.centerSelection || state.coordinateCenter;
+  const currentIndex = MOBILE_VIEWPORT_CENTER_SEQUENCE.indexOf(currentCenter);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % MOBILE_VIEWPORT_CENTER_SEQUENCE.length : 0;
+  setCoordinateCenter(MOBILE_VIEWPORT_CENTER_SEQUENCE[nextIndex]);
+}
+
 function selectMobileTapTarget(point) {
-  const target = selectTargetAt(point.clientX, point.clientY, {
-    pickRadiusScale: MOBILE_TARGET_PICK_RADIUS_SCALE,
-  });
   const now = performance.now();
   const isDoubleTap =
-    target &&
-    target === lastMobileTap.target &&
     now - lastMobileTap.time <= MOBILE_DOUBLE_TAP_MAX_MS &&
     Math.hypot(point.clientX - lastMobileTap.x, point.clientY - lastMobileTap.y) <= MOBILE_DOUBLE_TAP_MAX_DISTANCE;
 
   if (isDoubleTap) {
-    setCameraLock(true, target);
+    cycleMobileViewportCenter();
     lastMobileTap = { time: 0, x: 0, y: 0, target: null };
     return;
   }
 
-  lastMobileTap = target
-    ? { time: now, x: point.clientX, y: point.clientY, target }
-    : { time: 0, x: 0, y: 0, target: null };
+  const target = nearestTarget(point.clientX, point.clientY, {
+    pickRadiusScale: MOBILE_TARGET_PICK_RADIUS_SCALE,
+  });
+  if (target) {
+    setCameraLock(true, target);
+  } else {
+    clearTargetSelection();
+  }
+
+  lastMobileTap = { time: now, x: point.clientX, y: point.clientY, target };
 }
 
 function handleCanvasTouchPointerDown(event) {
@@ -8928,6 +8955,7 @@ function resetAppState() {
   state.hovered = null;
   state.locked = null;
   state.cameraLocked = false;
+  state.cameraFollowsLockedTarget = false;
   previousCustomView = null;
   clearActiveLightcurveInsets();
   applyUncertaintyRealization({ updateTarget: false });
@@ -9359,6 +9387,7 @@ function selectCatalogSearchTarget(target) {
   state.locked = target;
   state.hovered = null;
   state.cameraLocked = false;
+  state.cameraFollowsLockedTarget = false;
   const zoomChanged = clampZoomToTarget(target);
   setTarget(state.locked);
   if (zoomChanged) syncRangeOutputs();
@@ -9471,6 +9500,7 @@ function handleTargetSearchInput() {
     state.locked = null;
     state.hovered = null;
     state.cameraLocked = false;
+    state.cameraFollowsLockedTarget = false;
     clearActiveLightcurveInsets();
     if (clampZoomToTarget(null)) syncRangeOutputs();
   }
@@ -9497,6 +9527,7 @@ function clearTargetSelection() {
   state.locked = null;
   state.hovered = null;
   state.cameraLocked = false;
+  state.cameraFollowsLockedTarget = false;
   const zoomChanged = clampZoomToTarget(null);
   setTarget(null);
   if (zoomChanged) {
@@ -9505,17 +9536,23 @@ function clearTargetSelection() {
   }
 }
 
-function setCameraLock(enabled, target = state.locked) {
+function setCameraLock(enabled, target = state.locked, { followViewport = !MOBILE_CONTROLS_MEDIA.matches } = {}) {
   markOrientationGridActive();
   let zoomChanged = false;
   if (enabled && target) {
+    const previousReference = activeCoordinateReference();
     state.locked = target;
     state.hovered = null;
     state.cameraLocked = true;
-    clearCenterSelectionForTarget(target);
-    zoomChanged = clampZoomToTarget(target);
+    state.cameraFollowsLockedTarget = Boolean(followViewport);
+    clearCenterSelectionForTarget(target, {
+      preserveScreenPosition: !state.cameraFollowsLockedTarget,
+      previousReference,
+    });
+    if (state.cameraFollowsLockedTarget) zoomChanged = clampZoomToTarget(target);
   } else {
     state.cameraLocked = false;
+    state.cameraFollowsLockedTarget = false;
   }
 
   updateSceneLayout();
@@ -10211,7 +10248,10 @@ function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOn
   state.locked = target;
   state.hovered = null;
   clearCenterSelectionForTarget(state.locked);
-  if (!state.locked) state.cameraLocked = false;
+  if (!state.locked) {
+    state.cameraLocked = false;
+    state.cameraFollowsLockedTarget = false;
+  }
   const zoomChanged = clampZoomToTarget(state.locked);
   setTarget(state.locked);
   if (zoomChanged) syncRangeOutputs();
