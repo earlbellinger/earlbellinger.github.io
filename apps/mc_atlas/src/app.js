@@ -80,6 +80,10 @@ const CATALOG_PULSE_ALL_STARS = true;
 const NAVIGATION_PULSE_THROTTLE_SETTLE_MS = 400;
 const NAVIGATION_PULSE_UPDATE_INTERVAL_MS = 220;
 const NAVIGATION_SLOW_PULSE_PERIOD_SECONDS = 5;
+const SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS = 1000 / 60;
+const SLOW_PULSE_REFRESH_EASE_END_SECONDS = 10;
+const SLOW_PULSE_REFRESH_SAMPLES_PER_CYCLE = 320;
+const SLOW_PULSE_REFRESH_MAX_INTERVAL_MS = 1000;
 const INTRO_LIVE_PULSE_MIN_CYCLE_FRACTION = 0.12;
 const INTRO_LIVE_PULSE_MAX_PERIOD_SECONDS = 3.6;
 const INTRO_LIVE_PULSE_ISOLATION_CELL_PX = 22;
@@ -878,9 +882,11 @@ const BLACKBODY_COLOR_STOPS = [
   [40000, "#91afff"],
 ];
 const BLACKBODY_DISPLAY_WHITEPOINT_TEMPERATURE = 5800;
-const BLACKBODY_DISPLAY_TEMPERATURE_CONTRAST = 3.6;
 const BLACKBODY_DISPLAY_WHITEPOINT_RGB = [255, 255, 255];
-const BLACKBODY_DISPLAY_CHROMA_BOOST = 2.0;
+const BLACKBODY_DISPLAY_CHROMA_BOOST = 1.2;
+const COLOR_CONTRAST_MIN = 1;
+const COLOR_CONTRAST_MAX = 5;
+const COLOR_CONTRAST_DEFAULT = 2;
 const SKY_GRID_CONFIGS = {
   equatorial: {
     id: "equatorial",
@@ -939,6 +945,7 @@ const controls = {
   roll: document.querySelector("#roll"),
   zoom: document.querySelector("#zoom"),
   radiusScale: document.querySelector("#radiusScale"),
+  colorContrast: document.querySelector("#colorContrast"),
   uncertaintySeed: document.querySelector("#uncertaintySeed"),
   panLock: document.querySelector("#panLock"),
   pulsationSpeed: document.querySelector("#pulsationSpeed"),
@@ -954,6 +961,7 @@ const outputs = {
   roll: document.querySelector("#rollValue"),
   zoom: document.querySelector("#zoomValue"),
   radiusScale: document.querySelector("#radiusValue"),
+  colorContrast: document.querySelector("#colorContrastValue"),
   uncertaintySeed: document.querySelector("#uncertaintySeedValue"),
   pulsationSpeed: document.querySelector("#pulsationSpeedValue"),
   pulsationAmplitude: document.querySelector("#pulsationAmplitudeValue"),
@@ -1006,6 +1014,7 @@ const state = {
   panX: 0,
   panY: 0,
   radiusScale: defaultRadiusScaleForPreset(PULSATOR_DEFAULT_PRESET),
+  colorContrast: COLOR_CONTRAST_DEFAULT,
   datasetExposure: {
     cepheids: DATASET_EXPOSURE_DEFAULT,
     rrlyrae: DATASET_EXPOSURE_DEFAULT,
@@ -1101,6 +1110,15 @@ const editableMultiplierConfigs = {
       markRedClumpLayerDirty();
       queueRender();
     },
+  },
+  colorContrast: {
+    label: "color",
+    digits: 2,
+    inputMode: "decimal",
+    min: () => COLOR_CONTRAST_MIN,
+    max: () => COLOR_CONTRAST_MAX,
+    get: () => state.colorContrast,
+    set: (value) => setColorContrast(value),
   },
   uncertaintySeed: {
     label: "seed",
@@ -1235,9 +1253,9 @@ const animationStartMs = performance.now();
 let simulationTimeOffsetDays = 0;
 let pausedSimulationDay = null;
 let previousCustomView = null;
+let lastTargetNavigationStep = null;
 let orientationGridLastActivityMs = animationStartMs;
 let navigationPulseThrottleUntilMs = 0;
-let lastCatalogPulseUpdateMs = Number.NEGATIVE_INFINITY;
 let introPulseThrottleActive = false;
 let introPulseThrottleEndedThisFrame = false;
 let introPulseThrottleRelease = 0;
@@ -1349,7 +1367,6 @@ function beginIntroPulseThrottle() {
   introPulseThrottleGeneration += 1;
   introPulseThrottleStartDay = currentSimulationDay();
   preselectIntroLivePulsators();
-  lastCatalogPulseUpdateMs = Number.NEGATIVE_INFINITY;
 }
 
 function endIntroPulseThrottle({ clearNavigationThrottle = false, skipProjectionThrottle = false } = {}) {
@@ -1373,17 +1390,65 @@ function catalogPulseUpdateIntervalMs() {
   return NAVIGATION_PULSE_UPDATE_INTERVAL_MS * (1 - introPulseThrottleRelease);
 }
 
-function shouldUpdateCatalogPulseState(now = performance.now()) {
-  const updateIntervalMs = catalogPulseUpdateIntervalMs();
+function slowPulseAdaptiveRefreshIntervalMsForPeriod(periodSeconds) {
+  if (
+    !Number.isFinite(periodSeconds) ||
+    periodSeconds <= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS
+  ) {
+    return 0;
+  }
+
+  const ease = smoothStep(
+    (periodSeconds - NAVIGATION_SLOW_PULSE_PERIOD_SECONDS) /
+      Math.max(
+        0.001,
+        SLOW_PULSE_REFRESH_EASE_END_SECONDS - NAVIGATION_SLOW_PULSE_PERIOD_SECONDS,
+      ),
+  );
+  const targetIntervalMs = clamp(
+    (periodSeconds * 1000) / SLOW_PULSE_REFRESH_SAMPLES_PER_CYCLE,
+    SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS,
+    SLOW_PULSE_REFRESH_MAX_INTERVAL_MS,
+  );
   return (
-    !navigationPulseThrottleActive(now) ||
-    updateIntervalMs <= 1 ||
-    now - lastCatalogPulseUpdateMs >= updateIntervalMs
+    SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS +
+    (targetIntervalMs - SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS) * ease
   );
 }
 
-function markCatalogPulseStateUpdated(now = performance.now()) {
-  lastCatalogPulseUpdateMs = now;
+function updateSlowPulseRefreshSchedule(item) {
+  const point = item?.point;
+  if (!item) return;
+  if (!point?.lightCurve) {
+    item.slowPulseScheduleSpeed = state.pulsationSpeed;
+    item.slowPulseScheduleLightCurve = null;
+    item.slowPulseRenderedPeriodSeconds = Infinity;
+    item.slowPulseAdaptiveRefreshIntervalMs = 0;
+    item.slowPulseRefreshPhase = 0;
+    return;
+  }
+  if (
+    item.slowPulseScheduleSpeed === state.pulsationSpeed &&
+    item.slowPulseScheduleLightCurve === point.lightCurve
+  ) {
+    return;
+  }
+
+  const periodSeconds = renderedPulsationPeriodSeconds(point);
+  item.slowPulseScheduleSpeed = state.pulsationSpeed;
+  item.slowPulseScheduleLightCurve = point.lightCurve;
+  item.slowPulseRenderedPeriodSeconds = periodSeconds;
+  item.slowPulseAdaptiveRefreshIntervalMs =
+    slowPulseAdaptiveRefreshIntervalMsForPeriod(periodSeconds);
+  item.slowPulseRefreshPhase = (point.sample || 0) / 100;
+}
+
+function slowPulseRefreshIntervalMs(item, throttleSlowPulse) {
+  if (!item) return 0;
+  updateSlowPulseRefreshSchedule(item);
+  const adaptiveIntervalMs = item.slowPulseAdaptiveRefreshIntervalMs || 0;
+  if (!throttleSlowPulse) return adaptiveIntervalMs;
+  return Math.max(adaptiveIntervalMs, catalogPulseUpdateIntervalMs());
 }
 
 function clampDatasetExposure(value) {
@@ -1400,6 +1465,11 @@ function clampPulsationAmplitudeScale(value) {
 
 function clampRadiusScale(value) {
   return clamp(value, RADIUS_SCALE_MIN, RADIUS_SCALE_MAX);
+}
+
+function clampColorContrast(value) {
+  const numeric = Number(value);
+  return clamp(Number.isFinite(numeric) ? numeric : COLOR_CONTRAST_DEFAULT, COLOR_CONTRAST_MIN, COLOR_CONTRAST_MAX);
 }
 
 function clampUncertaintySeed(value) {
@@ -2741,9 +2811,10 @@ function displayTemperatureFromPhysicalTemperature(temperature) {
   const maxTemperature = BLACKBODY_COLOR_STOPS[BLACKBODY_COLOR_STOPS.length - 1][0];
   const boundedTemperature = clamp(temperature, minTemperature, maxTemperature);
   const logRatio = Math.log(boundedTemperature / BLACKBODY_DISPLAY_WHITEPOINT_TEMPERATURE);
+  const colorContrast = clampColorContrast(state?.colorContrast ?? COLOR_CONTRAST_DEFAULT);
 
   return clamp(
-    BLACKBODY_DISPLAY_WHITEPOINT_TEMPERATURE * Math.exp(logRatio * BLACKBODY_DISPLAY_TEMPERATURE_CONTRAST),
+    BLACKBODY_DISPLAY_WHITEPOINT_TEMPERATURE * Math.exp(logRatio * colorContrast),
     minTemperature,
     maxTemperature,
   );
@@ -2831,6 +2902,22 @@ function intrinsicVMinusIForRow(row) {
   return row[IDX.vMinusI] - reddeningEVIForRow(row);
 }
 
+function recolorCatalogLightCurve(lightCurve, row, baseVMinusI, baseLogLuminosity) {
+  if (!lightCurve || !Number.isFinite(baseVMinusI)) return;
+  if (lightCurve.colors && lightCurve.colorOffsets && lightCurve.logLuminosities) {
+    for (let index = 0; index < lightCurve.colors.length; index += 1) {
+      lightCurve.colors[index] = colorForCatalogState(
+        row,
+        baseVMinusI + lightCurve.colorOffsets[index],
+        lightCurve.logLuminosities[index],
+      );
+    }
+  }
+  const meanColorOffset = Number.isFinite(lightCurve.meanColorOffset) ? lightCurve.meanColorOffset : 0;
+  const meanLogLuminosity = Number.isFinite(baseLogLuminosity) ? baseLogLuminosity : row?.[IDX.logLum];
+  lightCurve.meanColor = colorForCatalogState(row, baseVMinusI + meanColorOffset, meanLogLuminosity);
+}
+
 function updateLightCurveLuminosityColors(point) {
   const lightCurve = point.lightCurve;
   if (!lightCurve || !Number.isFinite(point.currentLogLum)) return;
@@ -2846,18 +2933,7 @@ function updateLightCurveLuminosityColors(point) {
   }
   lightCurve.currentBaseLogLuminosity = point.currentLogLum;
 
-  if (!Number.isFinite(point.vMinusI0)) return;
-  if (lightCurve.colors && lightCurve.colorOffsets && lightCurve.logLuminosities) {
-    for (let index = 0; index < lightCurve.colors.length; index += 1) {
-      lightCurve.colors[index] = colorForCatalogState(
-        point.row,
-        point.vMinusI0 + lightCurve.colorOffsets[index],
-        lightCurve.logLuminosities[index],
-      );
-    }
-  }
-  const meanColorOffset = Number.isFinite(lightCurve.meanColorOffset) ? lightCurve.meanColorOffset : 0;
-  lightCurve.meanColor = colorForCatalogState(point.row, point.vMinusI0 + meanColorOffset, point.currentLogLum);
+  recolorCatalogLightCurve(lightCurve, point.row, point.vMinusI0, point.currentLogLum);
 }
 
 function updateCatalogPointForDistance(point, distance) {
@@ -2901,6 +2977,70 @@ function updateClusterPointForDistance(point, distance) {
     Math.abs(distance - catalogDistance) > 1e-8;
   point.coordinates = hasSampledDistance ? clusterCoordinatesForDistance(row, distance) : point.baseCoordinates;
   point.currentDistance = point.coordinates.distance;
+}
+
+function refreshTemperatureDrivenColors() {
+  colorCache.clear();
+  catalogTemperatureColorCache.clear();
+
+  for (const point of scene.catalog) {
+    if (!point?.row) continue;
+    const logLuminosity = currentCatalogLogLuminosity(point);
+    point.color = colorForCatalogState(point.row, point.vMinusI0, logLuminosity);
+    updateLightCurveLuminosityColors(point);
+    if (point.drawItem) point.drawItem.currentColor = null;
+  }
+
+  const clusterRenderedLuminosity = new Array(scene.clusters.length).fill(0);
+  const clusterRenderedColorSums = scene.clusters.map(() => [0, 0, 0]);
+  for (const point of scene.clusterStars) {
+    const row = point.row;
+    point.color = Number.isFinite(row?.[CS.temperature])
+      ? colorForTemperature(row[CS.temperature])
+      : colorForVMinusI(row?.[CS.vMinusI0], row?.[CS.spectral]);
+    const syntheticRow = point.lightCurve?.syntheticRow;
+    if (syntheticRow) {
+      recolorCatalogLightCurve(point.lightCurve, syntheticRow, syntheticRow[IDX.vMinusI0], syntheticRow[IDX.logLum]);
+    }
+    if (point.drawItem) point.drawItem.currentColor = null;
+
+    const clusterIndex = point.clusterIndex;
+    const starLuminosity = Number.isFinite(row?.[CS.lum]) ? Math.max(0, row[CS.lum]) : 0;
+    const renderedColorSums = clusterRenderedColorSums[clusterIndex];
+    if (starLuminosity > 0 && renderedColorSums) {
+      const rgbValue = cssColorToRgb(point.color);
+      clusterRenderedLuminosity[clusterIndex] += starLuminosity;
+      renderedColorSums[0] += rgbValue[0] * starLuminosity;
+      renderedColorSums[1] += rgbValue[1] * starLuminosity;
+      renderedColorSums[2] += rgbValue[2] * starLuminosity;
+    }
+  }
+
+  for (const cluster of scene.clusters) {
+    const renderedLuminosity = clusterRenderedLuminosity[cluster.index] || 0;
+    const renderedColorSums = clusterRenderedColorSums[cluster.index];
+    cluster.renderedStarGlowRgb =
+      renderedLuminosity > 0 && renderedColorSums
+        ? renderedColorSums.map((value) => Math.round(value / renderedLuminosity))
+        : cssColorToRgb(colorForVMinusI(cluster.row?.[CL.unresolvedVMinusI0], 4));
+    for (const bin of cluster.hrBins || []) {
+      bin.color = Number.isFinite(bin.temperature)
+        ? colorForTemperature(bin.temperature)
+        : colorForVMinusI(bin.vMinusI0, 5);
+    }
+  }
+
+  markCatalogStaticDirty();
+  markClusterStarGpuDirty();
+  setTarget(state.locked || state.hovered);
+  queueRender();
+}
+
+function setColorContrast(value) {
+  const next = clampColorContrast(value);
+  if (Math.abs(state.colorContrast - next) < 1e-6) return;
+  state.colorContrast = next;
+  refreshTemperatureDrivenColors();
 }
 
 function applyUncertaintyRealization({ updateTarget = true } = {}) {
@@ -3877,6 +4017,7 @@ function preselectIntroLivePulsators() {
 }
 
 function shouldIntroThrottleCatalogItem(item) {
+  updateSlowPulseRefreshSchedule(item);
   if (
     item.point.introPulseLiveGeneration === introPulseThrottleGeneration &&
     item.point.introPulseLive
@@ -3884,7 +4025,7 @@ function shouldIntroThrottleCatalogItem(item) {
     return false;
   }
   return (
-    renderedPulsationPeriodSeconds(item.point) >=
+    item.slowPulseRenderedPeriodSeconds >=
     NAVIGATION_SLOW_PULSE_PERIOD_SECONDS * introPulseThrottleRelease
   );
 }
@@ -3892,8 +4033,9 @@ function shouldIntroThrottleCatalogItem(item) {
 function shouldNavigationThrottleCatalogItem(item) {
   const point = item?.point;
   if (!point?.lightCurve) return false;
+  updateSlowPulseRefreshSchedule(item);
   if (introPulseThrottleActive) return shouldIntroThrottleCatalogItem(item);
-  return renderedPulsationPeriodSeconds(point) >= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS;
+  return item.slowPulseRenderedPeriodSeconds >= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS;
 }
 
 function pulsationTooFastForAnimation(point) {
@@ -6934,8 +7076,63 @@ function clusterGlowHalfLightFraction(bins) {
   return Math.max(0.95, previousOuter * 0.5);
 }
 
+function cachedClusterGlowHalfLightFraction(item, bins) {
+  if (!bins || bins.length === 0) return 0.45;
+  if (item.clusterGlowHalfLightBins === bins && Number.isFinite(item.clusterGlowHalfLightFraction)) {
+    return item.clusterGlowHalfLightFraction;
+  }
+  item.clusterGlowHalfLightBins = bins;
+  item.clusterGlowHalfLightFraction = clusterGlowHalfLightFraction(bins);
+  return item.clusterGlowHalfLightFraction;
+}
+
 function clusterGlowOuterRadiusFraction(point) {
   return Math.max(1, point.glowOuterRadiusFraction || 1);
+}
+
+function cachedClusterUnresolvedGlowRgb(item, row) {
+  const colorKey = `${row[CL.unresolvedVMinusI0]}|${state.colorContrast}`;
+  if (item.clusterGlowUnresolvedColorKey === colorKey && item.clusterGlowUnresolvedRgb) {
+    return item.clusterGlowUnresolvedRgb;
+  }
+  item.clusterGlowUnresolvedColorKey = colorKey;
+  item.clusterGlowUnresolvedRgb = cssColorToRgb(colorForVMinusI(row[CL.unresolvedVMinusI0], 4));
+  return item.clusterGlowUnresolvedRgb;
+}
+
+function cachedClusterGlowStopColors(item, radius, profileRadius, scaleRadius, alpha, glowColor) {
+  if (
+    item.clusterGlowStopRadius === radius &&
+    item.clusterGlowStopProfileRadius === profileRadius &&
+    item.clusterGlowStopScaleRadius === scaleRadius &&
+    item.clusterGlowStopAlpha === alpha &&
+    item.clusterGlowStopRed === glowColor[0] &&
+    item.clusterGlowStopGreen === glowColor[1] &&
+    item.clusterGlowStopBlue === glowColor[2] &&
+    item.clusterGlowStopColors
+  ) {
+    return item.clusterGlowStopColors;
+  }
+
+  const stopColors = [];
+  for (let index = 0; index <= CLUSTER_GLOW_PROFILE_STOPS; index += 1) {
+    const stop = index / CLUSTER_GLOW_PROFILE_STOPS;
+    const projectedRadius = stop * radius;
+    const plummerSurface = 1 / (1 + (projectedRadius / scaleRadius) ** 2) ** 2;
+    const edgeUnit = projectedRadius <= profileRadius ? 0 : (projectedRadius - profileRadius) / (radius - profileRadius);
+    const edgeFade = 1 - smoothStep(edgeUnit);
+    stopColors.push(rgbaFromRgb(glowColor, alpha * plummerSurface * edgeFade));
+  }
+
+  item.clusterGlowStopRadius = radius;
+  item.clusterGlowStopProfileRadius = profileRadius;
+  item.clusterGlowStopScaleRadius = scaleRadius;
+  item.clusterGlowStopAlpha = alpha;
+  item.clusterGlowStopRed = glowColor[0];
+  item.clusterGlowStopGreen = glowColor[1];
+  item.clusterGlowStopBlue = glowColor[2];
+  item.clusterGlowStopColors = stopColors;
+  return stopColors;
 }
 
 function drawClusterGlows() {
@@ -6975,9 +7172,9 @@ function drawClusterGlows() {
     const glowOuterRadiusFraction = clusterGlowOuterRadiusFraction(item.point);
     const profileRadius = Math.max(7, item.screenRadius * CLUSTER_GLOW_RADIUS_SCALE * glowOuterRadiusFraction);
     const radius = clusterGlowOuterRadiusFromCoreRadius(item.screenRadius, glowOuterRadiusFraction);
-    const halfLightFraction = bins && bins.length > 0 ? clusterGlowHalfLightFraction(bins) : 0.45;
+    const halfLightFraction = cachedClusterGlowHalfLightFraction(item, bins);
     const scaleRadius = Math.max(0.08, halfLightFraction) * item.screenRadius * CLUSTER_GLOW_RADIUS_SCALE;
-    const unresolvedColor = cssColorToRgb(colorForVMinusI(row[CL.unresolvedVMinusI0], 4));
+    const unresolvedColor = cachedClusterUnresolvedGlowRgb(item, row);
     const renderedColor = item.point.renderedStarGlowRgb || unresolvedColor;
     const collapsedMix = alpha > 0 ? collapsedStarAlpha / alpha : 0;
     const glowColor = mixRgb(unresolvedColor, renderedColor, collapsedMix);
@@ -6990,13 +7187,9 @@ function drawClusterGlows() {
       radius,
     );
 
+    const stopColors = cachedClusterGlowStopColors(item, radius, profileRadius, scaleRadius, alpha, glowColor);
     for (let index = 0; index <= CLUSTER_GLOW_PROFILE_STOPS; index += 1) {
-      const stop = index / CLUSTER_GLOW_PROFILE_STOPS;
-      const projectedRadius = stop * radius;
-      const plummerSurface = 1 / (1 + (projectedRadius / scaleRadius) ** 2) ** 2;
-      const edgeUnit = projectedRadius <= profileRadius ? 0 : (projectedRadius - profileRadius) / (radius - profileRadius);
-      const edgeFade = 1 - smoothStep(edgeUnit);
-      gradient.addColorStop(stop, rgbaFromRgb(glowColor, alpha * plummerSurface * edgeFade));
+      gradient.addColorStop(index / CLUSTER_GLOW_PROFILE_STOPS, stopColors[index]);
     }
 
     ctx.fillStyle = gradient;
@@ -7134,18 +7327,25 @@ function starRadiusFactorForPoint(point) {
   return point.kind === "catalog" || point.kind === "clusterStar" ? PULSATOR_BASE_RADIUS_FACTOR : 1;
 }
 
-function rawStarRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1) {
+function rawStarRadiusBaseFromBase(baseRadius, radiusFactor = 1) {
   return (
     baseRadius *
       PULSATOR_RADIUS_BASE_SCALE *
       state.radiusScale *
-      radiusFactor *
-      Math.sqrt(Math.max(0.000001, areaPulse))
+      radiusFactor
   );
 }
 
+function rawStarRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1) {
+  return rawStarRadiusBaseFromBase(baseRadius, radiusFactor) * Math.sqrt(Math.max(0.000001, areaPulse));
+}
+
+function starRadiusFromRawBase(rawBaseRadius, areaPulse = 1, maxRadius = 28) {
+  return clamp(rawBaseRadius * Math.sqrt(Math.max(0.000001, areaPulse)), 0.18, maxRadius);
+}
+
 function starRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1, maxRadius = 28) {
-  return clamp(rawStarRadiusFromBase(baseRadius, areaPulse, radiusFactor), 0.18, maxRadius);
+  return starRadiusFromRawBase(rawStarRadiusBaseFromBase(baseRadius, radiusFactor), areaPulse, maxRadius);
 }
 
 function starRadius(point, projected, areaPulse = 1) {
@@ -7211,11 +7411,26 @@ function pulseSafeAlphaForPoint(point, lightCurve = null) {
   return pulseSafeAlpha;
 }
 
-function starAlphaFromUnit(alphaUnit, opacityPulse, lightCurve = null, point = null, exposureGain = datasetExposureForPoint(point)) {
+function starBaseAlphaWithPulseHeadroomFromUnit(
+  alphaUnit,
+  lightCurve = null,
+  point = null,
+  exposureGain = datasetExposureForPoint(point),
+) {
   const pulseSafeAlpha = pulseSafeAlphaForPoint(point, lightCurve);
   const exposure = (exposureGain / 10) * DISPLAY_LUMINOSITY_BASE_BOOST * alphaUnit;
-  const baseAlphaWithPulseHeadroom = pulseSafeAlpha * (1 - Math.exp(-exposure / STAR_ALPHA_HEADROOM_EXPOSURE));
+  return pulseSafeAlpha * (1 - Math.exp(-exposure / STAR_ALPHA_HEADROOM_EXPOSURE));
+}
+
+function starAlphaFromBaseAlphaWithPulseHeadroom(baseAlphaWithPulseHeadroom, opacityPulse) {
   return clamp(baseAlphaWithPulseHeadroom * opacityPulse, 0.0005, STAR_PULSE_ALPHA_MAX);
+}
+
+function starAlphaFromUnit(alphaUnit, opacityPulse, lightCurve = null, point = null, exposureGain = datasetExposureForPoint(point)) {
+  return starAlphaFromBaseAlphaWithPulseHeadroom(
+    starBaseAlphaWithPulseHeadroomFromUnit(alphaUnit, lightCurve, point, exposureGain),
+    opacityPulse,
+  );
 }
 
 function redClumpSurfacePhysicalAlpha(item) {
@@ -7303,13 +7518,17 @@ function catalogItemLodAlpha(item) {
 function updateCatalogStaticStyle(item) {
   const radiusFactor = starRadiusFactorForPoint(item.point);
   const lodAlpha = catalogItemLodAlpha(item);
+  const pulsatorPreset = currentPulsatorPreset();
   if (
     item.staticBaseRadius !== item.baseRadius ||
     item.staticAlphaUnit !== item.alphaUnit ||
     item.staticLodAlpha !== lodAlpha ||
     item.staticRadiusFactor !== radiusFactor ||
     item.staticRadiusScale !== state.radiusScale ||
-    item.staticExposure !== datasetExposureForPoint(item.point)
+    item.staticExposure !== datasetExposureForPoint(item.point) ||
+    item.staticLightCurve !== item.point.lightCurve ||
+    item.staticPulsationAmplitudeScale !== state.pulsationAmplitudeScale ||
+    item.staticPulsatorPreset !== pulsatorPreset
   ) {
     item.staticBaseRadius = item.baseRadius;
     item.staticAlphaUnit = item.alphaUnit;
@@ -7317,8 +7536,19 @@ function updateCatalogStaticStyle(item) {
     item.staticRadiusFactor = radiusFactor;
     item.staticRadiusScale = state.radiusScale;
     item.staticExposure = datasetExposureForPoint(item.point);
-    item.staticRadius = starRadiusFromBase(item.baseRadius, 1, radiusFactor);
-    item.staticAlpha = starAlphaFromUnit(item.alphaUnit, 1, item.point.lightCurve, item.point, item.staticExposure) * lodAlpha;
+    item.staticLightCurve = item.point.lightCurve;
+    item.staticPulsationAmplitudeScale = state.pulsationAmplitudeScale;
+    item.staticPulsatorPreset = pulsatorPreset;
+    item.staticRadiusRawBase = rawStarRadiusBaseFromBase(item.baseRadius, radiusFactor);
+    item.staticRadius = starRadiusFromRawBase(item.staticRadiusRawBase);
+    item.staticBaseAlphaWithPulseHeadroom = starBaseAlphaWithPulseHeadroomFromUnit(
+      item.alphaUnit,
+      item.point.lightCurve,
+      item.point,
+      item.staticExposure,
+    );
+    item.staticAlpha =
+      starAlphaFromBaseAlphaWithPulseHeadroom(item.staticBaseAlphaWithPulseHeadroom, 1) * lodAlpha;
   }
   item.navigationPulseThrottle = shouldNavigationThrottleCatalogItem(item);
 }
@@ -7384,19 +7614,81 @@ function drawCatalogBuckets(context, colorBuckets) {
   context.restore();
 }
 
+function catalogStaticVisualBaseMatches(item) {
+  return (
+    item.staticBaseRadius === item.baseRadius &&
+    item.staticAlphaUnit === item.alphaUnit &&
+    item.staticRadiusFactor === starRadiusFactorForPoint(item.point) &&
+    item.staticRadiusScale === state.radiusScale &&
+    item.staticExposure === datasetExposureForPoint(item.point) &&
+    item.staticLightCurve === item.point.lightCurve &&
+    item.staticPulsationAmplitudeScale === state.pulsationAmplitudeScale &&
+    item.staticPulsatorPreset === currentPulsatorPreset() &&
+    Number.isFinite(item.staticRadiusRawBase) &&
+    Number.isFinite(item.staticBaseAlphaWithPulseHeadroom)
+  );
+}
+
+function animatedCatalogVisualStyleMatches(item) {
+  const locked = item.point === state.locked;
+  return (
+    Number.isFinite(item.currentAlpha) &&
+    Number.isFinite(item.currentRadius) &&
+    item.currentVisualStyleBaseRadius === item.baseRadius &&
+    item.currentVisualStyleAlphaUnit === item.alphaUnit &&
+    item.currentVisualStyleExposure === item.staticExposure &&
+    item.currentVisualStyleAreaPulse === item.currentAreaPulse &&
+    item.currentVisualStyleOpacityPulse === item.currentOpacityPulse &&
+    item.currentVisualStyleRadiusScale === state.radiusScale &&
+    item.currentVisualStyleLightCurve === item.point.lightCurve &&
+    item.currentVisualStylePulsatorPreset === currentPulsatorPreset() &&
+    item.currentVisualStyleLocked === locked &&
+    (!locked || item.currentVisualStyleZoom === state.zoom)
+  );
+}
+
+function stampAnimatedCatalogVisualStyle(item) {
+  item.currentVisualStyleBaseRadius = item.baseRadius;
+  item.currentVisualStyleAlphaUnit = item.alphaUnit;
+  item.currentVisualStyleExposure = item.staticExposure;
+  item.currentVisualStyleAreaPulse = item.currentAreaPulse;
+  item.currentVisualStyleOpacityPulse = item.currentOpacityPulse;
+  item.currentVisualStyleRadiusScale = state.radiusScale;
+  item.currentVisualStyleLightCurve = item.point.lightCurve;
+  item.currentVisualStylePulsatorPreset = currentPulsatorPreset();
+  item.currentVisualStyleLocked = item.point === state.locked;
+  item.currentVisualStyleZoom = state.zoom;
+}
+
+function updateAnimatedCatalogVisualStyle(item) {
+  if (catalogStaticVisualBaseMatches(item)) {
+    item.currentAlpha = starAlphaFromBaseAlphaWithPulseHeadroom(
+      item.staticBaseAlphaWithPulseHeadroom,
+      item.currentOpacityPulse,
+    );
+    item.currentRadius =
+      item.point === state.locked
+        ? catalogRenderVisualRadius(item, item.currentAreaPulse)
+        : starRadiusFromRawBase(item.staticRadiusRawBase, item.currentAreaPulse);
+  } else {
+    item.currentAlpha = starAlphaFromUnit(
+      item.alphaUnit,
+      item.currentOpacityPulse,
+      item.point.lightCurve,
+      item.point,
+      item.staticExposure,
+    );
+    item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+  }
+  stampAnimatedCatalogVisualStyle(item);
+}
+
 function updateAnimatedCatalogItem(item, simulationDay) {
   const pulseSample = pulseState(item.point, simulationDay);
   item.currentPulse = pulseSample.pulse;
   item.currentAreaPulse = pulseSample.areaPulse;
   item.currentOpacityPulse = pulseSample.opacityPulse;
-  item.currentAlpha = starAlphaFromUnit(
-    item.alphaUnit,
-    item.currentOpacityPulse,
-    item.point.lightCurve,
-    item.point,
-    item.staticExposure,
-  );
-  item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+  updateAnimatedCatalogVisualStyle(item);
   item.currentColor = pulseSample.color;
   return item.currentColor;
 }
@@ -7411,19 +7703,38 @@ function cachedAnimatedCatalogItemColor(item, simulationDay) {
   ) {
     return updateAnimatedCatalogItem(item, simulationDay);
   }
-  item.currentAlpha = starAlphaFromUnit(
-    item.alphaUnit,
-    item.currentOpacityPulse,
-    item.point.lightCurve,
-    item.point,
-    item.staticExposure,
-  );
-  item.currentRadius = catalogRenderVisualRadius(item, item.currentAreaPulse);
+  if (!animatedCatalogVisualStyleMatches(item)) updateAnimatedCatalogVisualStyle(item);
   return item.currentColor;
 }
 
-function animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState) {
-  if (throttleSlowPulse && item.navigationPulseThrottle && !updateThrottledPulseState) {
+function shouldRefreshAnimatedCatalogItem(item, now, throttleSlowPulse) {
+  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS) return true;
+  if (!item.navigationPulseThrottle) return true;
+  if (item.point === state.locked || item.point === state.hovered) return true;
+
+  const intervalMs = slowPulseRefreshIntervalMs(item, throttleSlowPulse);
+  if (intervalMs <= SLOW_PULSE_REFRESH_FRAME_INTERVAL_MS + 1) return true;
+
+  const refreshBucket = Math.floor((now + intervalMs * item.slowPulseRefreshPhase) / intervalMs);
+  const pulsatorPreset = currentPulsatorPreset();
+  if (
+    item.pulseRefreshBucket === refreshBucket &&
+    item.pulseRefreshSpeed === state.pulsationSpeed &&
+    item.pulseRefreshAmplitudeScale === state.pulsationAmplitudeScale &&
+    item.pulseRefreshPulsatorPreset === pulsatorPreset &&
+    item.currentColor
+  ) {
+    return false;
+  }
+  item.pulseRefreshBucket = refreshBucket;
+  item.pulseRefreshSpeed = state.pulsationSpeed;
+  item.pulseRefreshAmplitudeScale = state.pulsationAmplitudeScale;
+  item.pulseRefreshPulsatorPreset = pulsatorPreset;
+  return true;
+}
+
+function animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, pulseNow) {
+  if (!shouldRefreshAnimatedCatalogItem(item, pulseNow, throttleSlowPulse)) {
     return cachedAnimatedCatalogItemColor(item, simulationDay);
   }
   return updateAnimatedCatalogItem(item, simulationDay);
@@ -7512,13 +7823,13 @@ function drawAnimatedCatalogItems(
   items,
   simulationDay,
   throttleSlowPulse = false,
-  updateThrottledPulseState = true,
+  pulseNow = performance.now(),
 ) {
   const colorBuckets = scene.colorBuckets;
   clearColorBuckets(colorBuckets);
 
   for (const item of items) {
-    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState);
+    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, pulseNow);
     pushColorBucket(colorBuckets, color, item);
   }
 
@@ -7598,10 +7909,10 @@ function rebuildCatalogStaticLayer(simulationDay = currentSimulationDay()) {
   stampCatalogStaticCache(animatedCatalog, staticCatalog, usePulseLod);
 }
 
-function drawCatalogDirect(simulationDay, throttleSlowPulse = false, updateThrottledPulseState = true) {
+function drawCatalogDirect(simulationDay, throttleSlowPulse = false, pulseNow = performance.now()) {
   const colorBuckets = scene.colorBuckets;
   clearColorBuckets(colorBuckets);
-  const now = performance.now();
+  const now = pulseNow;
   const usePulseLod = shouldUseCatalogPulseLod(now);
   const freezeStaticPulse = navigationPulseThrottleActive(now);
   let animatedCatalog = 0;
@@ -7612,7 +7923,7 @@ function drawCatalogDirect(simulationDay, throttleSlowPulse = false, updateThrot
     const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     let color = item.point.color;
     if (animates) {
-      color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState);
+      color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, now);
       animatedCatalog += 1;
     } else {
       color = updateStaticCatalogItem(item, { freezePulse: freezeStaticPulse, simulationDay });
@@ -7625,7 +7936,7 @@ function drawCatalogDirect(simulationDay, throttleSlowPulse = false, updateThrot
   return { animatedCatalog, staticCatalog };
 }
 
-function drawCatalogGpu(simulationDay, throttleSlowPulse = false, updateThrottledPulseState = true) {
+function drawCatalogGpu(simulationDay, throttleSlowPulse = false, pulseNow = performance.now()) {
   const renderer = prepareGpuSceneLayer();
   if (!renderer) return null;
   const staticRenderer = scene.catalogStaticRenderer;
@@ -7640,7 +7951,7 @@ function drawCatalogGpu(simulationDay, throttleSlowPulse = false, updateThrottle
   let count = 0;
 
   for (const item of scene.catalogAnimatedDrawList) {
-    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, updateThrottledPulseState);
+    const color = animatedCatalogItemColor(item, simulationDay, throttleSlowPulse, pulseNow);
     offset = writeCatalogGpuItem(data, offset, item, color);
     count += 1;
   }
@@ -7657,12 +7968,10 @@ function drawCatalog(useStaticCache = true) {
   const simulationDay = currentSimulationDay();
   const pulseNow = performance.now();
   const throttleSlowPulse = navigationPulseThrottleActive(pulseNow);
-  const updateThrottledPulseState = !throttleSlowPulse || shouldUpdateCatalogPulseState(pulseNow);
-  if (throttleSlowPulse && updateThrottledPulseState) markCatalogPulseStateUpdated(pulseNow);
   let animatedCatalog = 0;
   let staticCatalog = 0;
 
-  const gpuResult = drawCatalogGpu(simulationDay, throttleSlowPulse, updateThrottledPulseState);
+  const gpuResult = drawCatalogGpu(simulationDay, throttleSlowPulse, pulseNow);
   if (gpuResult) {
     ({ animatedCatalog, staticCatalog } = gpuResult);
   } else if (useStaticCache && PULSE_LOD_ENABLED && catalogStaticCacheMatches()) {
@@ -7674,7 +7983,7 @@ function drawCatalog(useStaticCache = true) {
       scene.catalogAnimatedDrawList,
       simulationDay,
       throttleSlowPulse,
-      updateThrottledPulseState,
+      pulseNow,
     );
   } else if (useStaticCache && PULSE_LOD_ENABLED) {
     rebuildCatalogStaticLayer(simulationDay);
@@ -7685,13 +7994,13 @@ function drawCatalog(useStaticCache = true) {
       scene.catalogAnimatedDrawList,
       simulationDay,
       throttleSlowPulse,
-      updateThrottledPulseState,
+      pulseNow,
     );
   } else {
     ({ animatedCatalog, staticCatalog } = drawCatalogDirect(
       simulationDay,
       throttleSlowPulse,
-      updateThrottledPulseState,
+      pulseNow,
     ));
   }
 
@@ -7932,6 +8241,7 @@ function syncOrientationPresetButtons() {
 function syncRangeOutputs() {
   state.zoom = clampZoomScale(state.zoom, { allowTargetZoom: Boolean(selectedTargetForDeepZoom()) });
   state.radiusScale = clampRadiusScale(state.radiusScale);
+  state.colorContrast = clampColorContrast(state.colorContrast);
   setPulsationSpeed(state.pulsationSpeed);
   state.pulsationAmplitudeScale = clampPulsationAmplitudeScale(state.pulsationAmplitudeScale);
   syncEditableMultiplierOutput("yaw", radiansToDegrees(state.yaw));
@@ -7939,6 +8249,7 @@ function syncRangeOutputs() {
   syncEditableMultiplierOutput("roll", radiansToDegrees(state.roll));
   syncEditableMultiplierOutput("zoom", state.zoom);
   syncEditableMultiplierOutput("radiusScale", state.radiusScale);
+  syncEditableMultiplierOutput("colorContrast", state.colorContrast);
   syncEditableMultiplierOutput("uncertaintySeed", state.uncertaintySeed);
   syncEditableMultiplierOutput("pulsationSpeed", state.pulsationSpeed);
   syncEditableMultiplierOutput("pulsationAmplitude", state.pulsationAmplitudeScale);
@@ -7951,6 +8262,7 @@ function syncRangeOutputs() {
   controls.roll.value = String(radiansToDegrees(state.roll));
   controls.zoom.value = String(Math.log10(clampZoomScale(state.zoom)));
   controls.radiusScale.value = String(Math.log10(state.radiusScale));
+  controls.colorContrast.value = String(state.colorContrast);
   controls.uncertaintySeed.value = String(state.uncertaintySeed);
   controls.pulsationSpeed.value = String(state.pulsationSpeedLog);
   controls.pulsationAmplitude.value = String(Math.log10(state.pulsationAmplitudeScale));
@@ -7960,6 +8272,7 @@ function syncRangeOutputs() {
     controls.roll,
     controls.zoom,
     controls.radiusScale,
+    controls.colorContrast,
     controls.uncertaintySeed,
     controls.pulsationSpeed,
     controls.pulsationAmplitude,
@@ -8216,6 +8529,7 @@ function setCoordinateCenter(centerId) {
   state.coordinateCenter = centerId;
   state.centerSelection = centerId;
   state.customCoordinateContext = null;
+  lastTargetNavigationStep = null;
   state.locked = null;
   state.hovered = null;
   state.cameraLocked = false;
@@ -8781,6 +9095,7 @@ function resetMobileViewportToDefault() {
   state.cameraLocked = false;
   state.cameraFollowsLockedTarget = false;
   previousCustomView = null;
+  lastTargetNavigationStep = null;
   updateSceneLayout();
   syncRangeOutputs();
   syncCoordinateFrameControls();
@@ -8804,6 +9119,7 @@ function selectMobileTapTarget(point) {
     pickRadiusScale: MOBILE_TARGET_PICK_RADIUS_SCALE,
   });
   if (target) {
+    lastTargetNavigationStep = null;
     state.locked = target;
     state.hovered = null;
     state.cameraLocked = false;
@@ -8950,6 +9266,7 @@ function resetAppState() {
   };
   state.depthScale = 1;
   state.density = 100;
+  state.colorContrast = COLOR_CONTRAST_DEFAULT;
   resetSimulationClock();
   setPulsationSpeed(INITIAL_PULSATION_SPEED, { preserveDay: false });
   state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(PULSATOR_DEFAULT_PRESET);
@@ -8982,8 +9299,10 @@ function resetAppState() {
   state.cameraLocked = false;
   state.cameraFollowsLockedTarget = false;
   previousCustomView = null;
+  lastTargetNavigationStep = null;
   clearActiveLightcurveInsets();
   applyUncertaintyRealization({ updateTarget: false });
+  refreshTemperatureDrivenColors();
 
   updateSceneLayout();
   syncTargetSearchInput();
@@ -9409,6 +9728,7 @@ function clampZoomToTarget(target = selectedTargetForDeepZoom()) {
 
 function selectCatalogSearchTarget(target) {
   if (!targetIsPickable(target)) return;
+  lastTargetNavigationStep = null;
   state.locked = target;
   state.hovered = null;
   state.cameraLocked = false;
@@ -9533,6 +9853,7 @@ function handleTargetSearchInput() {
   }
 
   if (state.locked || state.hovered || state.cameraLocked) {
+    lastTargetNavigationStep = null;
     state.locked = null;
     state.hovered = null;
     state.cameraLocked = false;
@@ -9560,6 +9881,7 @@ function handleTargetSearchKeydown(event) {
 }
 
 function clearTargetSelection() {
+  lastTargetNavigationStep = null;
   state.locked = null;
   state.hovered = null;
   state.cameraLocked = false;
@@ -10125,6 +10447,47 @@ function nearestTargetNavigationCandidateIndex(candidates) {
   return bestIndex;
 }
 
+function targetNavigationStepDirection(direction) {
+  if (direction < 0) return -1;
+  if (direction > 0) return 1;
+  return 0;
+}
+
+function targetNavigationCandidateIndex(candidates, current, direction) {
+  if (!candidates.length) return -1;
+  const currentIndex = current ? candidates.findIndex((candidate) => candidate.target === current) : -1;
+  if (currentIndex >= 0) return positiveModulo(currentIndex + direction, candidates.length);
+  return nearestTargetNavigationCandidateIndex(candidates);
+}
+
+function targetNavigationWouldBacktrack(target, current, direction) {
+  return Boolean(
+    target &&
+      current &&
+      lastTargetNavigationStep &&
+      lastTargetNavigationStep.direction === direction &&
+      lastTargetNavigationStep.from === target &&
+      lastTargetNavigationStep.to === current,
+  );
+}
+
+function steppedTargetNavigationTarget(candidates, current, direction, { avoidBacktrack = false } = {}) {
+  const startIndex = targetNavigationCandidateIndex(candidates, current, direction);
+  if (startIndex < 0) return null;
+  const startTarget = candidates[startIndex]?.target || null;
+  if (!avoidBacktrack || !targetNavigationWouldBacktrack(startTarget, current, direction)) {
+    return startTarget;
+  }
+
+  for (let offset = 1; offset < candidates.length; offset += 1) {
+    const target = candidates[positiveModulo(startIndex + offset * direction, candidates.length)]?.target || null;
+    if (!target || target === current) continue;
+    if (!targetNavigationWouldBacktrack(target, current, direction)) return target;
+  }
+
+  return startTarget;
+}
+
 function centerViewportOnTarget(target) {
   const base = getBaseSceneLayout();
   const coordinates = targetCoordinates(target);
@@ -10158,7 +10521,21 @@ function selectNavigationTarget(target, { centerViewport = false } = {}) {
   }
 }
 
+function selectSteppedNavigationTarget(target, current, direction, options = {}) {
+  if (!target) return false;
+  lastTargetNavigationStep = {
+    from: current || null,
+    to: target,
+    direction,
+  };
+  selectNavigationTarget(target, options);
+  return true;
+}
+
 function stepTargetNavigation(direction) {
+  const stepDirection = targetNavigationStepDirection(direction);
+  if (!stepDirection) return;
+
   const visibleCandidates = buildTargetNavigationCandidates();
   const current = state.locked || state.hovered;
   const visibleCurrentIndex = current
@@ -10166,23 +10543,22 @@ function stepTargetNavigation(direction) {
     : -1;
 
   if (visibleCandidates.length && (visibleCurrentIndex < 0 || visibleCandidates.length > 1)) {
-    const nextVisibleIndex =
-      visibleCurrentIndex >= 0
-        ? positiveModulo(visibleCurrentIndex + direction, visibleCandidates.length)
-        : nearestTargetNavigationCandidateIndex(visibleCandidates);
-    selectNavigationTarget(visibleCandidates[nextVisibleIndex]?.target);
-    return;
+    const visibleTarget = steppedTargetNavigationTarget(visibleCandidates, current, stepDirection, {
+      avoidBacktrack: true,
+    });
+    if (!targetNavigationWouldBacktrack(visibleTarget, current, stepDirection)) {
+      selectSteppedNavigationTarget(visibleTarget, current, stepDirection);
+      return;
+    }
   }
 
   const fullCandidates = buildFullTargetNavigationCandidates();
   if (!fullCandidates.length) return;
-  const currentIndex = current ? fullCandidates.findIndex((candidate) => candidate.target === current) : -1;
-  const nextIndex =
-    currentIndex >= 0
-      ? positiveModulo(currentIndex + direction, fullCandidates.length)
-      : nearestTargetNavigationCandidateIndex(fullCandidates);
+  const fullTarget = steppedTargetNavigationTarget(fullCandidates, current, stepDirection, {
+    avoidBacktrack: true,
+  });
 
-  selectNavigationTarget(fullCandidates[nextIndex]?.target, { centerViewport: true });
+  selectSteppedNavigationTarget(fullTarget, current, stepDirection, { centerViewport: true });
 }
 
 function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
@@ -10281,6 +10657,7 @@ function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOn
   }
 
   const wasCameraLocked = state.cameraLocked;
+  lastTargetNavigationStep = null;
   state.locked = target;
   state.hovered = null;
   clearCenterSelectionForTarget(state.locked);
@@ -10333,6 +10710,10 @@ function resetRangeControl(controlId) {
       markRedClumpLayerDirty();
       syncRangeOutputs();
       queueRender();
+      break;
+    case "colorContrast":
+      setColorContrast(COLOR_CONTRAST_DEFAULT);
+      syncRangeOutputs();
       break;
     case "uncertaintySeed":
       setUncertaintySeed(DEFAULT_UNCERTAINTY_SEED);
@@ -10542,6 +10923,12 @@ function bindControls() {
     syncRangeOutputs();
     queueRender();
   });
+  const updateColorContrast = () => {
+    setColorContrast(controls.colorContrast.value);
+    syncRangeOutputs();
+  };
+  controls.colorContrast.addEventListener("input", updateColorContrast);
+  controls.colorContrast.addEventListener("change", updateColorContrast);
   controls.uncertaintySeed.addEventListener("input", () => {
     requestUncertaintySeed(controls.uncertaintySeed.value);
   });

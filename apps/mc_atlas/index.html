@@ -152,6 +152,11 @@
             <output id="radiusValue" class="editableMultiplier" data-multiplier-output="radiusScale"><button class="editableMultiplierValue" type="button" aria-label="Edit radius value">1.00</button><span class="editableMultiplierUnit">x</span></output>
           </div>
           <div class="range">
+            <span id="colorContrastLabel" class="rangeReset" data-reset-control="colorContrast" role="button" tabindex="0" title="Reset color contrast">Color</span>
+            <input id="colorContrast" type="range" min="1" max="5" step="any" value="2" aria-labelledby="colorContrastLabel" />
+            <output id="colorContrastValue" class="editableMultiplier" data-multiplier-output="colorContrast"><button class="editableMultiplierValue" type="button" aria-label="Edit color value">2.00</button><span class="editableMultiplierUnit">x</span></output>
+          </div>
+          <div class="range">
             <span id="uncertaintySeedLabel" class="rangeReset" data-reset-control="uncertaintySeed" role="button" tabindex="0" title="Reset seed">Seed</span>
             <input id="uncertaintySeed" type="range" min="0" max="100" step="1" value="0" aria-labelledby="uncertaintySeedLabel" />
             <output id="uncertaintySeedValue" class="editableMultiplier" data-multiplier-output="uncertaintySeed"><button class="editableMultiplierValue" type="button" aria-label="Edit seed value">0</button><span class="editableMultiplierUnit"></span></output>
@@ -200,6 +205,7 @@
           <h2>Sources</h2>
           <div id="sourceLinks" class="sources"></div>
           <p class="note">Spectral class is inferred from dereddened V-I color for OGLE stars and from MIST temperatures for synthetic cluster stars before D58 blackbody rendering.</p>
+          <p class="note">I am grateful to Ebraheem Farag and Maria Korolik for useful suggestions and feedback.</p>
         </section>
       </aside>
 
