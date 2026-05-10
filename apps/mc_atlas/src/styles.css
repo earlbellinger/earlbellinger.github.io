@@ -397,7 +397,7 @@ h2 {
 }
 
 .check + .check {
-  margin-top: 7px;
+  margin-top: 4px;
 }
 
 .check > input[type="checkbox"] {
@@ -519,7 +519,7 @@ h2 {
 }
 
 .range + .range {
-  margin-top: 7px;
+  margin-top: 4px;
 }
 
 .orbitRange {
@@ -1199,7 +1199,7 @@ h2 {
 
 .coordinateLocalRow {
   align-items: flex-start;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .coordinateReadout .skyCoordinate,
@@ -1251,8 +1251,18 @@ h2 {
 }
 
 .coordinateReadout .localCoordinate {
-  gap: 3px;
-  padding: 4px 5px;
+  --local-value-width: 8.7ch;
+  gap: 2px;
+  padding: 4px 4px;
+}
+
+.coordinateReadout .localCoordinate[data-axis="x"],
+.coordinateReadout .localCoordinate[data-axis="y"] {
+  --local-value-width: 8.4ch;
+}
+
+.coordinateReadout .localCoordinate[data-axis="d"] {
+  --local-value-width: 8.8ch;
 }
 
 .coordinateReadout b {
@@ -1272,7 +1282,7 @@ h2 {
 }
 
 .coordinateReadout .localCoordinate strong {
-  width: 10ch;
+  width: var(--local-value-width);
 }
 
 .scaleBar {
@@ -1597,7 +1607,8 @@ h2 {
   .mobileControlsToggle,
   .mobilePresetToggle {
     position: fixed;
-    bottom: max(14px, env(safe-area-inset-bottom));
+    top: max(14px, env(safe-area-inset-top));
+    bottom: auto;
     z-index: 7;
     display: inline-grid;
     place-items: center;
@@ -1645,7 +1656,7 @@ h2 {
   .mobile-controls-open .mobilePresetToggle {
     opacity: 0;
     pointer-events: none;
-    transform: translateY(8px);
+    transform: translateY(-8px);
   }
 
   .mobileTargetPreview {
@@ -1834,13 +1845,13 @@ h2 {
     transform: translateY(0);
   }
 
-  .panLockOption {
+  .coordinateHud .panLockOption {
     display: none;
   }
 
   .scaleBar {
     right: max(14px, env(safe-area-inset-right));
-    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 62px);
+    bottom: max(14px, env(safe-area-inset-bottom));
     z-index: 4;
     transition: opacity 160ms ease;
   }

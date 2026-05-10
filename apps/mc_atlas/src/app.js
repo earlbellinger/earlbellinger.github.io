@@ -45,6 +45,10 @@ const VIEWPORT_YAW_STEP_DEGREES = 5;
 const VIEWPORT_KEY_FAST_MULTIPLIER = 2.5;
 const TARGET_NAVIGATION_HILBERT_BITS = 10;
 const TARGET_NAVIGATION_VIEWPORT_MARGIN = 24;
+const TARGET_NAVIGATION_RECENT_LIMIT = 16;
+const TARGET_PICK_TILE_SIZE = 48;
+const HOVER_TARGET_PANEL_DELAY_MS = 120;
+const CURSOR_READOUT_THROTTLE_MS = 80;
 const ORBIT_DRAG_ZOOM_DAMPING = 0.5;
 const ORBIT_DRAG_MIN_SENSITIVITY = 0.18;
 const PULSATOR_RADIUS_BASE_SCALE = 0.254016;
@@ -112,6 +116,7 @@ const CATALOG_WORLD_PULSE_FULL_UPLOAD_DIRTY_FRACTION = 0.55;
 const CATALOG_WORLD_PULSE_FULL_UPLOAD_RANGE_LIMIT = 160;
 const CLUSTER_STAR_GPU_VERTEX_FLOATS = 9;
 const RED_CLUMP_GPU_VERTEX_FLOATS = 6;
+const RED_CLUMP_SOURCE_STAR_COUNT_LABEL = "2.3M";
 const RED_CLUMP_ZOOM_FADE_START = 75;
 const RED_CLUMP_ZOOM_FADE_END = 350;
 // User-facing yaw zero is the observer-side OGLE view.
@@ -310,7 +315,7 @@ const COORDINATE_FRAMES = [
     axes: [
       ["x", "east"],
       ["y", "north"],
-      ["d", "distance from Sun"],
+      ["d", "from Sun"],
     ],
   },
   {
@@ -1186,6 +1191,9 @@ const scene = {
   catalogDrawList: [],
   catalogDrawListScreenProjected: true,
   catalogProjectionFastPending: false,
+  projectionCacheVersion: 0,
+  targetPickIndex: null,
+  targetPickIndexVersion: -1,
   catalogAnimatedDrawList: [],
   catalogWorldStaticDrawList: [],
   redClumpDrawList: [],
@@ -1242,7 +1250,13 @@ let movedDuringDrag = false;
 let touchGesture = null;
 let drawerSwipeGesture = null;
 const activeTouchPointers = new Map();
-let hoverTimer = 0;
+let hoverPickFrame = 0;
+let pendingHoverPickX = 0;
+let pendingHoverPickY = 0;
+let hasPendingHoverPick = false;
+let hoverDetailTimer = 0;
+let cursorReadoutTimer = 0;
+let lastCursorReadoutMs = 0;
 let hoverSuppressedUntil = 0;
 let pointerMode = "orbit";
 let loadingProgress = 0;
@@ -1778,6 +1792,31 @@ function formatPeriodDays(row) {
     return `${formatNumberCompact(period, periodDigits)} d`;
   }
   return `${formatNumber(period, 4)} d`;
+}
+
+function formatPulsationClockSeconds(point) {
+  const seconds = renderedPulsationPeriodSeconds(point);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "n/a";
+  if (seconds >= SECONDS_PER_DAY) {
+    const days = seconds / SECONDS_PER_DAY;
+    return `${formatNumberCompact(days, days >= 10 ? 1 : 2)} d`;
+  }
+  if (seconds >= 60) {
+    const minutes = seconds / 60;
+    return `${formatNumberCompact(minutes, minutes >= 10 ? 1 : 2)} m`;
+  }
+  if (seconds >= 1) {
+    return `${formatNumberCompact(seconds, seconds >= 10 ? 1 : 2)} s`;
+  }
+  if (seconds >= 0.001) {
+    const milliseconds = seconds * 1000;
+    return `${formatNumberCompact(milliseconds, milliseconds >= 10 ? 1 : 2)} ms`;
+  }
+  return `${formatNumberCompact(seconds * 1000000, 1)} us`;
+}
+
+function formatTargetPeriod(point) {
+  return `${formatPeriodDays(point.row)}\u00a0\u00a0\u00a0(🕒 = ${formatPulsationClockSeconds(point)})`;
 }
 
 function formatPulsationDuration(seconds) {
@@ -3287,6 +3326,7 @@ function adjustPulsationSpeed(direction, fast = false) {
   setPulsationSpeed(state.pulsationSpeed * factor);
   markCatalogStaticDirty();
   syncRangeOutputs();
+  refreshActiveTargetPanel();
   queueRender();
 }
 
@@ -4635,7 +4675,12 @@ function createClusterHrDiagram(target) {
   yLabel.setAttribute("y", String(padTop + plotHeight / 2));
   yLabel.setAttribute("text-anchor", "middle");
   yLabel.setAttribute("transform", `rotate(-90 9 ${padTop + plotHeight / 2})`);
-  yLabel.textContent = "log L_I [Lsun]";
+  yLabel.setAttribute("aria-label", "log L over L solar");
+  const yLabelSolar = createSvgElement("tspan");
+  yLabelSolar.setAttribute("baseline-shift", "sub");
+  yLabelSolar.setAttribute("font-size", "0.72em");
+  yLabelSolar.textContent = "⊙";
+  yLabel.append("log L/L", yLabelSolar);
   axisGroup.append(xLabel, yLabel);
 
   const binGroup = createSvgElement("g");
@@ -7140,6 +7185,13 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
 
   if (!redClumpProjectsInShader) markRedClumpLayerDirty();
   markCatalogStaticDirty();
+  scene.projectionCacheVersion += 1;
+  if (scene.catalogDrawListScreenProjected) {
+    rebuildTargetPickIndex();
+  } else {
+    scene.targetPickIndex = null;
+    scene.targetPickIndexVersion = -1;
+  }
   if (PERF_HUD_ENABLED) {
     const projectionMs = performance.now() - projectionStartMs;
     perfState.projectionMs = perfState.projectionMs
@@ -8995,6 +9047,7 @@ function updateCoordinateReadout() {
   frame.axes.forEach((axis, index) => {
     const item = document.createElement("span");
     item.className = "localCoordinate";
+    item.dataset.axis = axis[0];
     const symbol = document.createElement("b");
     symbol.textContent = axis[0];
 
@@ -9229,6 +9282,7 @@ function syncDatasetPresetStateChange() {
   syncRangeOutputs();
   invalidateActivePointLists();
   clearHiddenTargetSelection();
+  refreshActiveTargetPanel();
   markCatalogStaticDirty();
   markRedClumpLayerDirty();
   markProjectionDirty();
@@ -9386,19 +9440,40 @@ function setDragStart(event) {
   };
 }
 
-function setCursorClientPosition(clientX, clientY) {
-  state.cursorClientX = clientX;
-  state.cursorClientY = clientY;
-  updateCoordinateReadout();
+function scheduleCoordinateReadoutUpdate() {
+  if (cursorReadoutTimer) return;
+  const now = performance.now();
+  const elapsed = now - lastCursorReadoutMs;
+  const delay = Math.max(0, CURSOR_READOUT_THROTTLE_MS - elapsed);
+  cursorReadoutTimer = window.setTimeout(() => {
+    cursorReadoutTimer = 0;
+    lastCursorReadoutMs = performance.now();
+    updateCoordinateReadout();
+  }, delay);
 }
 
-function setCursorPosition(event) {
-  setCursorClientPosition(event.clientX, event.clientY);
+function setCursorClientPosition(clientX, clientY, { throttleReadout = false } = {}) {
+  state.cursorClientX = clientX;
+  state.cursorClientY = clientY;
+  if (throttleReadout) {
+    scheduleCoordinateReadoutUpdate();
+  } else {
+    window.clearTimeout(cursorReadoutTimer);
+    cursorReadoutTimer = 0;
+    lastCursorReadoutMs = performance.now();
+    updateCoordinateReadout();
+  }
+}
+
+function setCursorPosition(event, options = {}) {
+  setCursorClientPosition(event.clientX, event.clientY, options);
 }
 
 function clearCursorPosition() {
   state.cursorClientX = null;
   state.cursorClientY = null;
+  window.clearTimeout(cursorReadoutTimer);
+  cursorReadoutTimer = 0;
   updateCoordinateReadout();
 }
 
@@ -9545,7 +9620,7 @@ function finishMobileTouchGesture() {
   dragStart = null;
   movedDuringDrag = false;
   canvas.classList.remove("is-dragging");
-  window.clearTimeout(hoverTimer);
+  cancelHoverPick();
   hoverSuppressedUntil = performance.now() + 350;
 }
 
@@ -9673,7 +9748,8 @@ function handleCanvasTouchPointerDown(event) {
   if (!isMobileTouchPointer(event)) return false;
   event.preventDefault();
   requestMobileFullscreen();
-  window.clearTimeout(hoverTimer);
+  cancelHoverPick();
+  cancelHoverTargetPanelUpdate();
   cancelIntroRotation();
   cancelAxisSpinAnimation();
   activeTouchPointers.set(event.pointerId, touchPointFromEvent(event));
@@ -9782,7 +9858,8 @@ function resetAppState() {
   cancelAxisSpinAnimation();
   introCloudLabelAnimation = null;
   datasetPresetPreview = null;
-  window.clearTimeout(hoverTimer);
+  cancelHoverPick();
+  cancelHoverTargetPanelUpdate();
   markOrientationGridActive();
 
   state.yaw = 0;
@@ -10455,10 +10532,59 @@ function setCameraLock(enabled, target = state.locked, { followViewport = !MOBIL
   markProjectionDirty();
 }
 
-function setTarget(target) {
+function refreshActiveTargetPanel() {
+  const current = state.locked || state.hovered;
+  if (current) setTarget(current);
+}
+
+function cancelHoverTargetPanelUpdate() {
+  window.clearTimeout(hoverDetailTimer);
+  hoverDetailTimer = 0;
+}
+
+function scheduleHoverTargetPanelUpdate(target) {
+  cancelHoverTargetPanelUpdate();
+  if (state.locked) return;
+  hoverDetailTimer = window.setTimeout(() => {
+    hoverDetailTimer = 0;
+    if (state.locked || target !== state.hovered) return;
+    setTarget(target, { markCatalogDirty: false });
+  }, HOVER_TARGET_PANEL_DELAY_MS);
+}
+
+function cancelHoverPick() {
+  if (hoverPickFrame) {
+    window.cancelAnimationFrame(hoverPickFrame);
+    hoverPickFrame = 0;
+  }
+  hasPendingHoverPick = false;
+}
+
+function runHoverPick() {
+  hoverPickFrame = 0;
+  if (!hasPendingHoverPick) return;
+  hasPendingHoverPick = false;
+  if (performance.now() < hoverSuppressedUntil || !projectionCacheReadyForHoverPicking()) return;
+
+  const nextHovered = nearestTarget(pendingHoverPickX, pendingHoverPickY, { refreshProjection: false });
+  if (nextHovered === state.hovered) return;
+  state.hovered = nextHovered;
+  scheduleCoordinateReadoutUpdate();
+  scheduleHoverTargetPanelUpdate(state.hovered);
+  queueRender();
+}
+
+function scheduleHoverPick(clientX, clientY) {
+  pendingHoverPickX = clientX;
+  pendingHoverPickY = clientY;
+  hasPendingHoverPick = true;
+  if (!hoverPickFrame) hoverPickFrame = window.requestAnimationFrame(runHoverPick);
+}
+
+function setTarget(target, { markCatalogDirty = true } = {}) {
   const current = target || state.locked || state.hovered;
   clearActiveLightcurveInsets();
-  markCatalogStaticDirty();
+  if (markCatalogDirty) markCatalogStaticDirty();
   elements.target.classList.remove("hasMatches");
   elements.target.replaceChildren();
 
@@ -10543,6 +10669,11 @@ function setTarget(target) {
   updateCoordinateReadout();
 }
 
+function targetCoordinateLabel(frame, reference, { units = false } = {}) {
+  const label = frame.id === "atlas" ? "3D Pos" : `${reference.label} ${frame.label}`;
+  return units ? `${label} [kpc]` : label;
+}
+
 function targetRowsForCatalog(target) {
   const row = target.row;
   const spec = scene.spectralClasses[row[IDX.spectral]].id;
@@ -10606,7 +10737,7 @@ function targetRowsForCatalog(target) {
   const radius = Number.isFinite(target.currentRadius) ? target.currentRadius : row[IDX.radius];
   const details = [
     ["Type", `${dataset}, ${location}, ${spec}`],
-    ["Period", formatPeriodDays(row)],
+    ["Period", formatTargetPeriod(target)],
     ["Lum", `${formatNumber(luminosity, 0)} Lsun`],
     ["Radius", `${formatNumber(radius, 1)} Rsun`],
     ["vs RC", `${formatNumber(luminosity / RED_CLUMP_LUMINOSITY, 1)}x`],
@@ -10692,7 +10823,7 @@ function targetRowsForCatalog(target) {
         : "template phase";
   details.push(["T0", t0Label], ["Fourier", `R21 ${formatNumber(params.r21, 3)}, R31 ${formatNumber(params.r31, 3)}`]);
   details.push(
-    [`${reference.label} ${frame.label}`, formatCoordinateTriplet(activeCoordinates)],
+    [targetCoordinateLabel(frame, reference), formatCoordinateTriplet(activeCoordinates)],
     ["RA, Dec", `${formatNumber(row[IDX.raDeg], 4)}°, ${formatNumber(row[IDX.decDeg], 4)}°`],
     ["Gal l,b", `${formatNumber(row[IDX.galLonDeg], 4)}°, ${formatNumber(row[IDX.galLatDeg], 4)}°`],
   );
@@ -10710,7 +10841,7 @@ function targetRowsForRedClump(target) {
     ["Radius ref", `${formatNumber(RED_CLUMP_RADIUS, 1)} Rsun`],
     ["Dist", `${formatNumber(row[RC.distance], 2)} kpc`],
     ["Gal l,b", `${formatNumber(row[RC.lon], 2)}°, ${formatNumber(row[RC.lat], 2)}°`],
-    [`${reference.label} ${frame.label}`, formatCoordinateTriplet(activeCoordinates)],
+    [targetCoordinateLabel(frame, reference), formatCoordinateTriplet(activeCoordinates)],
   ];
   if (Number.isFinite(row[RC.densityCount])) {
     details.splice(4, 0, ["RC-like count", formatInteger(row[RC.densityCount])]);
@@ -10773,7 +10904,7 @@ function targetRowsForCluster(target) {
           ? `${row[CL.qualityFlags]} (FC ${row[CL.flagsCount]})`
           : row[CL.qualityFlags],
     ],
-    [`${reference.label} ${frame.label} [kpc]`, formatCoordinateTriplet(activeCoordinates)],
+    [targetCoordinateLabel(frame, reference, { units: true }), formatCoordinateTriplet(activeCoordinates)],
     ["RA, Dec [deg]", `${formatNumber(row[CL.raDeg], 4)}°, ${formatNumber(row[CL.decDeg], 4)}°`],
     ["Gal l,b [deg]", `${formatNumber(row[CL.galLonDeg], 4)}°, ${formatNumber(row[CL.galLatDeg], 4)}°`],
   ];
@@ -10997,29 +11128,37 @@ function targetNavigationCandidateIndex(candidates, current, direction) {
   return nearestTargetNavigationCandidateIndex(candidates);
 }
 
-function targetNavigationWouldBacktrack(target, current, direction) {
-  return Boolean(
-    target &&
-      current &&
-      lastTargetNavigationStep &&
-      lastTargetNavigationStep.direction === direction &&
-      lastTargetNavigationStep.from === target &&
-      lastTargetNavigationStep.to === current,
-  );
+function targetNavigationRecentTargets(current, direction) {
+  if (
+    !current ||
+    !lastTargetNavigationStep ||
+    lastTargetNavigationStep.direction !== direction ||
+    lastTargetNavigationStep.to !== current
+  ) {
+    return [];
+  }
+  if (Array.isArray(lastTargetNavigationStep.recentTargets)) {
+    return lastTargetNavigationStep.recentTargets;
+  }
+  return [lastTargetNavigationStep.from, lastTargetNavigationStep.to].filter(Boolean);
 }
 
-function steppedTargetNavigationTarget(candidates, current, direction, { avoidBacktrack = false } = {}) {
+function targetNavigationWouldRevisit(target, current, direction) {
+  return Boolean(target && targetNavigationRecentTargets(current, direction).includes(target));
+}
+
+function steppedTargetNavigationTarget(candidates, current, direction, { avoidRecent = false } = {}) {
   const startIndex = targetNavigationCandidateIndex(candidates, current, direction);
   if (startIndex < 0) return null;
   const startTarget = candidates[startIndex]?.target || null;
-  if (!avoidBacktrack || !targetNavigationWouldBacktrack(startTarget, current, direction)) {
+  if (!avoidRecent || !targetNavigationWouldRevisit(startTarget, current, direction)) {
     return startTarget;
   }
 
   for (let offset = 1; offset < candidates.length; offset += 1) {
     const target = candidates[positiveModulo(startIndex + offset * direction, candidates.length)]?.target || null;
     if (!target || target === current) continue;
-    if (!targetNavigationWouldBacktrack(target, current, direction)) return target;
+    if (!targetNavigationWouldRevisit(target, current, direction)) return target;
   }
 
   return startTarget;
@@ -11060,10 +11199,13 @@ function selectNavigationTarget(target, { centerViewport = false } = {}) {
 
 function selectSteppedNavigationTarget(target, current, direction, options = {}) {
   if (!target) return false;
+  const recentTargets = targetNavigationRecentTargets(current, direction);
+  const nextRecentTargets = recentTargets.length ? [...recentTargets, target] : [current, target].filter(Boolean);
   lastTargetNavigationStep = {
     from: current || null,
     to: target,
     direction,
+    recentTargets: nextRecentTargets.slice(-TARGET_NAVIGATION_RECENT_LIMIT),
   };
   selectNavigationTarget(target, options);
   return true;
@@ -11081,9 +11223,9 @@ function stepTargetNavigation(direction) {
 
   if (visibleCandidates.length && (visibleCurrentIndex < 0 || visibleCandidates.length > 1)) {
     const visibleTarget = steppedTargetNavigationTarget(visibleCandidates, current, stepDirection, {
-      avoidBacktrack: true,
+      avoidRecent: true,
     });
-    if (!targetNavigationWouldBacktrack(visibleTarget, current, stepDirection)) {
+    if (visibleTarget && !targetNavigationWouldRevisit(visibleTarget, current, stepDirection)) {
       selectSteppedNavigationTarget(visibleTarget, current, stepDirection);
       return;
     }
@@ -11092,7 +11234,7 @@ function stepTargetNavigation(direction) {
   const fullCandidates = buildFullTargetNavigationCandidates();
   if (!fullCandidates.length) return;
   const fullTarget = steppedTargetNavigationTarget(fullCandidates, current, stepDirection, {
-    avoidBacktrack: true,
+    avoidRecent: true,
   });
 
   selectSteppedNavigationTarget(fullTarget, current, stepDirection, { centerViewport: true });
@@ -11102,7 +11244,35 @@ function projectionCacheReadyForHoverPicking() {
   return !projectionDirty && !scene.catalogProjectionFastPending && scene.catalogDrawListScreenProjected;
 }
 
-function catalogPickVisualRadius(item, { useCachedVisuals = false, simulationDay = null } = {}) {
+function targetPickTileCoordinate(value) {
+  return Math.floor(value / TARGET_PICK_TILE_SIZE);
+}
+
+function targetPickTileKey(tileX, tileY) {
+  return `${tileX},${tileY}`;
+}
+
+function rebuildTargetPickIndex() {
+  const tiles = new Map();
+  for (const item of scene.catalogDrawList) {
+    if (item.point.kind !== "catalog") continue;
+    const projected = item.projected;
+    if (!Number.isFinite(projected.x) || !Number.isFinite(projected.y)) continue;
+    const tileX = targetPickTileCoordinate(projected.x);
+    const tileY = targetPickTileCoordinate(projected.y);
+    const key = targetPickTileKey(tileX, tileY);
+    let bucket = tiles.get(key);
+    if (!bucket) {
+      bucket = [];
+      tiles.set(key, bucket);
+    }
+    bucket.push(item);
+  }
+  scene.targetPickIndex = tiles;
+  scene.targetPickIndexVersion = scene.projectionCacheVersion;
+}
+
+function catalogPickVisualRadius(item, useCachedVisuals = false, simulationDay = null) {
   if (useCachedVisuals && Number.isFinite(item.currentRadius) && item.currentRadius > 0) return item.currentRadius;
   let areaPulse = 1;
   if (useCachedVisuals) {
@@ -11114,6 +11284,60 @@ function catalogPickVisualRadius(item, { useCachedVisuals = false, simulationDay
   return catalogRenderVisualRadius(item, areaPulse);
 }
 
+function considerCatalogPickCandidate(item, clientX, clientY, radiusScale, useCachedVisuals, simulationDay, best) {
+  const point = item.point;
+  if (point.kind !== "catalog" || !targetIsPickable(point)) return;
+  const visualRadius = catalogPickVisualRadius(item, useCachedVisuals, simulationDay);
+  const radius =
+    Math.max(CATALOG_DIRECT_PICK_MIN_RADIUS, visualRadius + CATALOG_DIRECT_PICK_PADDING_PX) *
+    radiusScale;
+  const dx = item.projected.x - clientX;
+  const dy = item.projected.y - clientY;
+  const distance = dx * dx + dy * dy;
+  if (distance <= radius * radius && distance < best.catalogDistance) {
+    best.catalog = point;
+    best.catalogDistance = distance;
+  }
+  if (distance < best.fallbackDistance) {
+    best.fallback = point;
+    best.fallbackDistance = distance;
+  }
+}
+
+function nearestCatalogPickTarget(clientX, clientY, radiusScale, useCachedVisuals, simulationDay) {
+  const maxCatalogPickDistance = 144 * radiusScale * radiusScale;
+  const best = {
+    catalog: null,
+    catalogDistance: maxCatalogPickDistance,
+    fallback: null,
+    fallbackDistance: maxCatalogPickDistance,
+  };
+
+  if (!scene.catalogDrawListScreenProjected) {
+    for (const item of scene.catalogDrawList) {
+      considerCatalogPickCandidate(item, clientX, clientY, radiusScale, useCachedVisuals, simulationDay, best);
+    }
+    return best;
+  }
+
+  if (!scene.targetPickIndex || scene.targetPickIndexVersion !== scene.projectionCacheVersion) {
+    rebuildTargetPickIndex();
+  }
+
+  const tileX = targetPickTileCoordinate(clientX);
+  const tileY = targetPickTileCoordinate(clientY);
+  for (let y = tileY - 1; y <= tileY + 1; y += 1) {
+    for (let x = tileX - 1; x <= tileX + 1; x += 1) {
+      const bucket = scene.targetPickIndex.get(targetPickTileKey(x, y));
+      if (!bucket) continue;
+      for (let index = 0; index < bucket.length; index += 1) {
+        considerCatalogPickCandidate(bucket[index], clientX, clientY, radiusScale, useCachedVisuals, simulationDay, best);
+      }
+    }
+  }
+  return best;
+}
+
 function nearestTarget(clientX, clientY, { pickRadiusScale = 1, refreshProjection = true } = {}) {
   if (refreshProjection) {
     ensureProjectionCacheForInteraction();
@@ -11122,35 +11346,11 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1, refreshProjectio
   }
 
   const radiusScale = Math.max(1, pickRadiusScale);
-  const maxCatalogPickDistance = 144 * radiusScale * radiusScale;
   const useCachedVisuals = !refreshProjection;
   const simulationDay = useCachedVisuals ? null : currentSimulationDay();
-  let bestCatalog = null;
-  let bestCatalogDistance = maxCatalogPickDistance;
-  let bestCatalogFallback = null;
-  let bestCatalogFallbackDistance = maxCatalogPickDistance;
+  const catalogPick = nearestCatalogPickTarget(clientX, clientY, radiusScale, useCachedVisuals, simulationDay);
 
-  for (const item of scene.catalogDrawList) {
-    if (item.point.kind !== "catalog") continue;
-    if (!targetIsPickable(item.point)) continue;
-    const visualRadius = catalogPickVisualRadius(item, { useCachedVisuals, simulationDay });
-    const radius =
-      Math.max(CATALOG_DIRECT_PICK_MIN_RADIUS, visualRadius + CATALOG_DIRECT_PICK_PADDING_PX) *
-      radiusScale;
-    const dx = item.projected.x - clientX;
-    const dy = item.projected.y - clientY;
-    const distance = dx * dx + dy * dy;
-    if (distance <= radius * radius && distance < bestCatalogDistance) {
-      bestCatalog = item.point;
-      bestCatalogDistance = distance;
-    }
-    if (distance < bestCatalogFallbackDistance) {
-      bestCatalogFallback = item.point;
-      bestCatalogFallbackDistance = distance;
-    }
-  }
-
-  if (bestCatalog) return bestCatalog;
+  if (catalogPick.catalog) return catalogPick.catalog;
 
   let best = null;
   let bestClusterScore = Infinity;
@@ -11172,7 +11372,7 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1, refreshProjectio
   }
 
   if (best) return best;
-  return bestCatalogFallback;
+  return catalogPick.fallback;
 }
 
 function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOnRepeat = false, lockCamera = false } = {}) {
@@ -11253,6 +11453,7 @@ function resetRangeControl(controlId) {
       setPulsationSpeed(defaultPulsationSpeedForPreset(preset));
       markCatalogStaticDirty();
       syncRangeOutputs();
+      refreshActiveTargetPanel();
       queueRender();
       break;
     case "pulsationAmplitude":
@@ -11479,6 +11680,7 @@ function bindControls() {
     setPulsationSpeed(10 ** Number(controls.pulsationSpeed.value));
     markCatalogStaticDirty();
     syncRangeOutputs();
+    refreshActiveTargetPanel();
     queueRender();
   };
   controls.pulsationSpeed.addEventListener("input", updatePulsationSpeed);
@@ -11547,6 +11749,8 @@ function bindControls() {
   canvas.addEventListener("pointerdown", (event) => {
     if (handleCanvasTouchPointerDown(event)) return;
     event.preventDefault();
+    cancelHoverPick();
+    cancelHoverTargetPanelUpdate();
     canvas.focus({ preventScroll: true });
     cancelIntroRotation();
     cancelAxisSpinAnimation();
@@ -11603,26 +11807,18 @@ function bindControls() {
       }
 
       if (movedDuringDrag) markOrientationGridActive();
-      setCursorPosition(event);
+      setCursorPosition(event, { throttleReadout: true });
       syncRangeOutputs();
       markProjectionDirty();
       return;
     }
 
-    setCursorPosition(event);
-    window.clearTimeout(hoverTimer);
-    if (performance.now() < hoverSuppressedUntil) return;
-    const hoverX = event.clientX;
-    const hoverY = event.clientY;
-    hoverTimer = window.setTimeout(() => {
-      if (!projectionCacheReadyForHoverPicking()) return;
-      const nextHovered = nearestTarget(hoverX, hoverY, { refreshProjection: false });
-      if (nextHovered === state.hovered) return;
-      state.hovered = nextHovered;
-      markCatalogStaticDirty();
-      if (!state.locked) setTarget(state.hovered);
-      queueRender();
-    }, 20);
+    setCursorPosition(event, { throttleReadout: true });
+    if (performance.now() < hoverSuppressedUntil) {
+      cancelHoverPick();
+      return;
+    }
+    scheduleHoverPick(event.clientX, event.clientY);
   });
 
   canvas.addEventListener("pointerup", (event) => {
@@ -11632,7 +11828,8 @@ function bindControls() {
     dragStart = null;
     canvas.classList.remove("is-dragging");
     if (movedDuringDrag && pointerMode === "pan") {
-      window.clearTimeout(hoverTimer);
+      cancelHoverPick();
+      cancelHoverTargetPanelUpdate();
       hoverSuppressedUntil = performance.now() + 350;
       clearTargetSelection();
       markProjectionDirty();
@@ -11657,6 +11854,8 @@ function bindControls() {
 
   canvas.addEventListener("pointerleave", (event) => {
     if (activeTouchPointers.has(event.pointerId)) return;
+    cancelHoverPick();
+    cancelHoverTargetPanelUpdate();
     if (!dragging) clearCursorPosition();
   });
 
@@ -12136,7 +12335,7 @@ function preparePoints(payload) {
     outputs.miraCount.textContent = formatInteger(payload.counts.miras || 0);
   }
   if (outputs.rcCount) {
-    outputs.rcCount.textContent = formatInteger(payload.counts.redClumpCells);
+    outputs.rcCount.textContent = RED_CLUMP_SOURCE_STAR_COUNT_LABEL;
   }
   if (outputs.clusterCount) {
     outputs.clusterCount.textContent = formatInteger(payload.counts.clusters || 0);

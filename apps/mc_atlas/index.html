@@ -118,11 +118,18 @@
             <input type="checkbox" data-dataset="redclump" checked aria-label="Show Red clump" title="Show Red clump" />
             <button class="datasetPresetText" type="button" data-dataset-preset="redclump">Red clump</button>
             <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="redclump" aria-label="Red clump intensity" title="Red clump intensity" />
+            <output id="rcCount">0</output>
           </div>
         </section>
 
         <section>
-          <h2>Orbit</h2>
+          <div class="sectionHeader orbitSectionHeader">
+            <h2>Orbit</h2>
+            <label class="panLockOption" title="Pan without moving the coordinate origin">
+              <input id="panLock" type="checkbox" checked />
+              <span>Pan lock</span>
+            </label>
+          </div>
           <div class="range orbitRange">
             <span id="yawLabel" class="rangeReset" data-reset-control="yaw" role="button" tabindex="0" title="Reset yaw">Yaw</span>
             <button class="axisSpinButton" type="button" data-spin-axis="yaw" aria-label="Spin yaw 360 degrees" title="Spin yaw 360 degrees">↻</button>
@@ -222,10 +229,6 @@
               <button id="faceView" type="button">Face</button>
               <button id="edgeView" type="button">Edge</button>
             </div>
-            <label class="panLockOption" title="Pan without moving the coordinate origin">
-              <input id="panLock" type="checkbox" checked />
-              <span>Pan lock</span>
-            </label>
           </div>
         </div>
         <div id="coordinateReadout" class="coordinateReadout">
@@ -244,7 +247,7 @@
           <div class="coordinateLocalRow">
             <span class="localCoordinate"><b>x</b> east <strong>0.0 kpc</strong></span>
             <span class="localCoordinate"><b>y</b> north <strong>0.0 kpc</strong></span>
-            <span class="localCoordinate"><b>d</b> distance from Sun <strong></strong></span>
+            <span class="localCoordinate"><b>d</b> from Sun <strong></strong></span>
           </div>
         </div>
       </div>
