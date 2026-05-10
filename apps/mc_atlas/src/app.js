@@ -47,7 +47,7 @@ const TARGET_NAVIGATION_HILBERT_BITS = 10;
 const TARGET_NAVIGATION_VIEWPORT_MARGIN = 24;
 const ORBIT_DRAG_ZOOM_DAMPING = 0.5;
 const ORBIT_DRAG_MIN_SENSITIVITY = 0.18;
-const PULSATOR_RADIUS_BASE_SCALE = 0.31752;
+const PULSATOR_RADIUS_BASE_SCALE = 0.254016;
 const INITIAL_PULSATION_SPEED = 18_000;
 const PULSATION_SPEED_MIN = 1;
 const PULSATION_SPEED_MAX = 25_000_000;
@@ -383,7 +383,7 @@ const PULSATOR_PRESET_SPEEDS = {
   rrlyrae: 17_000,
   miras: 7_000_000,
 };
-// Baseline radii are 0.75x the previous calibration; class presets compensate to preserve tuned visual sizes.
+// Baseline radii are calibrated so 1x matches the former 0.8x visual scale.
 const PULSATOR_PRESET_RADIUS_SCALES = {
   default: 1,
   cepheids: 0.7,
@@ -5086,7 +5086,7 @@ function createCatalogDynamicProgram(gl) {
         ) * u_starBaseRadiusViewportScale;
         float radius = clamp(
           baseRadius *
-            ${PULSATOR_RADIUS_BASE_SCALE.toFixed(5)} *
+            ${PULSATOR_RADIUS_BASE_SCALE.toFixed(6)} *
             ${PULSATOR_BASE_RADIUS_FACTOR.toFixed(2)} *
             u_radiusScale *
             sqrt(max(0.000001, areaPulse)),
@@ -5225,7 +5225,7 @@ function createClusterStarProgram(gl) {
           u_starRadiusBaseMax
         ) * u_starBaseRadiusViewportScale;
         float radius = clamp(
-          baseRadius * ${PULSATOR_RADIUS_BASE_SCALE.toFixed(5)} * ${PULSATOR_BASE_RADIUS_FACTOR.toFixed(2)} * u_radiusScale,
+          baseRadius * ${PULSATOR_RADIUS_BASE_SCALE.toFixed(6)} * ${PULSATOR_BASE_RADIUS_FACTOR.toFixed(2)} * u_radiusScale,
           0.18,
           28.0
         );
@@ -11067,35 +11067,61 @@ function stepTargetNavigation(direction) {
   selectSteppedNavigationTarget(fullTarget, current, stepDirection, { centerViewport: true });
 }
 
-function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
-  ensureProjectionCacheForInteraction();
+function projectionCacheReadyForHoverPicking() {
+  return !projectionDirty && !scene.catalogProjectionFastPending && scene.catalogDrawListScreenProjected;
+}
 
-  let best = null;
+function catalogPickVisualRadius(item, { useCachedVisuals = false, simulationDay = null } = {}) {
+  if (useCachedVisuals && Number.isFinite(item.currentRadius) && item.currentRadius > 0) return item.currentRadius;
+  let areaPulse = 1;
+  if (useCachedVisuals) {
+    if (Number.isFinite(item.currentAreaPulse) && item.currentAreaPulse > 0) areaPulse = item.currentAreaPulse;
+  } else if (item.point.animatePulse || item.point === state.locked) {
+    areaPulse = lightCurveVisualPulses(pulseFactor(item.point, simulationDay ?? currentSimulationDay()), item.point)
+      .areaPulse;
+  }
+  return catalogRenderVisualRadius(item, areaPulse);
+}
+
+function nearestTarget(clientX, clientY, { pickRadiusScale = 1, refreshProjection = true } = {}) {
+  if (refreshProjection) {
+    ensureProjectionCacheForInteraction();
+  } else if (!projectionCacheReadyForHoverPicking()) {
+    return null;
+  }
+
   const radiusScale = Math.max(1, pickRadiusScale);
-  let bestDistance = 144 * radiusScale * radiusScale;
-  const simulationDay = currentSimulationDay();
+  const maxCatalogPickDistance = 144 * radiusScale * radiusScale;
+  const useCachedVisuals = !refreshProjection;
+  const simulationDay = useCachedVisuals ? null : currentSimulationDay();
+  let bestCatalog = null;
+  let bestCatalogDistance = maxCatalogPickDistance;
+  let bestCatalogFallback = null;
+  let bestCatalogFallbackDistance = maxCatalogPickDistance;
 
   for (const item of scene.catalogDrawList) {
     if (item.point.kind !== "catalog") continue;
     if (!targetIsPickable(item.point)) continue;
-    const areaPulse =
-      item.point.animatePulse || item.point === state.locked
-        ? lightCurveVisualPulses(pulseFactor(item.point, simulationDay), item.point).areaPulse
-        : 1;
+    const visualRadius = catalogPickVisualRadius(item, { useCachedVisuals, simulationDay });
     const radius =
-      Math.max(CATALOG_DIRECT_PICK_MIN_RADIUS, catalogRenderVisualRadius(item, areaPulse) + CATALOG_DIRECT_PICK_PADDING_PX) *
+      Math.max(CATALOG_DIRECT_PICK_MIN_RADIUS, visualRadius + CATALOG_DIRECT_PICK_PADDING_PX) *
       radiusScale;
     const dx = item.projected.x - clientX;
     const dy = item.projected.y - clientY;
     const distance = dx * dx + dy * dy;
-    if (distance <= radius * radius && distance < bestDistance) {
-      best = item.point;
-      bestDistance = distance;
+    if (distance <= radius * radius && distance < bestCatalogDistance) {
+      bestCatalog = item.point;
+      bestCatalogDistance = distance;
+    }
+    if (distance < bestCatalogFallbackDistance) {
+      bestCatalogFallback = item.point;
+      bestCatalogFallbackDistance = distance;
     }
   }
 
-  if (best) return best;
+  if (bestCatalog) return bestCatalog;
 
+  let best = null;
   let bestClusterScore = Infinity;
   for (const item of scene.clusterTargetDrawList) {
     if (!targetIsPickable(item.point)) continue;
@@ -11115,39 +11141,7 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
   }
 
   if (best) return best;
-
-  for (const item of scene.catalogDrawList) {
-    if (item.point.kind !== "catalog") continue;
-    if (!targetIsPickable(item.point)) continue;
-    const areaPulse =
-      item.point.animatePulse || item.point === state.locked
-        ? lightCurveVisualPulses(pulseFactor(item.point, simulationDay), item.point).areaPulse
-        : 1;
-    const radius = (catalogRenderVisualRadius(item, areaPulse) + 5) * radiusScale;
-    const dx = item.projected.x - clientX;
-    const dy = item.projected.y - clientY;
-    const distance = dx * dx + dy * dy;
-    const threshold = Math.max(bestDistance, radius * radius);
-    if (distance < threshold && distance < bestDistance) {
-      best = item.point;
-      bestDistance = distance;
-    }
-  }
-
-  if (best) return best;
-
-  for (const item of scene.redClumpDrawList) {
-    if (!targetIsPickable(item.point)) continue;
-    const dx = item.projected.x - clientX;
-    const dy = item.projected.y - clientY;
-    const distance = dx * dx + dy * dy;
-    if (distance < bestDistance) {
-      best = item.point;
-      bestDistance = distance;
-    }
-  }
-
-  return best;
+  return bestCatalogFallback;
 }
 
 function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOnRepeat = false, lockCamera = false } = {}) {
@@ -11587,8 +11581,13 @@ function bindControls() {
     setCursorPosition(event);
     window.clearTimeout(hoverTimer);
     if (performance.now() < hoverSuppressedUntil) return;
+    const hoverX = event.clientX;
+    const hoverY = event.clientY;
     hoverTimer = window.setTimeout(() => {
-      state.hovered = nearestTarget(event.clientX, event.clientY);
+      if (!projectionCacheReadyForHoverPicking()) return;
+      const nextHovered = nearestTarget(hoverX, hoverY, { refreshProjection: false });
+      if (nextHovered === state.hovered) return;
+      state.hovered = nextHovered;
       markCatalogStaticDirty();
       if (!state.locked) setTarget(state.hovered);
       queueRender();
