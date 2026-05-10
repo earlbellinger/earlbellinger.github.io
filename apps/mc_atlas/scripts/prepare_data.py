@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import tarfile
+import urllib.parse
 import urllib.request
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ PROCESSED = ROOT / "data" / "processed"
 
 M_SUN_I = 4.10
 T_SUN = 5772
+LOG_G_SUN = 4.438
 SUN_V_MINUS_I = 0.69
 BLACKBODY_V_NM = 550.0
 BLACKBODY_I_NM = 806.0
@@ -42,6 +44,7 @@ V_MINUS_I_TEMPERATURE_ANCHORS = (
     (3.2, 2600.0),
     (4.2, 2200.0),
 )
+ACTIVE_V_MINUS_I_TEMPERATURE_ANCHORS = V_MINUS_I_TEMPERATURE_ANCHORS
 
 EQ_TO_GAL = (
     (-0.0548755604162154, -0.8734370902348850, -0.4838350155487132),
@@ -60,6 +63,12 @@ SPECTRAL_CLASSES = [
 ]
 
 LOCATION_INDEX = {"LMC": 0, "SMC": 1, "BRIDGE": 2, "MBR": 2, "OUT": 3}
+MEAN_METALLICITY_FEH_BY_LOCATION = {
+    "LMC": -0.4,
+    "SMC": -0.7,
+    "Bridge": -0.55,
+    "Outer": -0.8,
+}
 DATASET_INDEX = {
     "cepheids": 0,
     "rrlyrae": 1,
@@ -103,7 +112,6 @@ MIRA_ALLWISE_MAG_ERROR_FLOOR = {
     "W3": 0.18,
 }
 MIRA_DISTANCE_VALID_RANGE_KPC = (20.0, 110.0)
-SMC_ANCHORED_MIRA_DISTANCE_VALID_RANGE_KPC = (20.0, 130.0)
 MIRA_PLR_LOGP_PIVOT = 2.3
 MIRA_PLR_O_RICH_LINEAR_LOGP_MAX = 2.6
 MIRA_LOCAL_NEIGHBOR_K = 32
@@ -112,6 +120,32 @@ MIRA_LOCAL_NEIGHBOR_MAX_ANGULAR_DEG = 1.5
 MIRA_LOCAL_NEIGHBOR_ERROR_FLOOR_KPC = 2.0
 MIRA_PULSATION_FIT_VERSION = 3
 MIRA_PULSATION_FITS_CACHE = PROCESSED / "mira_multiperiodic_fits_v3.json"
+MIRA_TEMPERATURE_CACHE = PROCESSED / "mira_literature_temperatures_v1.json"
+MIRA_TEMPERATURE_CACHE_VERSION = 1
+MIRA_TEMPERATURE_MATCH_MAX_ARCSEC = 2.0
+MIRA_LITERATURE_TEMPERATURE_RANGE_K = (1000, 5000)
+MIRA_TEMPERATURE_SOURCES = (
+    {
+        "id": "jones2017_teff_mcd",
+        "label": "Jones+2017 SAGE-Spec LMC TeffMcD",
+        "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR-3?-source=J%2FMNRAS%2F470%2F3250",
+    },
+    {
+        "id": "ruffle2015_tmcd",
+        "label": "Ruffle+2015 SAGE-Spec SMC Tmcd",
+        "url": "https://vizier.unistra.fr/cgi-bin/VizieR-3?-source=J%2FMNRAS%2F451%2F3504",
+    },
+    {
+        "id": "riebel2012_grams_teff",
+        "label": "Riebel+2012 GRAMS LMC Teff",
+        "url": "https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/J/ApJ/753/71?format=html&tex=true",
+    },
+    {
+        "id": "iwanek2021_tstar",
+        "label": "Iwanek+2021 Mira SED Tstar",
+        "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR-3?-source=J%2FApJS%2F257%2F23",
+    },
+)
 MIRA_PULSATION_MIN_AMPLITUDE = 0.04
 MIRA_PULSATION_MIN_POINTS = 20
 MIRA_PULSATION_MIN_V_POINTS = 14
@@ -251,6 +285,20 @@ MIST_DIR = ROOT / "data" / "mist"
 PERREN_CLUSTER_TABLE = RAW / "perren_vizier_clusters.dat"
 PERREN_ASTECA_TABLE = RAW / "perren_asteca_output_final.dat"
 MIST_CLUSTER_ISOCHRONE_CACHE = PROCESSED / "mist_cluster_isochrones_v1.npz"
+MIST_CLUSTER_ISOCHRONE_CACHE_VERSION = 1
+MIST_VI_TEMPERATURE_CACHE = PROCESSED / "mist_vi_temperature_calibration_v1.json"
+MIST_VI_TEMPERATURE_CACHE_VERSION = 1
+MIST_VI_TEMPERATURE_PHASE_MAX = 5
+MIST_VI_TEMPERATURE_COLOR_MIN = -0.35
+MIST_VI_TEMPERATURE_COLOR_MAX = 4.2
+MIST_VI_TEMPERATURE_BIN_WIDTH = 0.05
+MIST_VI_TEMPERATURE_MIN_BIN_COUNT = 5
+MIST_VI_LUMINOSITY_TEMPERATURE_CACHE = PROCESSED / "mist_vi_luminosity_temperature_calibration_v1.json"
+MIST_VI_LUMINOSITY_TEMPERATURE_CACHE_VERSION = 1
+MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MIN = -2.0
+MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MAX = 6.0
+MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_STEP = 0.1
+MIST_VI_LUMINOSITY_TEMPERATURE_VALUE_SCALE = 10000
 CLUSTER_SYNTHETIC_MASS_CUTOFF = 0.5
 CLUSTER_POINT_LUMINOSITY_CUTOFF = 1.0
 CLUSTER_GLOW_BIN_COUNT = 12
@@ -348,6 +396,8 @@ class CatalogStar:
     color_curve_quality: int = 0
     v_amplitude: float | None = None
     mira_pulsation: dict[str, object] | None = None
+    mira_teff: int | None = None
+    mira_teff_source_index: int | None = None
     reddening_evi: float = 0.0
     reddening_evi_error: float | None = None
     reddening_source: str = NO_REDDENING_SOURCE
@@ -507,10 +557,10 @@ def luminosity_from_i(i_mag: float, distance_kpc: float) -> float:
     return 10 ** (-0.4 * (absolute_i - M_SUN_I))
 
 
-def effective_temperature_from_v_minus_i(v_minus_i: float) -> float:
-    # Approximate display temperature from intrinsic V-I; this is still only a
-    # visual radius estimate, not a physical stellar-parameter fit.
-    anchors = V_MINUS_I_TEMPERATURE_ANCHORS
+def temperature_from_v_minus_i_anchors(
+    v_minus_i: float,
+    anchors: tuple[tuple[float, float], ...] | list[tuple[float, float]],
+) -> float:
     if v_minus_i <= anchors[0][0]:
         return anchors[0][1]
     for (left_color, left_temp), (right_color, right_temp) in zip(anchors, anchors[1:]):
@@ -520,6 +570,23 @@ def effective_temperature_from_v_minus_i(v_minus_i: float) -> float:
             log_right = math.log(right_temp)
             return math.exp(log_left + fraction * (log_right - log_left))
     return anchors[-1][1]
+
+
+def effective_temperature_from_v_minus_i(v_minus_i: float) -> float:
+    # Approximate display temperature from intrinsic V-I; this is still only a
+    # visual radius estimate, not a physical stellar-parameter fit.
+    return temperature_from_v_minus_i_anchors(v_minus_i, ACTIVE_V_MINUS_I_TEMPERATURE_ANCHORS)
+
+
+def set_v_minus_i_temperature_anchors(anchors: list[tuple[float, float]] | tuple[tuple[float, float], ...]) -> None:
+    global ACTIVE_V_MINUS_I_TEMPERATURE_ANCHORS
+    clean = tuple(
+        (float(v_minus_i), float(temperature))
+        for v_minus_i, temperature in anchors
+        if math.isfinite(float(v_minus_i)) and math.isfinite(float(temperature)) and float(temperature) > 0
+    )
+    if len(clean) >= 2:
+        ACTIVE_V_MINUS_I_TEMPERATURE_ANCHORS = tuple(sorted(clean, key=lambda item: item[0]))
 
 
 def radius_from_luminosity_and_color(luminosity: float, v_minus_i: float) -> float:
@@ -3302,6 +3369,213 @@ def parse_miras() -> list[CatalogStar]:
     )
 
 
+def source_index_for_mira_temperature(source_id: str) -> int:
+    for index, source in enumerate(MIRA_TEMPERATURE_SOURCES):
+        if source["id"] == source_id:
+            return index
+    raise KeyError(source_id)
+
+
+def valid_mira_literature_temperature(value: object) -> int | None:
+    temperature = finite_float(value)
+    if temperature is None:
+        return None
+    lower, upper = MIRA_LITERATURE_TEMPERATURE_RANGE_K
+    if not (lower <= temperature <= upper):
+        return None
+    return int(round(temperature))
+
+
+def fetch_vizier_tsv_rows(source: str, columns: str) -> list[dict[str, str]]:
+    params = {
+        "-source": source,
+        "-out": columns,
+        "-out.max": "unlimited",
+    }
+    url = "https://vizier.cds.unistra.fr/viz-bin/asu-tsv?" + urllib.parse.urlencode(params)
+    request = urllib.request.Request(url, headers={"User-Agent": "mc-atlas-data-prep/1.0"})
+    with urllib.request.urlopen(request, timeout=300) as response:
+        text = response.read().decode("utf-8", errors="replace")
+
+    lines = [line for line in text.splitlines() if line and not line.startswith("#")]
+    if not lines:
+        return []
+
+    header = lines[0].split("\t")
+    rows: list[dict[str, str]] = []
+    for line in lines[1:]:
+        cells = line.split("\t")
+        if len(cells) != len(header):
+            continue
+        if all(not cell.strip() or set(cell.strip()) <= {"-"} for cell in cells):
+            continue
+        rows.append(dict(zip(header, cells)))
+    return rows
+
+
+def add_exact_mira_temperature_estimate(
+    estimates: dict[str, dict[str, int]],
+    obj_id: str,
+    temperature: int | None,
+    source_index: int,
+) -> None:
+    if temperature is None or not obj_id:
+        return
+    estimates.setdefault(obj_id, {"teff": temperature, "sourceIndex": source_index})
+
+
+def mira_temperature_position_buckets(
+    stars: list[CatalogStar],
+    bucket_arcsec: float = 10.0,
+) -> dict[tuple[int, int], list[CatalogStar]]:
+    buckets: dict[tuple[int, int], list[CatalogStar]] = {}
+    for star in stars:
+        key = (int(star.ra * 3600.0 // bucket_arcsec), int(star.dec * 3600.0 // bucket_arcsec))
+        buckets.setdefault(key, []).append(star)
+    return buckets
+
+
+def add_coordinate_mira_temperature_estimates(
+    estimates: dict[str, dict[str, int]],
+    stars: list[CatalogStar],
+    rows: list[dict[str, str]],
+    source_index: int,
+    temperature_column: str,
+    ra_column: str = "_RA",
+    dec_column: str = "_DE",
+) -> None:
+    buckets = mira_temperature_position_buckets(stars)
+    bucket_arcsec = 10.0
+    max_distance_deg = MIRA_TEMPERATURE_MATCH_MAX_ARCSEC / 3600.0
+    best_by_star: dict[str, tuple[float, int]] = {}
+    for row in rows:
+        temperature = valid_mira_literature_temperature(row.get(temperature_column))
+        ra = finite_float(row.get(ra_column))
+        dec = finite_float(row.get(dec_column))
+        if temperature is None or ra is None or dec is None:
+            continue
+
+        key = (int(ra * 3600.0 // bucket_arcsec), int(dec * 3600.0 // bucket_arcsec))
+        for delta_ra in range(-1, 2):
+            for delta_dec in range(-1, 2):
+                for star in buckets.get((key[0] + delta_ra, key[1] + delta_dec), []):
+                    distance_sq = angular_distance_sq_deg(star.ra, star.dec, ra, dec)
+                    if distance_sq > max_distance_deg**2:
+                        continue
+                    best = best_by_star.get(star.obj_id)
+                    if best is None or distance_sq < best[0]:
+                        best_by_star[star.obj_id] = (distance_sq, temperature)
+
+    for obj_id, (_, temperature) in best_by_star.items():
+        if obj_id not in estimates:
+            estimates[obj_id] = {"teff": temperature, "sourceIndex": source_index}
+
+
+def build_mira_literature_temperature_lookup(miras: list[CatalogStar]) -> dict[str, dict[str, int]]:
+    if MIRA_TEMPERATURE_CACHE.exists():
+        try:
+            cached = json.loads(MIRA_TEMPERATURE_CACHE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            cached = None
+        if (
+            isinstance(cached, dict)
+            and cached.get("version") == MIRA_TEMPERATURE_CACHE_VERSION
+            and isinstance(cached.get("estimates"), dict)
+        ):
+            return cached["estimates"]
+
+    estimates: dict[str, dict[str, int]] = {}
+    lmc_miras = [star for star in miras if star.location == "LMC"]
+
+    jones_index = source_index_for_mira_temperature("jones2017_teff_mcd")
+    for row in fetch_vizier_tsv_rows("J/MNRAS/470/3250/table2", "OGLE3ID,TeffMcD"):
+        obj_id = row.get("OGLE3ID", "").strip()
+        add_exact_mira_temperature_estimate(
+            estimates,
+            obj_id,
+            valid_mira_literature_temperature(row.get("TeffMcD")),
+            jones_index,
+        )
+
+    ruffle_index = source_index_for_mira_temperature("ruffle2015_tmcd")
+    for row in fetch_vizier_tsv_rows("J/MNRAS/451/3504/table2", "LPV,Tmcd"):
+        lpv_id = row.get("LPV", "").strip()
+        if not lpv_id:
+            continue
+        try:
+            obj_id = f"OGLE-SMC-LPV-{int(lpv_id):05d}"
+        except ValueError:
+            continue
+        add_exact_mira_temperature_estimate(
+            estimates,
+            obj_id,
+            valid_mira_literature_temperature(row.get("Tmcd")),
+            ruffle_index,
+        )
+
+    riebel_index = source_index_for_mira_temperature("riebel2012_grams_teff")
+    add_coordinate_mira_temperature_estimates(
+        estimates,
+        lmc_miras,
+        fetch_vizier_tsv_rows("J/ApJ/753/71/table3", "Name,Cl,Teff,_RA,_DE"),
+        riebel_index,
+        "Teff",
+    )
+
+    iwanek_index = source_index_for_mira_temperature("iwanek2021_tstar")
+    for row in fetch_vizier_tsv_rows("J/ApJS/257/23/gold", "ID,Tstar"):
+        obj_id = row.get("ID", "").strip()
+        if obj_id in estimates:
+            continue
+        add_exact_mira_temperature_estimate(
+            estimates,
+            obj_id,
+            valid_mira_literature_temperature(row.get("Tstar")),
+            iwanek_index,
+        )
+
+    MIRA_TEMPERATURE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    MIRA_TEMPERATURE_CACHE.write_text(
+        json.dumps(
+            {
+                "version": MIRA_TEMPERATURE_CACHE_VERSION,
+                "sources": MIRA_TEMPERATURE_SOURCES,
+                "estimates": estimates,
+            },
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    return estimates
+
+
+def apply_mira_literature_temperatures(miras: list[CatalogStar]) -> dict[str, object]:
+    estimates = build_mira_literature_temperature_lookup(miras)
+    source_counts = {source["id"]: 0 for source in MIRA_TEMPERATURE_SOURCES}
+    matched = 0
+    for star in miras:
+        estimate = estimates.get(star.obj_id)
+        if estimate is None:
+            continue
+        temperature = valid_mira_literature_temperature(estimate.get("teff"))
+        source_index = estimate.get("sourceIndex")
+        if temperature is None or not isinstance(source_index, int) or not (0 <= source_index < len(MIRA_TEMPERATURE_SOURCES)):
+            continue
+        star.mira_teff = temperature
+        star.mira_teff_source_index = source_index
+        source_counts[MIRA_TEMPERATURE_SOURCES[source_index]["id"]] += 1
+        matched += 1
+
+    return {
+        "miraLiteratureTemperatureEstimates": matched,
+        "miraLiteratureTemperatureSourceCounts": {
+            source_id: count
+            for source_id, count in source_counts.items()
+            if count
+        },
+    }
+
+
 def distance_modulus_to_kpc(distance_modulus: float) -> float:
     return 10 ** ((distance_modulus - 10.0) / 5.0)
 
@@ -4516,8 +4790,8 @@ def apply_mira_distances(miras: list[CatalogStar]) -> dict[str, object]:
     download_mira_allwise_xmatch(smc_miras, SMC_MIRA_ALLWISE_XMATCH)
     lmc_allwise_rows = parse_mira_allwise_xmatch(LMC_MIRA_ALLWISE_XMATCH)
     smc_allwise_rows = parse_mira_allwise_xmatch(SMC_MIRA_ALLWISE_XMATCH)
-    smc_raw_estimates: dict[str, dict[str, float | str]] = {}
-    smc_raw_moduli: list[float] = []
+    smc_allwise_estimates: dict[str, dict[str, float | str]] = {}
+    smc_allwise_moduli: list[float] = []
     for star in smc_miras:
         row = smc_allwise_rows.get(star.obj_id)
         if row is None:
@@ -4534,15 +4808,8 @@ def apply_mira_distances(miras: list[CatalogStar]) -> dict[str, object]:
         )
         if estimate is None:
             continue
-        smc_raw_estimates[star.obj_id] = estimate
-        smc_raw_moduli.append(float(estimate["distanceModulus"]))
-    smc_anchor_offset_mag = 0.0
-    if smc_raw_moduli:
-        smc_anchor_offset_mag = kpc_to_distance_modulus(MIRA_CLOUD_DISTANCES_KPC["SMC"]) - float(np.median(smc_raw_moduli))
-    smc_anchor_modulus_error = modulus_error_from_distance(
-        MIRA_CLOUD_DISTANCES_KPC["SMC"],
-        MIRA_CLOUD_DISTANCE_ERRORS_KPC.get("SMC"),
-    )
+        smc_allwise_estimates[star.obj_id] = estimate
+        smc_allwise_moduli.append(float(estimate["distanceModulus"]))
 
     estimated = 0
     fallback = 0
@@ -4598,22 +4865,7 @@ def apply_mira_distances(miras: list[CatalogStar]) -> dict[str, object]:
                         magnitude_error_floor=MIRA_ALLWISE_MAG_ERROR_FLOOR,
                     )
         elif star.location == "SMC":
-            estimate = smc_raw_estimates.get(star.obj_id)
-            if estimate is not None:
-                adjusted_modulus = float(estimate["distanceModulus"]) + smc_anchor_offset_mag
-                adjusted_distance = distance_modulus_to_kpc(adjusted_modulus)
-                if SMC_ANCHORED_MIRA_DISTANCE_VALID_RANGE_KPC[0] <= adjusted_distance <= SMC_ANCHORED_MIRA_DISTANCE_VALID_RANGE_KPC[1]:
-                    adjusted_modulus_error = math.sqrt(float(estimate["modulusError"]) ** 2 + smc_anchor_modulus_error**2)
-                    estimate = {
-                        **estimate,
-                        "distance": adjusted_distance,
-                        "distanceModulus": adjusted_modulus,
-                        "distanceError": distance_error_from_modulus(adjusted_distance, adjusted_modulus_error),
-                        "modulusError": adjusted_modulus_error,
-                        "source": f"{estimate['source']} SMC-anchored",
-                    }
-                else:
-                    estimate = None
+            estimate = smc_allwise_estimates.get(star.obj_id)
 
         if estimate is not None:
             assign_mira_estimate(star, estimate)
@@ -4644,8 +4896,7 @@ def apply_mira_distances(miras: list[CatalogStar]) -> dict[str, object]:
         "miraDistanceSourceCounts": source_counts,
         "miraDistanceMedianErrorKpc": round_number(float(np.median(errors)), 3) if errors else None,
         "miraDistanceMedianRelativeError": round_number(float(np.median(relative_errors)), 4) if relative_errors else None,
-        "miraSmcAllwiseMedianRawDistanceKpc": round_number(distance_modulus_to_kpc(float(np.median(smc_raw_moduli))), 3) if smc_raw_moduli else None,
-        "miraSmcAllwiseAnchorOffsetMag": round_number(smc_anchor_offset_mag, 3),
+        "miraSmcAllwiseMedianDistanceKpc": round_number(distance_modulus_to_kpc(float(np.median(smc_allwise_moduli))), 3) if smc_allwise_moduli else None,
     }
 
 
@@ -4844,19 +5095,50 @@ def parse_perren_clusters(path: Path, asteca_path: Path) -> list[ClusterParamete
 
 
 def mist_feh_from_filename(path: Path) -> float | None:
-    match = re.search(r"feh_([mp])(\d{3})_afe_p0_vvcrit0\.0_full\.iso$", path.name)
+    match = re.search(r"feh_([mp])(\d+(?:\.\d+)?)_afe_p0(?:\.0)?_vvcrit\d+(?:\.\d+)?", path.name)
     if not match:
         return None
-    value = int(match.group(2)) / 100
+    raw_value = match.group(2)
+    value = float(raw_value) if "." in raw_value else int(raw_value) / 100
     return value if match.group(1) == "p" else -value
 
 
-def available_mist_files() -> list[tuple[float, Path, str]]:
+def mist_file_label(path: Path) -> str:
+    name = path.name
+    for suffix in (".iso.UBVRIplus", ".iso.cmd", ".iso"):
+        if name.lower().endswith(suffix.lower()):
+            return name[: -len(suffix)]
+    return path.stem
+
+
+def is_mist_cmd_file(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(".iso.cmd") or name.endswith(".iso.ubvriplus")
+
+
+def available_mist_cmd_files() -> list[tuple[float, Path, str]]:
     files: list[tuple[float, Path, str]] = []
-    for path in MIST_DIR.glob("*_afe_p0_vvcrit0.0_full.iso"):
+    for path in MIST_DIR.rglob("*"):
+        if not path.is_file() or not is_mist_cmd_file(path):
+            continue
+        if "UBVRI" not in str(path).upper():
+            continue
         feh = mist_feh_from_filename(path)
         if feh is not None:
-            files.append((feh, path, path.stem))
+            files.append((feh, path, mist_file_label(path)))
+    non_rotating = [item for item in files if "vvcrit0.0" in item[1].name]
+    return sorted(non_rotating or files, key=lambda item: item[0])
+
+
+def available_mist_files() -> list[tuple[float, Path, str]]:
+    files = available_mist_cmd_files()
+    if files:
+        return files
+
+    for path in MIST_DIR.rglob("*_afe_p0_vvcrit0.0_full.iso"):
+        feh = mist_feh_from_filename(path)
+        if feh is not None:
+            files.append((feh, path, mist_file_label(path)))
     return sorted(files, key=lambda item: item[0])
 
 
@@ -4968,6 +5250,9 @@ def mist_array_to_isochrone(array: np.ndarray, feh: float, log_age: float, label
 
 
 def parse_mist_isochrone_file(path: Path, ages: set[float]) -> dict[float, np.ndarray]:
+    if is_mist_cmd_file(path):
+        return parse_mist_cmd_isochrone_file(path, ages)
+
     wanted = {round(age, 2) for age in ages}
     selected: dict[float, list[list[float]]] = {age: [] for age in wanted}
     fallback: dict[float, list[list[float]]] = {age: [] for age in wanted}
@@ -5028,6 +5313,449 @@ def parse_mist_isochrone_file(path: Path, ages: set[float]) -> dict[float, np.nd
     return parsed
 
 
+def parse_mist_cmd_isochrone_file(path: Path, ages: set[float]) -> dict[float, np.ndarray]:
+    wanted = {round(age, 2) for age in ages}
+    selected: dict[float, list[list[float]]] = {age: [] for age in wanted}
+    fallback: dict[float, list[list[float]]] = {age: [] for age in wanted}
+    column_index: dict[str, int] | None = None
+
+    required_columns = {
+        "log10_isochrone_age_yr",
+        "initial_mass",
+        "log_Teff",
+        "log_g",
+        "log_L",
+        "Bessell_V",
+        "Bessell_I",
+        "phase",
+    }
+
+    with path.open("r", encoding="ascii", errors="ignore") as handle:
+        for raw_line in handle:
+            if raw_line.startswith("# EEP"):
+                columns = raw_line[1:].split()
+                column_index = {name: index for index, name in enumerate(columns)}
+                if not required_columns.issubset(column_index):
+                    missing = ", ".join(sorted(required_columns - set(column_index)))
+                    raise ValueError(f"{path.name} is missing required MIST CMD columns: {missing}")
+                continue
+            if not raw_line.strip() or raw_line.startswith("#") or column_index is None:
+                continue
+            parts = raw_line.split()
+            log_age = round(float(parts[column_index["log10_isochrone_age_yr"]]), 2)
+            if log_age not in wanted:
+                continue
+            initial_mass = float(parts[column_index["initial_mass"]])
+            log_temperature = float(parts[column_index["log_Teff"]])
+            log_luminosity = float(parts[column_index["log_L"]])
+            log_g = float(parts[column_index["log_g"]])
+            v_mag = float(parts[column_index["Bessell_V"]])
+            i_mag = float(parts[column_index["Bessell_I"]])
+            phase = int(float(parts[column_index["phase"]]))
+            if not all(
+                math.isfinite(value)
+                for value in (initial_mass, log_temperature, log_luminosity, log_g, v_mag, i_mag)
+            ):
+                continue
+            if initial_mass <= 0 or abs(v_mag) > 90 or abs(i_mag) > 90:
+                continue
+            temperature = 10 ** log_temperature
+            bolometric_luminosity = 10 ** log_luminosity
+            radius = math.sqrt(max(bolometric_luminosity, 1e-12)) * (T_SUN / temperature) ** 2
+            star_mass = max(0.0, 10 ** (log_g - LOG_G_SUN) * radius * radius)
+            i_luminosity = 10 ** (-0.4 * (i_mag - M_SUN_I))
+            v_minus_i = v_mag - i_mag
+            if i_luminosity <= 0 or not math.isfinite(i_luminosity):
+                continue
+            row = [
+                initial_mass,
+                star_mass if star_mass > 0 else initial_mass,
+                i_luminosity,
+                radius,
+                v_minus_i,
+                temperature,
+                float(spectral_index(v_minus_i)),
+            ]
+            fallback[log_age].append(row)
+            if phase <= CLUSTER_RENDER_PHASE_MAX:
+                selected[log_age].append(row)
+
+    parsed: dict[float, np.ndarray] = {}
+    for age in wanted:
+        rows = selected[age] or fallback[age]
+        if not rows:
+            continue
+        array = np.array(rows, dtype=float)
+        order = np.argsort(array[:, 0])
+        array = array[order]
+        unique_mass, unique_index = np.unique(array[:, 0], return_index=True)
+        if unique_mass.size >= 2:
+            parsed[age] = array[np.sort(unique_index)]
+    return parsed
+
+
+def v_minus_i_temperature_anchor_dicts(anchors: tuple[tuple[float, float], ...]) -> list[dict[str, float]]:
+    return [
+        {
+            "vMinusI": round_number(v_minus_i, 3),
+            "temperature": round_number(temperature, 1),
+        }
+        for v_minus_i, temperature in anchors
+    ]
+
+
+def fallback_v_minus_i_temperature_calibration(reason: str) -> dict[str, object]:
+    return {
+        "source": "fallback-hand-anchors",
+        "reason": reason,
+        "interpolation": "log-temperature",
+        "anchors": v_minus_i_temperature_anchor_dicts(V_MINUS_I_TEMPERATURE_ANCHORS),
+        "fileCount": 0,
+        "sampleCount": 0,
+    }
+
+
+def v_minus_i_temperature_anchors_from_calibration(calibration: dict[str, object]) -> tuple[tuple[float, float], ...]:
+    anchors_raw = calibration.get("anchors")
+    anchors: list[tuple[float, float]] = []
+    if isinstance(anchors_raw, list):
+        for item in anchors_raw:
+            if not isinstance(item, dict):
+                continue
+            v_minus_i = finite_float(item.get("vMinusI"))
+            temperature = finite_float(item.get("temperature"))
+            if v_minus_i is not None and temperature is not None and temperature > 0:
+                anchors.append((v_minus_i, temperature))
+    return tuple(sorted(anchors, key=lambda item: item[0])) or V_MINUS_I_TEMPERATURE_ANCHORS
+
+
+def mist_temperature_calibration_file_key(path: Path) -> str:
+    try:
+        return path.relative_to(MIST_DIR).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def mist_temperature_calibration_file_signatures(files: list[tuple[float, Path, str]]) -> dict[str, dict[str, int]]:
+    return {mist_temperature_calibration_file_key(path): mist_file_signature(path) for _feh, path, _label in files}
+
+
+def merge_mist_temperature_anchors(mist_anchors: list[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
+    if not mist_anchors:
+        return V_MINUS_I_TEMPERATURE_ANCHORS
+    mist_anchors = sorted(mist_anchors, key=lambda item: item[0])
+    mist_min = mist_anchors[0][0]
+    mist_max = mist_anchors[-1][0]
+    margin = MIST_VI_TEMPERATURE_BIN_WIDTH * 2
+    merged = [anchor for anchor in V_MINUS_I_TEMPERATURE_ANCHORS if anchor[0] < mist_min - margin]
+    merged.extend(mist_anchors)
+    merged.extend(anchor for anchor in V_MINUS_I_TEMPERATURE_ANCHORS if anchor[0] > mist_max + margin)
+    clean: list[tuple[float, float]] = []
+    last_color: float | None = None
+    for v_minus_i, temperature in sorted(merged, key=lambda item: item[0]):
+        if last_color is not None and abs(v_minus_i - last_color) < 1e-9:
+            clean[-1] = (v_minus_i, temperature)
+        else:
+            clean.append((v_minus_i, temperature))
+        last_color = v_minus_i
+    return tuple(clean)
+
+
+def parse_mist_cmd_vi_temperature_samples(path: Path, bins: list[list[tuple[float, float]]]) -> int:
+    column_index: dict[str, int] | None = None
+    required_columns = {"log_Teff", "Bessell_V", "Bessell_I", "phase"}
+    sample_count = 0
+    with path.open("r", encoding="ascii", errors="ignore") as handle:
+        for raw_line in handle:
+            if raw_line.startswith("# EEP"):
+                columns = raw_line[1:].split()
+                column_index = {name: index for index, name in enumerate(columns)}
+                if not required_columns.issubset(column_index):
+                    return sample_count
+                continue
+            if not raw_line.strip() or raw_line.startswith("#") or column_index is None:
+                continue
+            parts = raw_line.split()
+            log_temperature = float(parts[column_index["log_Teff"]])
+            v_mag = float(parts[column_index["Bessell_V"]])
+            i_mag = float(parts[column_index["Bessell_I"]])
+            phase = int(float(parts[column_index["phase"]]))
+            if phase > MIST_VI_TEMPERATURE_PHASE_MAX:
+                continue
+            if not all(math.isfinite(value) for value in (log_temperature, v_mag, i_mag)):
+                continue
+            if abs(v_mag) > 90 or abs(i_mag) > 90:
+                continue
+            v_minus_i = v_mag - i_mag
+            if not MIST_VI_TEMPERATURE_COLOR_MIN <= v_minus_i <= MIST_VI_TEMPERATURE_COLOR_MAX:
+                continue
+            bin_index = int((v_minus_i - MIST_VI_TEMPERATURE_COLOR_MIN) / MIST_VI_TEMPERATURE_BIN_WIDTH)
+            if 0 <= bin_index < len(bins):
+                bins[bin_index].append((v_minus_i, log_temperature))
+                sample_count += 1
+    return sample_count
+
+
+def build_mist_v_minus_i_temperature_calibration() -> dict[str, object]:
+    files = available_mist_cmd_files()
+    if not files:
+        return fallback_v_minus_i_temperature_calibration("UBVRIplus MIST CMD files not found under data/mist")
+
+    file_signatures = mist_temperature_calibration_file_signatures(files)
+    if MIST_VI_TEMPERATURE_CACHE.exists():
+        try:
+            cached = json.loads(MIST_VI_TEMPERATURE_CACHE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cached = None
+        if (
+            isinstance(cached, dict)
+            and cached.get("version") == MIST_VI_TEMPERATURE_CACHE_VERSION
+            and cached.get("files") == file_signatures
+        ):
+            return cached
+
+    bin_count = int((MIST_VI_TEMPERATURE_COLOR_MAX - MIST_VI_TEMPERATURE_COLOR_MIN) / MIST_VI_TEMPERATURE_BIN_WIDTH) + 1
+    bins: list[list[tuple[float, float]]] = [[] for _ in range(bin_count)]
+    sample_count = 0
+    for _feh, path, _label in files:
+        sample_count += parse_mist_cmd_vi_temperature_samples(path, bins)
+
+    mist_anchors: list[tuple[float, float]] = []
+    for samples in bins:
+        if len(samples) < MIST_VI_TEMPERATURE_MIN_BIN_COUNT:
+            continue
+        color_values = np.array([sample[0] for sample in samples], dtype=float)
+        log_temperature_values = np.array([sample[1] for sample in samples], dtype=float)
+        color = float(np.median(color_values))
+        temperature = float(10 ** np.median(log_temperature_values))
+        mist_anchors.append((color, temperature))
+
+    if len(mist_anchors) < 4:
+        return fallback_v_minus_i_temperature_calibration("UBVRIplus files did not yield enough V-I/Teff samples")
+
+    anchors = merge_mist_temperature_anchors(mist_anchors)
+    calibration = {
+        "version": MIST_VI_TEMPERATURE_CACHE_VERSION,
+        "source": "MIST-UBVRIplus-Bessell-VI",
+        "bands": ["Bessell_V", "Bessell_I"],
+        "temperatureColumn": "log_Teff",
+        "phaseMax": MIST_VI_TEMPERATURE_PHASE_MAX,
+        "binWidth": MIST_VI_TEMPERATURE_BIN_WIDTH,
+        "interpolation": "log-temperature",
+        "anchors": v_minus_i_temperature_anchor_dicts(anchors),
+        "fileCount": len(files),
+        "sampleCount": sample_count,
+        "files": file_signatures,
+    }
+    PROCESSED.mkdir(parents=True, exist_ok=True)
+    MIST_VI_TEMPERATURE_CACHE.write_text(json.dumps(calibration, indent=2, sort_keys=True), encoding="utf-8")
+    return calibration
+
+
+def mist_temperature_anchor_signature(anchors: tuple[tuple[float, float], ...]) -> str:
+    payload = json.dumps(v_minus_i_temperature_anchor_dicts(anchors), separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def fallback_vi_luminosity_temperature_calibration(
+    reason: str,
+    one_d_anchors: tuple[tuple[float, float], ...],
+) -> dict[str, object]:
+    return {
+        "version": MIST_VI_LUMINOSITY_TEMPERATURE_CACHE_VERSION,
+        "source": "fallback-one-dimensional-vi",
+        "available": False,
+        "reason": reason,
+        "fallbackAnchorSignature": mist_temperature_anchor_signature(one_d_anchors),
+        "fileCount": 0,
+        "sampleCount": 0,
+    }
+
+
+def parse_mist_cmd_vi_luminosity_temperature_samples(
+    path: Path,
+    feh_index: int,
+    sum_log_temperature: np.ndarray,
+    counts: np.ndarray,
+) -> int:
+    column_index: dict[str, int] | None = None
+    required_columns = {"log_Teff", "Bessell_V", "Bessell_I", "phase"}
+    sample_count = 0
+    with path.open("r", encoding="ascii", errors="ignore") as handle:
+        for raw_line in handle:
+            if raw_line.startswith("# EEP"):
+                columns = raw_line[1:].split()
+                column_index = {name: index for index, name in enumerate(columns)}
+                if not required_columns.issubset(column_index):
+                    return sample_count
+                continue
+            if not raw_line.strip() or raw_line.startswith("#") or column_index is None:
+                continue
+            parts = raw_line.split()
+            try:
+                log_temperature = float(parts[column_index["log_Teff"]])
+                v_mag = float(parts[column_index["Bessell_V"]])
+                i_mag = float(parts[column_index["Bessell_I"]])
+                phase = int(float(parts[column_index["phase"]]))
+            except (IndexError, ValueError):
+                continue
+            if phase > MIST_VI_TEMPERATURE_PHASE_MAX:
+                continue
+            if not all(math.isfinite(value) for value in (log_temperature, v_mag, i_mag)):
+                continue
+            if abs(v_mag) > 90 or abs(i_mag) > 90:
+                continue
+
+            v_minus_i = v_mag - i_mag
+            log_i_luminosity = -0.4 * (i_mag - M_SUN_I)
+            if not MIST_VI_TEMPERATURE_COLOR_MIN <= v_minus_i <= MIST_VI_TEMPERATURE_COLOR_MAX:
+                continue
+            if not (
+                MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MIN
+                <= log_i_luminosity
+                <= MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MAX
+            ):
+                continue
+
+            color_index = int(round((v_minus_i - MIST_VI_TEMPERATURE_COLOR_MIN) / MIST_VI_TEMPERATURE_BIN_WIDTH))
+            lum_index = int(
+                round(
+                    (log_i_luminosity - MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MIN)
+                    / MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_STEP
+                )
+            )
+            if 0 <= color_index < sum_log_temperature.shape[1] and 0 <= lum_index < sum_log_temperature.shape[2]:
+                sum_log_temperature[feh_index, color_index, lum_index] += log_temperature
+                counts[feh_index, color_index, lum_index] += 1
+                sample_count += 1
+    return sample_count
+
+
+def build_mist_vi_luminosity_temperature_calibration(
+    one_d_calibration: dict[str, object],
+) -> dict[str, object]:
+    files = available_mist_cmd_files()
+    one_d_anchors = v_minus_i_temperature_anchors_from_calibration(one_d_calibration)
+    if not files:
+        return fallback_vi_luminosity_temperature_calibration(
+            "UBVRIplus MIST CMD files not found under data/mist",
+            one_d_anchors,
+        )
+
+    file_signatures = mist_temperature_calibration_file_signatures(files)
+    fallback_anchor_signature = mist_temperature_anchor_signature(one_d_anchors)
+    if MIST_VI_LUMINOSITY_TEMPERATURE_CACHE.exists():
+        try:
+            cached = json.loads(MIST_VI_LUMINOSITY_TEMPERATURE_CACHE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cached = None
+        if (
+            isinstance(cached, dict)
+            and cached.get("version") == MIST_VI_LUMINOSITY_TEMPERATURE_CACHE_VERSION
+            and cached.get("files") == file_signatures
+            and cached.get("fallbackAnchorSignature") == fallback_anchor_signature
+        ):
+            return cached
+
+    color_count = int(
+        round((MIST_VI_TEMPERATURE_COLOR_MAX - MIST_VI_TEMPERATURE_COLOR_MIN) / MIST_VI_TEMPERATURE_BIN_WIDTH)
+    ) + 1
+    lum_count = int(
+        round(
+            (MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MAX - MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MIN)
+            / MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_STEP
+        )
+    ) + 1
+    feh_values = [round_number(feh, 3) for feh, _path, _label in files]
+    sum_log_temperature = np.zeros((len(files), color_count, lum_count), dtype=np.float64)
+    counts = np.zeros((len(files), color_count, lum_count), dtype=np.uint32)
+
+    sample_count = 0
+    for feh_index, (_feh, path, _label) in enumerate(files):
+        sample_count += parse_mist_cmd_vi_luminosity_temperature_samples(
+            path,
+            feh_index,
+            sum_log_temperature,
+            counts,
+        )
+
+    fallback_log_temperature_by_color = np.array(
+        [
+            math.log10(
+                temperature_from_v_minus_i_anchors(
+                    MIST_VI_TEMPERATURE_COLOR_MIN + color_index * MIST_VI_TEMPERATURE_BIN_WIDTH,
+                    one_d_anchors,
+                )
+            )
+            for color_index in range(color_count)
+        ],
+        dtype=np.float64,
+    )
+    grid_log_temperature = np.empty((len(files), color_count, lum_count), dtype=np.float32)
+    lum_indices = np.arange(lum_count, dtype=float)
+    for feh_index in range(len(files)):
+        for color_index in range(color_count):
+            cell_counts = counts[feh_index, color_index]
+            populated = np.flatnonzero(cell_counts > 0)
+            if populated.size:
+                mean_log_temperature = sum_log_temperature[feh_index, color_index, populated] / cell_counts[populated]
+                grid_log_temperature[feh_index, color_index] = np.interp(
+                    lum_indices,
+                    populated.astype(float),
+                    mean_log_temperature,
+                )
+            else:
+                grid_log_temperature[feh_index, color_index] = fallback_log_temperature_by_color[color_index]
+
+    encoded_values = np.clip(
+        np.rint(grid_log_temperature * MIST_VI_LUMINOSITY_TEMPERATURE_VALUE_SCALE),
+        1,
+        np.iinfo(np.uint16).max,
+    ).astype("<u2", copy=False)
+    calibration = {
+        "version": MIST_VI_LUMINOSITY_TEMPERATURE_CACHE_VERSION,
+        "source": "MIST-UBVRIplus-Bessell-VI-logL-feh",
+        "available": True,
+        "bands": ["Bessell_V", "Bessell_I"],
+        "temperatureColumn": "log_Teff",
+        "luminosity": f"I-band luminosity using M_I(Sun)={M_SUN_I:.2f}",
+        "phaseMax": MIST_VI_TEMPERATURE_PHASE_MAX,
+        "interpolation": "trilinear-log-temperature",
+        "missingCellFill": "interpolate along I-band log-luminosity, then fall back to one-dimensional V-I anchors",
+        "axes": {
+            "vMinusI": {
+                "min": MIST_VI_TEMPERATURE_COLOR_MIN,
+                "max": MIST_VI_TEMPERATURE_COLOR_MIN + (color_count - 1) * MIST_VI_TEMPERATURE_BIN_WIDTH,
+                "step": MIST_VI_TEMPERATURE_BIN_WIDTH,
+                "count": color_count,
+            },
+            "logLuminosity": {
+                "min": MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MIN,
+                "max": MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_MIN
+                + (lum_count - 1) * MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_STEP,
+                "step": MIST_VI_LUMINOSITY_TEMPERATURE_LOG_LUM_STEP,
+                "count": lum_count,
+            },
+            "metallicityFeH": feh_values,
+        },
+        "valueEncoding": "uint16-base64-little-endian-log10K",
+        "valueScale": MIST_VI_LUMINOSITY_TEMPERATURE_VALUE_SCALE,
+        "values": base64.b64encode(encoded_values.tobytes(order="C")).decode("ascii"),
+        "fileCount": len(files),
+        "sampleCount": sample_count,
+        "populatedCellCount": int(np.count_nonzero(counts)),
+        "cellCount": int(counts.size),
+        "fallbackAnchorSignature": fallback_anchor_signature,
+        "files": file_signatures,
+    }
+    PROCESSED.mkdir(parents=True, exist_ok=True)
+    MIST_VI_LUMINOSITY_TEMPERATURE_CACHE.write_text(
+        json.dumps(calibration, separators=(",", ":"), sort_keys=True),
+        encoding="utf-8",
+    )
+    return calibration
+
+
 def load_mist_isochrones(
     requests: dict[Path, set[float]],
     mist_files: list[tuple[float, Path, str]],
@@ -5036,7 +5764,7 @@ def load_mist_isochrones(
     arrays: dict[str, np.ndarray] = {}
     meta: dict[str, object] = {"version": 1, "files": {}}
     requested_keys = {
-        mist_cache_key(path.stem, round(age, 2))
+        mist_cache_key(mist_file_label(path), round(age, 2))
         for path, ages in requests.items()
         for age in ages
     }
@@ -5047,29 +5775,31 @@ def load_mist_isochrones(
                 meta = json.loads(str(cached["__meta__"].item()))
             except Exception:
                 meta = {"version": 0, "files": {}}
+            if meta.get("version") != MIST_CLUSTER_ISOCHRONE_CACHE_VERSION:
+                meta = {"version": 0, "files": {}}
             meta_files = meta.get("files") if isinstance(meta.get("files"), dict) else {}
             for path, ages in requests.items():
                 if meta_files.get(path.name) != mist_file_signature(path):
                     continue
                 for age in ages:
-                    key = mist_cache_key(path.stem, round(age, 2))
+                    key = mist_cache_key(mist_file_label(path), round(age, 2))
                     if key in cached:
                         arrays[key] = cached[key]
 
     missing: dict[Path, set[float]] = {}
     for path, ages in requests.items():
         for age in ages:
-            key = mist_cache_key(path.stem, round(age, 2))
+            key = mist_cache_key(mist_file_label(path), round(age, 2))
             if key not in arrays:
                 missing.setdefault(path, set()).add(round(age, 2))
 
     if missing:
         for path, ages in sorted(missing.items(), key=lambda item: item[0].name):
             for age, array in parse_mist_isochrone_file(path, ages).items():
-                arrays[mist_cache_key(path.stem, age)] = array
+                arrays[mist_cache_key(mist_file_label(path), age)] = array
         PROCESSED.mkdir(parents=True, exist_ok=True)
         meta = {
-            "version": 1,
+            "version": MIST_CLUSTER_ISOCHRONE_CACHE_VERSION,
             "massCutoffSolar": CLUSTER_SYNTHETIC_MASS_CUTOFF,
             "renderPhaseMax": CLUSTER_RENDER_PHASE_MAX,
             "files": {path.name: mist_file_signature(path) for path in requests},
@@ -5780,6 +6510,8 @@ def serialize_catalog(stars: list[CatalogStar], origin: tuple[float, float, floa
                 [round_number(value, 6) for value in mira_phases_v] if mira_phases_v else None,
                 mira_v_quality,
                 mira_v_source,
+                star.mira_teff,
+                star.mira_teff_source_index,
             ]
         )
     return rows
@@ -5834,8 +6566,15 @@ def main() -> None:
     color_curve_summary = apply_color_curves(catalog)
     reddening_summary = assign_reddening(catalog)
     mira_distance_summary = apply_mira_distances(miras)
+    mira_temperature_summary = apply_mira_literature_temperatures(miras)
     reddening_summary = assign_reddening(catalog)
     mira_pulsation_summary = apply_mira_pulsations(miras)
+
+    vi_temperature_calibration = build_mist_v_minus_i_temperature_calibration()
+    set_v_minus_i_temperature_anchors(v_minus_i_temperature_anchors_from_calibration(vi_temperature_calibration))
+    vi_luminosity_temperature_calibration = build_mist_vi_luminosity_temperature_calibration(
+        vi_temperature_calibration
+    )
 
     origin = mean_vector(catalog)
     lmc_origin = mean_vector([star for star in catalog if star.location == "LMC"])
@@ -5858,6 +6597,8 @@ def main() -> None:
                 "OGLE-III Magellanic LPV Mira catalogs",
                 "Iwanek et al. 2021 Mira mid-IR mean magnitudes and PLRs",
                 "AllWISE Mira cross-match for mid-IR PLR distances",
+                "Riebel et al. 2012 GRAMS LMC evolved-star SED temperatures",
+                "SAGE-Spec LMC/SMC evolved-star model temperatures",
                 "XMC Red Clump Distance Map FITS",
                 "Skowron et al. 2021 OGLE-IV Red Clump E(V-I) map",
                 "He & Huang 2026 3-D RR Lyrae E(V-I) map",
@@ -5865,17 +6606,22 @@ def main() -> None:
                 "MIST non-rotating alpha=0 isochrones",
             ],
             "coordinateFrame": "OGLE-aligned observed-sky tangent frame centered on the OGLE Magellanic sample; x/y are RA/Dec tangent axes rotated 15 degrees so the default OGLE-facing view starts level, z=away from Sun, units=kpc.",
-            "spectralNote": "Spectral class is inferred from dereddened V-I color because the source tables do not publish literal spectral types; rendered color subtracts E(V-I), maps intrinsic V-I to an approximate effective temperature, interpolates the full Mitchell Charity 2-degree sRGB D58 blackbody table, and applies display-only temperature/chroma contrast around the D58 whitepoint.",
+            "spectralNote": "Spectral class is inferred from dereddened V-I color because most source tables do not publish literal spectral types; rendered color subtracts E(V-I), maps intrinsic V-I plus I-band luminosity and [Fe/H] to an effective-temperature calibration derived from MIST UBVRIplus Bessell V/I photometry when available, interpolates the full Mitchell Charity 2-degree sRGB D58 blackbody table, and applies display-only temperature/chroma contrast around the D58 whitepoint. Miras with literature or SED-model Teff values use those values as mean temperature priors for display color.",
             "reddeningNote": "E(V-I) defaults to the Skowron et al. 2021 OGLE-IV red-clump map. Where a star falls inside the He & Huang 2026 3-D RR Lyrae GeoJSON partitions, the distance-dependent He & Huang E(V-I) value overrides the Skowron map. Stars outside both maps use same-cloud k=32 nearest-neighbor imputation from directly matched stars, with same-cloud median only as a sparse-neighborhood fallback. Pulsation color curves keep their OGLE V-I offsets, but the mean color is dereddened before temperature conversion.",
             "luminosityNote": "Luminosity is derived from I-band magnitude and line-of-sight distance using M_I(Sun)=4.10.",
             "anomalousCepheidDistanceNote": "Anomalous Cepheid distances use the LMC OGLE-IV Wesenheit period-luminosity relations from Jacyszyn-Dobrzeniecka et al. 2019, anchored to the Pietrzynski et al. 2019 LMC distance of 49.59 kpc. The published Bridge anomalous Cepheids are marked as Bridge; the Galactic foreground reclassification OGLE-GAL-ACEP-028 is included as Outer at its published 28.18 kpc distance.",
-            "miraDistanceNote": "OGLE Magellanic Mira positions and I/V means come from the published OGLE-III LPV catalogs because OGLE does not publish LMC/SMC Miras in the OGLE-IV OCVS. LMC Mira distances prefer the published Iwanek et al. 2021 extinction-corrected WISE/Spitzer mean magnitudes and their mid-IR PLRs, calibrated to the 49.59 kpc Pietrzynski et al. 2019 LMC distance; LMC stars missing those published mid-IR means fall back to a 2 arcsec AllWISE cross-match on the same PLRs. SMC Mira distances use a 2 arcsec AllWISE cross-match with the same published PLRs and a conservative single-catalog magnitude-error floor, then anchor the median AllWISE PLR modulus to the 62.44 kpc Graczyk et al. 2020 SMC geometric distance. Stars without reliable mid-IR estimates use a same-cloud 32-neighbor distance estimate where the local Mira field is dense enough, and only retain the published geometric cloud mean if that local estimate is unavailable.",
-            "radiusNote": "Radius is estimated from I-band luminosity and dereddened V-I color using an approximate effective temperature; it is intended for display scaling.",
-            "colorCurveNote": "Pulsation color is driven by validated OGLE V- and I-band template fits; compact phase templates store V-I offsets around the catalog mean observed color before subtracting E(V-I) and blackbody color rendering.",
+            "miraDistanceNote": "OGLE Magellanic Mira positions and I/V means come from the published OGLE-III LPV catalogs because OGLE does not publish LMC/SMC Miras in the OGLE-IV OCVS. LMC Mira distances prefer the published Iwanek et al. 2021 extinction-corrected WISE/Spitzer mean magnitudes and their mid-IR PLRs, calibrated to the 49.59 kpc Pietrzynski et al. 2019 LMC distance; LMC stars missing those published mid-IR means fall back to a 2 arcsec AllWISE cross-match on the same PLRs. SMC Mira distances use a 2 arcsec AllWISE cross-match with the same published PLRs and a conservative single-catalog magnitude-error floor, without a geometric zero-point renormalization. Stars without reliable mid-IR estimates use a same-cloud 32-neighbor distance estimate where the local Mira field is dense enough, and only retain the published geometric cloud mean if that local estimate is unavailable.",
+            "miraTemperatureNote": "Mira mean Teff priors prefer SAGE-Spec model temperatures where directly linked to OGLE IDs, then 2 arcsec Riebel et al. 2012 GRAMS LMC SED fits, then Iwanek et al. 2021 Tstar values for remaining golden-sample LMC Miras. These values are single-epoch or SED-model priors, not phase-resolved Rosseland temperatures; browser rendering constrains phase excursions around the prior so Miras remain cool late-type stars.",
+            "radiusNote": "Radius is estimated from I-band luminosity and dereddened V-I color using the generated V-I effective-temperature calibration; it is intended for display scaling.",
+            "colorCurveNote": "Pulsation color is driven by validated OGLE V- and I-band template fits; compact phase templates store V-I offsets around the catalog mean observed color before subtracting E(V-I). Rendering evaluates the temperature calibration at each phase using instantaneous intrinsic V-I and I-band luminosity.",
             "brightnessCurveNote": "Cepheid, anomalous Cepheid, and RR Lyrae brightness uses compact I-band templates fitted from OGLE epoch photometry, with validated convex dictionary templates promoted where they improve the unmodulated lightcurve. Miras use OGLE LPV primary, secondary, and tertiary periods and I-band amplitudes as a time-domain multi-sine model with phases fitted to OGLE I-band epoch photometry; V-band Mira components are fitted where possible, and sparse or missing V curves are regularized or filled from empirical V/I amplitude-ratio and phase-lag priors learned from the highest-quality Mira V/I fits.",
             "redClumpDensityNote": "Optional XMC surface opacity uses a smoothed Gaia DR3 broad red-clump count proxy binned on the same 0.25 degree galactic grid; it is for visual density only, not a reproduced Oden et al. RC catalog.",
-            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point luminosities are I-band blackbody surface-flux ratios relative to the Sun, radii are MIST radii, and positions are drawn inside the reported cluster radius with an age-dependent mass-segregation bias.",
+            "clusterSynthesisNote": "Perren et al. cluster masses seed single-star samples from a Chabrier-style IMF above 0.5 solar masses. Each synthetic star samples [Fe/H] and log(age) from the cluster uncertainty distribution truncated to the reported one-sigma support, then bilinearly interpolates between neighboring MIST alpha=0, non-rotating isochrone blocks before mass interpolation. When UBVRIplus MIST CMD files are available, Bessell V and I magnitudes provide synthetic V-I colors and I-band luminosities; otherwise the build falls back to full MIST tracks with blackbody-derived display colors. Stars with I-band luminosity below 1 solar luminosity are aggregated into per-cluster radial glow bins and compact HR bins; brighter stars are rendered as points. Point radii come from MIST radii or from MIST luminosity plus Teff, and positions are drawn inside the reported cluster radius with an age-dependent mass-segregation bias.",
             "redClumpDensitySource": red_clump_density_meta,
+            "viTemperatureCalibration": vi_temperature_calibration,
+            "viLuminosityTemperatureCalibration": vi_luminosity_temperature_calibration,
+            "meanMetallicityFeHByLocation": MEAN_METALLICITY_FEH_BY_LOCATION,
+            "miraTemperatureSources": [dict(source) for source in MIRA_TEMPERATURE_SOURCES],
             "originDistanceKpc": round_number(vector_length(origin), 3),
             "coordinateCenters": {
                 "sampleGalacticVectorKpc": rounded_vector(origin),
@@ -5936,6 +6682,8 @@ def main() -> None:
                 "miraPhasesV",
                 "miraVPulsationQuality",
                 "miraVPulsationSource",
+                "miraTeffK",
+                "miraTeffSourceIndex",
             ],
             "redClump": ["x", "y", "z", "distanceKpc", "galLonDeg", "galLatDeg", "densityCount", "densityUnit"],
             "clusters": [
@@ -6030,6 +6778,7 @@ def main() -> None:
             **color_curve_summary,
             **reddening_summary,
             **mira_distance_summary,
+            **mira_temperature_summary,
             **mira_pulsation_summary,
             **red_clump_density_summary,
             **cluster_summary,
@@ -6067,6 +6816,18 @@ def main() -> None:
             {
                 "name": "AllWISE Source Catalog",
                 "url": "https://wise2.ipac.caltech.edu/docs/release/allwise/",
+            },
+            {
+                "name": "Riebel et al. 2012 GRAMS LMC evolved-star SED fits",
+                "url": "https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/J/ApJ/753/71?format=html&tex=true",
+            },
+            {
+                "name": "Jones et al. 2017 SAGE-Spec LMC point-source classifications",
+                "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR-3?-source=J%2FMNRAS%2F470%2F3250",
+            },
+            {
+                "name": "Ruffle et al. 2015 SAGE-Spec SMC point-source classifications",
+                "url": "https://vizier.unistra.fr/cgi-bin/VizieR-3?-source=J%2FMNRAS%2F451%2F3504",
             },
             {
                 "name": "Pietrzynski et al. 2019 LMC geometric distance",

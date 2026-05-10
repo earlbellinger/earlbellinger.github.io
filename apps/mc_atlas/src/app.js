@@ -1,10 +1,17 @@
-const DATA_VERSION = "20260509-cluster-isochrone-interp";
+const DATA_VERSION = "20260510-mira-literature-teff";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
 const DATA_DOWNLOAD_PROGRESS_MAX = 0.88;
 const ZOOM_BASE_SCALE = 1.62;
 const DEFAULT_ZOOM_SCALE = 1;
 const ZOOM_SCALE_MIN = 0.5;
 const ZOOM_SCALE_MAX = 1000;
+const TARGET_ZOOM_SCALE_MAX = 100_000;
+const TARGET_ZOOM_SCREEN_DIAMETER_FRACTION = 0.8;
+const TARGET_SELECTION_RING_PADDING_PX = 7;
+const TARGET_SELECTION_RING_MIN_RADIUS = 8;
+const DEFAULT_UNCERTAINTY_SEED = 0;
+const UNCERTAINTY_SEED_MAX = 100;
+const UNCERTAINTY_TRUNCATION_SIGMA = 3;
 const DESKTOP_SCENE_CENTER_OFFSET_X = -30;
 const DATASET_EXPOSURE_MIN = 0.01;
 const DATASET_EXPOSURE_MAX = 100;
@@ -156,6 +163,8 @@ const IDX = {
   miraPhasesV: 47,
   miraVPulsationQuality: 48,
   miraVPulsationSource: 49,
+  miraTeff: 50,
+  miraTeffSourceIndex: 51,
 };
 
 const RC = {
@@ -329,9 +338,11 @@ const PULSATOR_PRESET_AMPLITUDE_SCALES = {
   miras: 2,
 };
 const LOCATION_LABELS = ["LMC", "SMC", "Bridge", "Outer"];
+const DEFAULT_MEAN_METALLICITY_FEH_BY_LOCATION = [-0.4, -0.7, -0.55, -0.8];
 const OGLE_OCVS_OBJECT_URL = "https://ogledb.astrouw.edu.pl/~ogle/OCVS/getobj.php?s=";
 const OGLE_III_CVS_OBJECT_URL = "https://ogledb.astrouw.edu.pl/~ogle/CVS/o.php?";
 const SUN_ABSOLUTE_I_MAG = 4.1;
+const SUN_EFFECTIVE_TEMPERATURE = 5772;
 const RED_CLUMP_MI = -0.25;
 const RED_CLUMP_LUMINOSITY = 10 ** (-0.4 * (RED_CLUMP_MI - SUN_ABSOLUTE_I_MAG));
 const RED_CLUMP_TEMPERATURE = 4800;
@@ -371,9 +382,17 @@ const BASE_LUMINOSITY_FACTOR = 3.25;
 const PULSATOR_BASE_RADIUS_FACTOR = 1.5;
 const COLOR_CACHE_PRECISION = 200;
 const MAX_COLOR_PULSE_OFFSET = 0.42;
-const MAX_MIRA_COLOR_PULSE_OFFSET = 2.2;
-const MAX_MIRA_PRIOR_ASSISTED_COLOR_PULSE_OFFSET = 2.0;
-const MAX_MIRA_PRIOR_ONLY_COLOR_PULSE_OFFSET = 1.6;
+const MAX_MIRA_COLOR_PULSE_OFFSET = 1.25;
+const MAX_MIRA_PRIOR_ASSISTED_COLOR_PULSE_OFFSET = 1.0;
+const MAX_MIRA_PRIOR_ONLY_COLOR_PULSE_OFFSET = 0.75;
+const MIRA_MIN_INTRINSIC_V_MINUS_I = 1.15;
+const MIRA_MAX_INTRINSIC_V_MINUS_I = 5.5;
+const MIRA_TEMPERATURE_HALF_SPAN_K = 500;
+const MIRA_TEMPERATURE_BOUNDS = {
+  carbon: { min: 1400, max: 3600 },
+  oxygen: { min: 2000, max: 4080 },
+  fallback: { min: 1700, max: 4080 },
+};
 const LIGHT_CURVE_AREA_PULSE_SHARE = 0.78;
 const CEPHEID_PRESET_AREA_PULSE_SHARE = 0.72;
 const RR_LYRAE_AREA_PULSE_SHARE = 0.74;
@@ -844,6 +863,8 @@ const MOBILE_TARGET_PICK_RADIUS_SCALE = 2.25;
 const MOBILE_STAR_BASE_RADIUS_SCALE = 0.5;
 const MOBILE_DRAWER_SWIPE_CLOSE_DISTANCE = 58;
 let mobileControlsOpen = false;
+let pendingUncertaintySeed = null;
+let uncertaintySeedFrame = 0;
 
 const controls = {
   yaw: document.querySelector("#yaw"),
@@ -851,6 +872,7 @@ const controls = {
   roll: document.querySelector("#roll"),
   zoom: document.querySelector("#zoom"),
   radiusScale: document.querySelector("#radiusScale"),
+  uncertaintySeed: document.querySelector("#uncertaintySeed"),
   panLock: document.querySelector("#panLock"),
   pulsationSpeed: document.querySelector("#pulsationSpeed"),
   pulsationAmplitude: document.querySelector("#pulsationAmplitude"),
@@ -865,6 +887,7 @@ const outputs = {
   roll: document.querySelector("#rollValue"),
   zoom: document.querySelector("#zoomValue"),
   radiusScale: document.querySelector("#radiusValue"),
+  uncertaintySeed: document.querySelector("#uncertaintySeedValue"),
   pulsationSpeed: document.querySelector("#pulsationSpeedValue"),
   pulsationAmplitude: document.querySelector("#pulsationAmplitudeValue"),
   visibleTotal: document.querySelector("#visibleTotal"),
@@ -923,6 +946,7 @@ const state = {
   pulsationSpeedLog: Math.log10(INITIAL_PULSATION_SPEED),
   pulsationSpeed: INITIAL_PULSATION_SPEED,
   pulsationAmplitudeScale: defaultPulsationAmplitudeScaleForPreset(PULSATOR_DEFAULT_PRESET),
+  uncertaintySeed: DEFAULT_UNCERTAINTY_SEED,
   datasetPreset: null,
   pulsatorPreset: null,
   datasets: {
@@ -1003,6 +1027,16 @@ const editableMultiplierConfigs = {
       queueRender();
     },
   },
+  uncertaintySeed: {
+    label: "seed",
+    digits: 0,
+    inputMode: "numeric",
+    unit: "",
+    min: () => DEFAULT_UNCERTAINTY_SEED,
+    max: () => UNCERTAINTY_SEED_MAX,
+    get: () => state.uncertaintySeed,
+    set: (value) => setUncertaintySeed(value),
+  },
   pulsationSpeed: {
     label: "speed",
     digits: 0,
@@ -1039,6 +1073,10 @@ const scene = {
   centerX: 0,
   centerY: 0,
   scale: 1,
+  temperatureAnchors: V_MINUS_I_TEMPERATURE_ANCHORS,
+  temperatureGrid: null,
+  meanMetallicityFeHByLocation: DEFAULT_MEAN_METALLICITY_FEH_BY_LOCATION,
+  miraTemperatureSources: [],
   payload: null,
   catalog: [],
   redClump: [],
@@ -1119,6 +1157,9 @@ const MIRA_LIGHTCURVE_INSET_CYCLES = 10;
 const MIRA_AMPLITUDE_STATS_CYCLES = 30;
 const SVG_NS = "http://www.w3.org/2000/svg";
 const colorCache = new Map();
+const catalogTemperatureColorCache = new Map();
+const CATALOG_TEMPERATURE_COLOR_CACHE_MAX = 500_000;
+const TEMPERATURE_GRID_METALLICITY_CACHE_PRECISION = 20;
 const catalogRenderColorCache = new Map();
 const perfState = {
   catalogMs: 0,
@@ -1196,21 +1237,88 @@ function clampRadiusScale(value) {
   return clamp(value, RADIUS_SCALE_MIN, RADIUS_SCALE_MAX);
 }
 
-function clampZoomScale(value) {
-  return clamp(value, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX);
+function clampUncertaintySeed(value) {
+  const seed = Number(value);
+  if (!Number.isFinite(seed)) return DEFAULT_UNCERTAINTY_SEED;
+  return Math.trunc(clamp(seed, DEFAULT_UNCERTAINTY_SEED, UNCERTAINTY_SEED_MAX));
+}
+
+function selectedTargetForDeepZoom() {
+  return state.locked || null;
+}
+
+function targetZoomUsableViewportSize() {
+  const width = scene.width || window.innerWidth || 0;
+  const height = scene.height || window.innerHeight || 0;
+  let usableWidth = width;
+  let usableHeight = height;
+  const panelRect = elements.panel?.getBoundingClientRect?.();
+  if (
+    !state.overlaysHidden &&
+    panelRect &&
+    panelRect.width > 0 &&
+    panelRect.height > 0 &&
+    panelRect.right > 0 &&
+    panelRect.bottom > 0 &&
+    panelRect.left < width &&
+    panelRect.top < height
+  ) {
+    if (panelRect.left > width * 0.5) usableWidth = Math.min(usableWidth, panelRect.left);
+    if (panelRect.top > height * 0.5) usableHeight = Math.min(usableHeight, panelRect.top);
+  }
+  return { width: usableWidth, height: usableHeight };
+}
+
+function targetZoomLimitRadius() {
+  const { width, height } = targetZoomUsableViewportSize();
+  const viewportSize = Math.min(width, height);
+  return Math.max(48, viewportSize * TARGET_ZOOM_SCREEN_DIAMETER_FRACTION * 0.5);
+}
+
+function targetZoomForRadiusLimit(target, low, high, limitRadius) {
+  if (targetSelectionRadiusAtZoom(target, low) >= limitRadius) return low;
+  if (targetSelectionRadiusAtZoom(target, high) < limitRadius) return high;
+
+  for (let index = 0; index < 28; index += 1) {
+    const mid = Math.sqrt(low * high);
+    if (targetSelectionRadiusAtZoom(target, mid) < limitRadius) low = mid;
+    else high = mid;
+  }
+  return high;
+}
+
+function targetZoomScaleMax(target = selectedTargetForDeepZoom()) {
+  if (!target || scene.width <= 0 || scene.height <= 0) return ZOOM_SCALE_MAX;
+
+  const limitRadius = targetZoomLimitRadius();
+  const radiusAtSliderMax = targetSelectionRadiusAtZoom(target, ZOOM_SCALE_MAX);
+  if (!Number.isFinite(radiusAtSliderMax)) return ZOOM_SCALE_MAX;
+  if (radiusAtSliderMax >= limitRadius) {
+    return targetZoomForRadiusLimit(target, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX, limitRadius);
+  }
+  return targetZoomForRadiusLimit(target, ZOOM_SCALE_MAX, TARGET_ZOOM_SCALE_MAX, limitRadius);
+}
+
+function clampZoomScale(value, { allowTargetZoom = false, target = selectedTargetForDeepZoom() } = {}) {
+  const targetMaxZoom = target ? targetZoomScaleMax(target) : ZOOM_SCALE_MAX;
+  const maxZoom = allowTargetZoom ? targetMaxZoom : Math.min(ZOOM_SCALE_MAX, targetMaxZoom);
+  return clamp(value, ZOOM_SCALE_MIN, maxZoom);
 }
 
 function effectiveZoomScale(value = state.zoom) {
-  return clampZoomScale(value) * ZOOM_BASE_SCALE;
+  const zoom = Number.isFinite(value) ? value : DEFAULT_ZOOM_SCALE;
+  return Math.max(ZOOM_SCALE_MIN, zoom) * ZOOM_BASE_SCALE;
 }
 
 function panDragSensitivity(value = state.zoom) {
-  const zoomSteps = Math.max(0, Math.log2(Math.max(1, clampZoomScale(value))));
+  const zoom = Number.isFinite(value) ? value : DEFAULT_ZOOM_SCALE;
+  const zoomSteps = Math.max(0, Math.log2(Math.max(1, zoom)));
   return Math.max(PAN_DRAG_MIN_SENSITIVITY, 1 / (1 + zoomSteps * PAN_DRAG_ZOOM_DAMPING));
 }
 
 function orbitDragSensitivity(value = state.zoom) {
-  const zoomSteps = Math.max(0, Math.log2(Math.max(1, clampZoomScale(value))));
+  const zoom = Number.isFinite(value) ? value : DEFAULT_ZOOM_SCALE;
+  const zoomSteps = Math.max(0, Math.log2(Math.max(1, zoom)));
   return Math.max(ORBIT_DRAG_MIN_SENSITIVITY, 1 / (1 + zoomSteps * ORBIT_DRAG_ZOOM_DAMPING));
 }
 
@@ -1622,7 +1730,7 @@ function syncEditableMultiplierOutput(key, value) {
   button.textContent = formatMultiplierValue(value, config.digits);
   button.setAttribute("aria-label", `Edit ${config.label} value`);
   button.title = `Edit ${config.label} value`;
-  unit.textContent = config.unit || "x";
+  unit.textContent = config.unit ?? "x";
   if (output.firstElementChild !== button || output.lastElementChild !== unit || output.children.length !== 2) {
     output.replaceChildren(button, unit);
   }
@@ -1663,7 +1771,7 @@ function beginEditableMultiplierEdit(key) {
   input.setAttribute("aria-label", `Edit ${config.label} value`);
 
   unit.className = "editableMultiplierUnit";
-  unit.textContent = config.unit || "x";
+  unit.textContent = config.unit ?? "x";
 
   const finish = (shouldCommit) => {
     if (finished) return;
@@ -1887,6 +1995,104 @@ function clusterStarCoordinates(row) {
   };
 }
 
+function coordinatesFromGalacticVector(galacticVector) {
+  const center = lonLatFromVector(galacticVector);
+  return {
+    galacticVector,
+    distance: center.distance,
+    lonDeg: center.lon,
+    latDeg: center.lat,
+  };
+}
+
+function catalogCoordinatesForDistance(row, distance) {
+  const galacticVector = vectorFromLonLat(row[IDX.galLonDeg], row[IDX.galLatDeg], distance);
+  return {
+    galacticVector,
+    distance,
+    lonDeg: row[IDX.galLonDeg],
+    latDeg: row[IDX.galLatDeg],
+  };
+}
+
+function clusterCoordinatesForDistance(row, distance) {
+  const galacticVector = vectorFromLonLat(row[CL.galLonDeg], row[CL.galLatDeg], distance);
+  return {
+    galacticVector,
+    distance,
+    lonDeg: row[CL.galLonDeg],
+    latDeg: row[CL.galLatDeg],
+  };
+}
+
+function kpcToDistanceModulus(distanceKpc) {
+  return 5 * Math.log10(distanceKpc) + 10;
+}
+
+function distanceModulusToKpc(distanceModulus) {
+  return 10 ** ((distanceModulus - 10) / 5);
+}
+
+function distanceErrorToModulusError(distanceKpc, distanceErrorKpc) {
+  if (!Number.isFinite(distanceKpc) || !Number.isFinite(distanceErrorKpc) || distanceKpc <= 0 || distanceErrorKpc <= 0) {
+    return null;
+  }
+  return (5 * distanceErrorKpc) / (Math.log(10) * distanceKpc);
+}
+
+function truncatedSeededStandardNormal(seed, key) {
+  let fallback = 0;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const u1 = Math.max(Number.EPSILON, seededUnit32(`${seed}:${key}:${attempt}:a`));
+    const u2 = seededUnit32(`${seed}:${key}:${attempt}:b`);
+    const normal = Math.sqrt(-2 * Math.log(u1)) * Math.cos(Math.PI * 2 * u2);
+    if (Number.isFinite(normal)) {
+      fallback = normal;
+      if (Math.abs(normal) <= UNCERTAINTY_TRUNCATION_SIGMA) return normal;
+    }
+  }
+  return clamp(fallback, -UNCERTAINTY_TRUNCATION_SIGMA, UNCERTAINTY_TRUNCATION_SIGMA);
+}
+
+function sampledDistanceFromModulusError(distanceKpc, modulusError, seed, key) {
+  if (
+    seed === DEFAULT_UNCERTAINTY_SEED ||
+    !Number.isFinite(distanceKpc) ||
+    !Number.isFinite(modulusError) ||
+    distanceKpc <= 0 ||
+    modulusError <= 0
+  ) {
+    return distanceKpc;
+  }
+  const sampledModulus = kpcToDistanceModulus(distanceKpc) + truncatedSeededStandardNormal(seed, key) * modulusError;
+  const sampledDistance = distanceModulusToKpc(sampledModulus);
+  return Number.isFinite(sampledDistance) && sampledDistance > 0 ? sampledDistance : distanceKpc;
+}
+
+function sampledDistanceFromKpcError(distanceKpc, distanceErrorKpc, seed, key) {
+  return sampledDistanceFromModulusError(
+    distanceKpc,
+    distanceErrorToModulusError(distanceKpc, distanceErrorKpc),
+    seed,
+    key,
+  );
+}
+
+function luminosityFromIMagnitude(iMagnitude, distanceKpc) {
+  if (!Number.isFinite(iMagnitude) || !Number.isFinite(distanceKpc) || distanceKpc <= 0) return null;
+  const absoluteI = iMagnitude - kpcToDistanceModulus(distanceKpc);
+  const luminosity = 10 ** (-0.4 * (absoluteI - SUN_ABSOLUTE_I_MAG));
+  return Number.isFinite(luminosity) && luminosity > 0 ? luminosity : null;
+}
+
+function stellarRadiusFromLuminosityAndColor(row, luminosity, vMinusI) {
+  if (!Number.isFinite(luminosity) || luminosity <= 0 || !Number.isFinite(vMinusI)) return null;
+  const logLuminosity = Math.log10(luminosity);
+  const temperature = effectiveTemperatureForCatalogState(row, vMinusI, logLuminosity);
+  if (!Number.isFinite(temperature) || temperature <= 0) return null;
+  return Math.sqrt(luminosity) * (SUN_EFFECTIVE_TEMPERATURE / temperature) ** 2;
+}
+
 function longitudeBoundsForValues(values, padding = SKY_GRID_BOUNDS_PADDING_DEGREES) {
   const longitudes = values.filter(Number.isFinite).map(normalizeDegrees360).sort((a, b) => a - b);
   if (longitudes.length === 0) return { start: 0, span: 0 };
@@ -2070,8 +2276,24 @@ function smoothStep(value) {
   return t * t * (3 - 2 * t);
 }
 
+function normalizedTemperatureAnchors(anchors) {
+  if (!Array.isArray(anchors)) return V_MINUS_I_TEMPERATURE_ANCHORS;
+  const clean = anchors
+    .map((anchor) => ({
+      vMinusI: Number(anchor?.vMinusI),
+      temperature: Number(anchor?.temperature),
+    }))
+    .filter((anchor) => Number.isFinite(anchor.vMinusI) && Number.isFinite(anchor.temperature) && anchor.temperature > 0)
+    .sort((left, right) => left.vMinusI - right.vMinusI);
+  return clean.length >= 2 ? clean : V_MINUS_I_TEMPERATURE_ANCHORS;
+}
+
+function activeVMinusITemperatureAnchors() {
+  return scene.temperatureAnchors?.length >= 2 ? scene.temperatureAnchors : V_MINUS_I_TEMPERATURE_ANCHORS;
+}
+
 function effectiveTemperatureFromVMinusI(vMinusI) {
-  const anchors = V_MINUS_I_TEMPERATURE_ANCHORS;
+  const anchors = activeVMinusITemperatureAnchors();
   if (vMinusI <= anchors[0].vMinusI) return anchors[0].temperature;
 
   for (let index = 1; index < anchors.length; index += 1) {
@@ -2086,6 +2308,234 @@ function effectiveTemperatureFromVMinusI(vMinusI) {
   }
 
   return anchors[anchors.length - 1].temperature;
+}
+
+function normalizedMeanMetallicityFeHByLocation(raw) {
+  const values = DEFAULT_MEAN_METALLICITY_FEH_BY_LOCATION.slice();
+  if (!raw || typeof raw !== "object") return values;
+  LOCATION_LABELS.forEach((label, index) => {
+    const value = Number(raw[label]);
+    if (Number.isFinite(value)) values[index] = value;
+  });
+  return values;
+}
+
+function decodeBase64Uint16(encoded) {
+  if (typeof encoded !== "string" || !encoded) return null;
+  try {
+    const binary = window.atob(encoded);
+    if (binary.length % 2 !== 0) return null;
+    const values = new Uint16Array(binary.length / 2);
+    for (let index = 0, byteIndex = 0; index < values.length; index += 1, byteIndex += 2) {
+      values[index] = binary.charCodeAt(byteIndex) | (binary.charCodeAt(byteIndex + 1) << 8);
+    }
+    return values;
+  } catch {
+    return null;
+  }
+}
+
+function normalizedGridAxis(raw) {
+  const min = Number(raw?.min);
+  const step = Number(raw?.step);
+  const count = Math.trunc(Number(raw?.count));
+  if (!Number.isFinite(min) || !Number.isFinite(step) || step <= 0 || !Number.isInteger(count) || count < 2) {
+    return null;
+  }
+  return {
+    min,
+    step,
+    count,
+    max: min + step * (count - 1),
+  };
+}
+
+function normalizedTemperatureGrid(raw) {
+  if (!raw?.available || raw.valueEncoding !== "uint16-base64-little-endian-log10K") return null;
+  const colorAxis = normalizedGridAxis(raw.axes?.vMinusI);
+  const logLuminosityAxis = normalizedGridAxis(raw.axes?.logLuminosity);
+  const metallicityFeH = Array.isArray(raw.axes?.metallicityFeH)
+    ? raw.axes.metallicityFeH.map(Number).filter(Number.isFinite)
+    : [];
+  const valueScale = Number(raw.valueScale);
+  const values = decodeBase64Uint16(raw.values);
+  const expectedLength = colorAxis?.count * logLuminosityAxis?.count * metallicityFeH.length;
+  if (
+    !colorAxis ||
+    !logLuminosityAxis ||
+    metallicityFeH.length < 2 ||
+    !Number.isFinite(valueScale) ||
+    valueScale <= 0 ||
+    !values ||
+    values.length !== expectedLength
+  ) {
+    return null;
+  }
+  return {
+    colorAxis,
+    logLuminosityAxis,
+    metallicityFeH,
+    valueScale,
+    values,
+  };
+}
+
+function axisBracket(axis, value) {
+  const rawIndex = clamp((value - axis.min) / axis.step, 0, axis.count - 1);
+  const lower = Math.floor(rawIndex);
+  const upper = Math.min(axis.count - 1, lower + 1);
+  return {
+    lower,
+    upper,
+    amount: upper === lower ? 0 : rawIndex - lower,
+  };
+}
+
+function metallicityBracket(values, feh) {
+  if (feh <= values[0]) return { lower: 0, upper: 0, amount: 0 };
+  const lastIndex = values.length - 1;
+  if (feh >= values[lastIndex]) return { lower: lastIndex, upper: lastIndex, amount: 0 };
+  for (let index = 1; index < values.length; index += 1) {
+    if (feh <= values[index]) {
+      const left = values[index - 1];
+      const right = values[index];
+      return {
+        lower: index - 1,
+        upper: index,
+        amount: (feh - left) / (right - left),
+      };
+    }
+  }
+  return { lower: lastIndex, upper: lastIndex, amount: 0 };
+}
+
+function temperatureGridValue(grid, fehIndex, colorIndex, lumIndex) {
+  const index =
+    (fehIndex * grid.colorAxis.count + colorIndex) * grid.logLuminosityAxis.count + lumIndex;
+  return grid.values[index] / grid.valueScale;
+}
+
+function temperatureFromGrid(vMinusI, logLuminosity, metallicityFeH) {
+  const grid = scene.temperatureGrid;
+  if (
+    !grid ||
+    !Number.isFinite(vMinusI) ||
+    !Number.isFinite(logLuminosity) ||
+    !Number.isFinite(metallicityFeH)
+  ) {
+    return null;
+  }
+
+  const color = axisBracket(grid.colorAxis, vMinusI);
+  const luminosity = axisBracket(grid.logLuminosityAxis, logLuminosity);
+  const metallicity = metallicityBracket(grid.metallicityFeH, metallicityFeH);
+  let weightedLogTemperature = 0;
+  let totalWeight = 0;
+
+  for (const [fehIndex, fehWeight] of [
+    [metallicity.lower, 1 - metallicity.amount],
+    [metallicity.upper, metallicity.amount],
+  ]) {
+    if (fehWeight <= 0) continue;
+    for (const [colorIndex, colorWeight] of [
+      [color.lower, 1 - color.amount],
+      [color.upper, color.amount],
+    ]) {
+      if (colorWeight <= 0) continue;
+      for (const [lumIndex, lumWeight] of [
+        [luminosity.lower, 1 - luminosity.amount],
+        [luminosity.upper, luminosity.amount],
+      ]) {
+        const weight = fehWeight * colorWeight * lumWeight;
+        if (weight <= 0) continue;
+        weightedLogTemperature += temperatureGridValue(grid, fehIndex, colorIndex, lumIndex) * weight;
+        totalWeight += weight;
+      }
+    }
+  }
+
+  if (totalWeight <= 0) return null;
+  return 10 ** (weightedLogTemperature / totalWeight);
+}
+
+function metallicityForCatalogRow(row) {
+  if (Number.isFinite(row?.[IDX.feh])) return row[IDX.feh];
+  const location = Math.trunc(Number(row?.[IDX.location]));
+  const value = scene.meanMetallicityFeHByLocation?.[location];
+  if (Number.isFinite(value)) return value;
+  return DEFAULT_MEAN_METALLICITY_FEH_BY_LOCATION[0];
+}
+
+function isMiraRow(row) {
+  return DATASET_KEYS[row?.[IDX.dataset]] === "miras";
+}
+
+function temperatureFromColorLuminosity(row, vMinusI, logLuminosity) {
+  const gridTemperature = temperatureFromGrid(vMinusI, logLuminosity, metallicityForCatalogRow(row));
+  return Number.isFinite(gridTemperature) ? gridTemperature : effectiveTemperatureFromVMinusI(vMinusI);
+}
+
+function miraLiteratureTemperature(row) {
+  const temperature = Number(row?.[IDX.miraTeff]);
+  return Number.isFinite(temperature) && temperature > 0 ? temperature : null;
+}
+
+function miraTemperatureSourceLabel(row) {
+  const sourceIndex = Math.trunc(Number(row?.[IDX.miraTeffSourceIndex]));
+  if (!Number.isInteger(sourceIndex) || sourceIndex < 0) return null;
+  const source = scene.miraTemperatureSources?.[sourceIndex];
+  return source?.label || source?.id || null;
+}
+
+function miraTemperatureAbsoluteBounds(row) {
+  const mode = String(row?.[IDX.mode] || "").toLowerCase();
+  if (mode.startsWith("c") || mode.includes("c-rich")) return MIRA_TEMPERATURE_BOUNDS.carbon;
+  if (mode.startsWith("o") || mode.includes("o-rich")) return MIRA_TEMPERATURE_BOUNDS.oxygen;
+  return MIRA_TEMPERATURE_BOUNDS.fallback;
+}
+
+function miraMeanTemperature(row) {
+  const bounds = miraTemperatureAbsoluteBounds(row);
+  const literatureTemperature = miraLiteratureTemperature(row);
+  if (Number.isFinite(literatureTemperature)) {
+    return clamp(literatureTemperature, bounds.min, bounds.max);
+  }
+  const meanVMinusI = intrinsicVMinusIForRow(row);
+  const colorTemperature = temperatureFromColorLuminosity(row, meanVMinusI, row?.[IDX.logLum]);
+  if (Number.isFinite(colorTemperature)) {
+    return clamp(colorTemperature, bounds.min, bounds.max);
+  }
+  return (bounds.min + bounds.max) * 0.5;
+}
+
+function miraTemperatureBoundsForRow(row) {
+  const bounds = miraTemperatureAbsoluteBounds(row);
+  const meanTemperature = miraMeanTemperature(row);
+  return {
+    min: Math.max(bounds.min, meanTemperature - MIRA_TEMPERATURE_HALF_SPAN_K),
+    max: Math.min(bounds.max, meanTemperature + MIRA_TEMPERATURE_HALF_SPAN_K),
+    mean: meanTemperature,
+  };
+}
+
+function miraTemperatureForCatalogState(row, vMinusI, logLuminosity) {
+  const bounds = miraTemperatureBoundsForRow(row);
+  const colorTemperature = temperatureFromColorLuminosity(row, vMinusI, logLuminosity);
+  const temperature = Number.isFinite(colorTemperature) ? colorTemperature : bounds.mean;
+  return clamp(temperature, bounds.min, bounds.max);
+}
+
+function effectiveTemperatureForCatalogState(row, vMinusI, logLuminosity) {
+  if (isMiraRow(row)) return miraTemperatureForCatalogState(row, vMinusI, logLuminosity);
+  return temperatureFromColorLuminosity(row, vMinusI, logLuminosity);
+}
+
+function quantizedGridAxisValue(axis, value) {
+  const index = clamp(Math.round((value - axis.min) / axis.step), 0, axis.count - 1);
+  return {
+    key: index,
+    value: axis.min + index * axis.step,
+  };
 }
 
 function rgbForTemperature(temperature) {
@@ -2139,10 +2589,11 @@ function colorForVMinusI(vMinusI, spectralIndex) {
     return scene.spectralClasses[spectralIndex]?.color || "#dfeaff";
   }
 
+  const anchors = activeVMinusITemperatureAnchors();
   const cacheKey = clamp(
     Math.round(vMinusI * COLOR_CACHE_PRECISION),
-    Math.round(V_MINUS_I_TEMPERATURE_ANCHORS[0].vMinusI * COLOR_CACHE_PRECISION),
-    Math.round(V_MINUS_I_TEMPERATURE_ANCHORS[V_MINUS_I_TEMPERATURE_ANCHORS.length - 1].vMinusI * COLOR_CACHE_PRECISION),
+    Math.round(anchors[0].vMinusI * COLOR_CACHE_PRECISION),
+    Math.round(anchors[anchors.length - 1].vMinusI * COLOR_CACHE_PRECISION),
   );
   const cached = colorCache.get(cacheKey);
   if (cached) return cached;
@@ -2150,6 +2601,37 @@ function colorForVMinusI(vMinusI, spectralIndex) {
   const cachedVMinusI = cacheKey / COLOR_CACHE_PRECISION;
   const color = colorForTemperature(effectiveTemperatureFromVMinusI(cachedVMinusI));
   colorCache.set(cacheKey, color);
+  return color;
+}
+
+function colorForCatalogState(row, vMinusI, logLuminosity) {
+  if (!Number.isFinite(vMinusI)) {
+    return scene.spectralClasses[row?.[IDX.spectral]]?.color || "#dfeaff";
+  }
+  if (isMiraRow(row)) {
+    return colorForTemperature(effectiveTemperatureForCatalogState(row, vMinusI, logLuminosity));
+  }
+  const grid = scene.temperatureGrid;
+  if (!grid || !Number.isFinite(logLuminosity)) {
+    return colorForVMinusI(vMinusI, row?.[IDX.spectral]);
+  }
+
+  const colorSample = quantizedGridAxisValue(grid.colorAxis, vMinusI);
+  const luminositySample = quantizedGridAxisValue(grid.logLuminosityAxis, logLuminosity);
+  const metallicityKey = Math.round(metallicityForCatalogRow(row) * TEMPERATURE_GRID_METALLICITY_CACHE_PRECISION);
+  const metallicitySample = metallicityKey / TEMPERATURE_GRID_METALLICITY_CACHE_PRECISION;
+  const cacheKey = `${colorSample.key}/${luminositySample.key}/${metallicityKey}`;
+  const cached = catalogTemperatureColorCache.get(cacheKey);
+  if (cached) return cached;
+
+  const temperature =
+    temperatureFromGrid(colorSample.value, luminositySample.value, metallicitySample) ||
+    effectiveTemperatureFromVMinusI(colorSample.value);
+  const color = colorForTemperature(temperature);
+  if (catalogTemperatureColorCache.size > CATALOG_TEMPERATURE_COLOR_CACHE_MAX) {
+    catalogTemperatureColorCache.clear();
+  }
+  catalogTemperatureColorCache.set(cacheKey, color);
   return color;
 }
 
@@ -2165,6 +2647,144 @@ function intrinsicVMinusIForRow(row) {
     return null;
   }
   return row[IDX.vMinusI] - reddeningEVIForRow(row);
+}
+
+function updateLightCurveLuminosityColors(point) {
+  const lightCurve = point.lightCurve;
+  if (!lightCurve || !Number.isFinite(point.currentLogLum)) return;
+
+  const previousBase = Number.isFinite(lightCurve.currentBaseLogLuminosity)
+    ? lightCurve.currentBaseLogLuminosity
+    : point.row[IDX.logLum];
+  const shift = point.currentLogLum - previousBase;
+  if (Number.isFinite(shift) && Math.abs(shift) > 1e-10 && lightCurve.logLuminosities) {
+    for (let index = 0; index < lightCurve.logLuminosities.length; index += 1) {
+      lightCurve.logLuminosities[index] += shift;
+    }
+  }
+  lightCurve.currentBaseLogLuminosity = point.currentLogLum;
+
+  if (!Number.isFinite(point.vMinusI0)) return;
+  if (lightCurve.colors && lightCurve.colorOffsets && lightCurve.logLuminosities) {
+    for (let index = 0; index < lightCurve.colors.length; index += 1) {
+      lightCurve.colors[index] = colorForCatalogState(
+        point.row,
+        point.vMinusI0 + lightCurve.colorOffsets[index],
+        lightCurve.logLuminosities[index],
+      );
+    }
+  }
+  const meanColorOffset = Number.isFinite(lightCurve.meanColorOffset) ? lightCurve.meanColorOffset : 0;
+  lightCurve.meanColor = colorForCatalogState(point.row, point.vMinusI0 + meanColorOffset, point.currentLogLum);
+}
+
+function updateCatalogPointForDistance(point, distance) {
+  const row = point.row;
+  const catalogDistance = row[IDX.distance];
+  const hasSampledDistance =
+    state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED &&
+    Number.isFinite(distance) &&
+    Number.isFinite(catalogDistance) &&
+    Math.abs(distance - catalogDistance) > 1e-8;
+
+  point.coordinates = hasSampledDistance ? catalogCoordinatesForDistance(row, distance) : point.baseCoordinates;
+  point.currentDistance = point.coordinates.distance;
+
+  let luminosity = row[IDX.lum];
+  if (hasSampledDistance) {
+    luminosity = luminosityFromIMagnitude(row[IDX.iMag], distance) || row[IDX.lum];
+  }
+  const logLuminosity = Number.isFinite(luminosity) && luminosity > 0 ? Math.log10(luminosity) : row[IDX.logLum];
+  const radius =
+    hasSampledDistance
+      ? stellarRadiusFromLuminosityAndColor(row, luminosity, point.vMinusI0) || row[IDX.radius]
+      : row[IDX.radius];
+
+  point.currentLum = luminosity;
+  point.currentLogLum = logLuminosity;
+  point.currentRadius = radius;
+  point.radiusUnit = pointRadiusUnitFromStellarRadius(radius);
+  point.alphaBaseUnit = pointAlphaUnitBaseFromLuminosity(luminosity) * BASE_LUMINOSITY_FACTOR;
+  point.color = colorForCatalogState(row, point.vMinusI0, logLuminosity);
+  updateLightCurveLuminosityColors(point);
+}
+
+function updateClusterPointForDistance(point, distance) {
+  const row = point.row;
+  const catalogDistance = row[CL.distance];
+  const hasSampledDistance =
+    state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED &&
+    Number.isFinite(distance) &&
+    Number.isFinite(catalogDistance) &&
+    Math.abs(distance - catalogDistance) > 1e-8;
+  point.coordinates = hasSampledDistance ? clusterCoordinatesForDistance(row, distance) : point.baseCoordinates;
+  point.currentDistance = point.coordinates.distance;
+}
+
+function applyUncertaintyRealization({ updateTarget = true } = {}) {
+  const seed = clampUncertaintySeed(state.uncertaintySeed);
+  state.uncertaintySeed = seed;
+
+  for (const point of scene.catalog) {
+    const sampledDistance = sampledDistanceFromKpcError(
+      point.row[IDX.distance],
+      point.row[IDX.distanceError],
+      seed,
+      `catalog:${point.row[IDX.id]}`,
+    );
+    updateCatalogPointForDistance(point, sampledDistance);
+  }
+
+  for (const point of scene.clusters) {
+    const sampledDistance = sampledDistanceFromModulusError(
+      point.row[CL.distance],
+      point.row[CL.eMu0],
+      seed,
+      `cluster:${point.row[CL.name]}:${point.index}`,
+    );
+    updateClusterPointForDistance(point, sampledDistance);
+  }
+
+  for (const point of scene.clusterStars) {
+    const cluster = scene.clusters[point.clusterIndex];
+    if (seed === DEFAULT_UNCERTAINTY_SEED || !cluster || cluster.coordinates === cluster.baseCoordinates) {
+      point.coordinates = point.baseCoordinates;
+    } else {
+      point.coordinates = coordinatesFromGalacticVector([
+        cluster.coordinates.galacticVector[0] + point.clusterOffsetVector[0],
+        cluster.coordinates.galacticVector[1] + point.clusterOffsetVector[1],
+        cluster.coordinates.galacticVector[2] + point.clusterOffsetVector[2],
+      ]);
+    }
+    point.currentDistance = point.coordinates.distance;
+  }
+
+  invalidateCoordinateCache();
+  if (state.cameraLocked && state.locked && (state.locked.kind === "catalog" || state.locked.kind === "cluster")) {
+    state.customCoordinateContext = centerContext(state.locked.coordinates.galacticVector);
+  }
+  if (updateTarget && (state.locked || state.hovered)) setTarget(state.locked || state.hovered);
+  markCatalogStaticDirty();
+}
+
+function setUncertaintySeed(value) {
+  const seed = clampUncertaintySeed(value);
+  if (state.uncertaintySeed === seed) return;
+  state.uncertaintySeed = seed;
+  applyUncertaintyRealization();
+  syncRangeOutputs();
+  markProjectionDirty();
+}
+
+function requestUncertaintySeed(value) {
+  pendingUncertaintySeed = clampUncertaintySeed(value);
+  if (uncertaintySeedFrame) return;
+  uncertaintySeedFrame = window.requestAnimationFrame(() => {
+    uncertaintySeedFrame = 0;
+    const seed = pendingUncertaintySeed;
+    pendingUncertaintySeed = null;
+    setUncertaintySeed(seed);
+  });
 }
 
 function decodeColorCurve(encoded) {
@@ -2261,6 +2881,10 @@ function hashString(value) {
     hash = Math.imul(hash, 16777619);
   }
   return Math.abs(hash >>> 0);
+}
+
+function seededUnit32(value) {
+  return (hashString(value) + 0.5) / 4294967296;
 }
 
 function seededUnit(value) {
@@ -2380,6 +3004,17 @@ function maxColorPulseOffsetForRow(row, source = "") {
   return MAX_MIRA_COLOR_PULSE_OFFSET;
 }
 
+function colorPulseOffsetBoundsForRow(row, meanVMinusI0, source = "") {
+  const maxOffset = maxColorPulseOffsetForRow(row, source);
+  let min = -maxOffset;
+  let max = maxOffset;
+  if (isMiraRow(row) && Number.isFinite(meanVMinusI0)) {
+    min = Math.max(min, MIRA_MIN_INTRINSIC_V_MINUS_I - meanVMinusI0);
+    max = Math.min(max, MIRA_MAX_INTRINSIC_V_MINUS_I - meanVMinusI0);
+  }
+  return { min, max };
+}
+
 function makeWaveform(row) {
   const params = lightCurveParams(row);
   const colorAmplitudeRatio = vToIAmplitudeRatio(row, params.subtype);
@@ -2454,6 +3089,8 @@ function makeWaveform(row) {
   const waveform = new Float32Array(WAVEFORM_SAMPLES);
   const rawColorOffsets = new Float32Array(WAVEFORM_SAMPLES);
   const colorOffsets = new Float32Array(WAVEFORM_SAMPLES);
+  const logLuminosities = new Float32Array(WAVEFORM_SAMPLES);
+  const temperatures = new Float32Array(WAVEFORM_SAMPLES);
   const colors = new Array(WAVEFORM_SAMPLES);
   const meanVMinusI0 = intrinsicVMinusIForRow(row);
   const iAmplitude = magnitudeOffsetSpan(iMagnitudeOffsets, meanIMagnitudeOffset);
@@ -2467,6 +3104,7 @@ function makeWaveform(row) {
   let meanFlux = 0;
   let meanColorOffset = 0;
   const maxColorPulseOffset = maxColorPulseOffsetForRow(row, miraVSource);
+  const colorOffsetBounds = colorPulseOffsetBoundsForRow(row, meanVMinusI0, miraVSource);
 
   for (let index = 0; index < WAVEFORM_SAMPLES; index += 1) {
     const iMagnitudeOffset = iMagnitudeOffsets[index];
@@ -2509,16 +3147,25 @@ function makeWaveform(row) {
 
   for (let index = 0; index < WAVEFORM_SAMPLES; index += 1) {
     const iMagnitudeOffset = iMagnitudeOffsets[index];
+    const centeredIMagnitudeOffset = iMagnitudeOffset - meanIMagnitudeOffset;
     const brightnessMagnitudeOffset = miraVComponents
       ? vMagnitudeOffsets[index] - meanVMagnitudeOffset
-      : (iMagnitudeOffset - meanIMagnitudeOffset) * brightnessAmplitudeScale;
+      : centeredIMagnitudeOffset * brightnessAmplitudeScale;
     const rawColorOffset = rawColorOffsets[index];
-    const colorOffset = clamp(rawColorOffset, -maxColorPulseOffset, maxColorPulseOffset);
+    const colorOffset = clamp(rawColorOffset, colorOffsetBounds.min, colorOffsetBounds.max);
+    const logLuminosity = Number.isFinite(row[IDX.logLum])
+      ? row[IDX.logLum] - 0.4 * centeredIMagnitudeOffset
+      : NaN;
+    const temperature = effectiveTemperatureForCatalogState(row, meanVMinusI0 + colorOffset, logLuminosity);
     waveform[index] = fluxFromMagnitudeOffset(brightnessMagnitudeOffset);
     colorOffsets[index] = colorOffset;
+    logLuminosities[index] = logLuminosity;
+    temperatures[index] = Number.isFinite(temperature) ? temperature : NaN;
     colors[index] = Number.isFinite(meanVMinusI0)
-      ? colorForVMinusI(meanVMinusI0 + colorOffset, row[IDX.spectral])
-      : colorForVMinusI(meanVMinusI0, row[IDX.spectral]);
+      ? Number.isFinite(temperature)
+        ? colorForTemperature(temperature)
+        : colorForCatalogState(row, meanVMinusI0, logLuminosity)
+      : colorForCatalogState(row, meanVMinusI0, logLuminosity);
     meanFlux += waveform[index];
     meanColorOffset += colorOffset;
     minFlux = Math.min(minFlux, waveform[index]);
@@ -2545,12 +3192,14 @@ function makeWaveform(row) {
     }
   }
   const meanColor = Number.isFinite(meanVMinusI0)
-    ? colorForVMinusI(meanVMinusI0 + meanColorOffset, row[IDX.spectral])
+    ? colorForCatalogState(row, meanVMinusI0 + meanColorOffset, row[IDX.logLum])
     : colors[0];
 
   return {
     waveform,
     colorOffsets,
+    logLuminosities,
+    temperatures,
     colors,
     params,
     minFlux,
@@ -2558,6 +3207,8 @@ function makeWaveform(row) {
     meanFlux,
     amplitudeSourceFluxes,
     meanColor,
+    meanColorOffset,
+    currentBaseLogLuminosity: row[IDX.logLum],
     maxFluxPhase: maxFluxIndex / WAVEFORM_SAMPLES,
     source: miraComponents ? "mira-multisine" : fittedIMagnitudeOffsets ? "ogle-fit" : params.measured ? "fourier" : "template",
     sourceQuality: miraComponents ? row[IDX.miraPulsationQuality] || 0 : row[IDX.brightnessCurveQuality] || 0,
@@ -2582,6 +3233,7 @@ function makeWaveform(row) {
     colorQuality: miraVComponents ? row[IDX.miraVPulsationQuality] || 0 : row[IDX.colorCurveQuality] || 0,
     miraVSource,
     maxColorPulseOffset,
+    colorOffsetBounds,
     timeDomain: Boolean(miraComponents),
     components: miraComponents,
     vComponents: miraVComponents,
@@ -2703,6 +3355,11 @@ function lightCurveInsetDisplayValue(flux) {
   return softVisualPulse(flux);
 }
 
+function currentCatalogLogLuminosity(point) {
+  if (Number.isFinite(point?.currentLogLum)) return point.currentLogLum;
+  return Number.isFinite(point?.row?.[IDX.logLum]) ? point.row[IDX.logLum] : NaN;
+}
+
 function timeDomainPulseSample(point, simulationDay) {
   const lightCurve = point?.lightCurve;
   if (!lightCurve?.timeDomain || !lightCurve.components?.length) return null;
@@ -2718,16 +3375,31 @@ function timeDomainPulseSample(point, simulationDay) {
   }
   const maxColorPulseOffset =
     lightCurve.maxColorPulseOffset || maxColorPulseOffsetForRow(point?.row, lightCurve.miraVSource);
-  const colorOffset = clamp(rawColorOffset, -maxColorPulseOffset, maxColorPulseOffset);
   const pulse = fluxFromMagnitudeOffset(brightnessMagnitudeOffset);
   const meanVMinusI0 = point?.vMinusI0;
+  const colorOffsetBounds =
+    lightCurve.colorOffsetBounds || colorPulseOffsetBoundsForRow(point?.row, meanVMinusI0, lightCurve.miraVSource);
+  const colorOffset = clamp(
+    rawColorOffset,
+    Number.isFinite(colorOffsetBounds.min) ? colorOffsetBounds.min : -maxColorPulseOffset,
+    Number.isFinite(colorOffsetBounds.max) ? colorOffsetBounds.max : maxColorPulseOffset,
+  );
+  const baseLogLuminosity = currentCatalogLogLuminosity(point);
+  const logLuminosity = Number.isFinite(baseLogLuminosity)
+    ? baseLogLuminosity - 0.4 * iMagnitudeOffset
+    : NaN;
+  const temperature = effectiveTemperatureForCatalogState(point.row, meanVMinusI0 + colorOffset, logLuminosity);
   const color = Number.isFinite(meanVMinusI0)
-    ? colorForVMinusI(meanVMinusI0 + colorOffset, point.row?.[IDX.spectral])
+    ? Number.isFinite(temperature)
+      ? colorForTemperature(temperature)
+      : colorForCatalogState(point.row, meanVMinusI0, logLuminosity)
     : point?.lightCurve?.meanColor || point?.color || "#ffffff";
   return {
     pulse,
     color,
     colorOffset,
+    logLuminosity,
+    temperature,
   };
 }
 
@@ -2828,6 +3500,50 @@ function vMinusIPulseRangeForTarget(target) {
   return {
     min: target.vMinusI0 + minOffset,
     max: target.vMinusI0 + maxOffset,
+  };
+}
+
+function temperaturePulseRangeForTarget(target) {
+  if (!target?.lightCurve?.colorOffsets || !Number.isFinite(target.vMinusI0)) return null;
+
+  let minTemperature = Infinity;
+  let maxTemperature = -Infinity;
+  const temperatures = target.lightCurve.temperatures;
+  if (temperatures?.length) {
+    for (const temperature of temperatures) {
+      if (!Number.isFinite(temperature)) continue;
+      minTemperature = Math.min(minTemperature, temperature);
+      maxTemperature = Math.max(maxTemperature, temperature);
+    }
+    if (Number.isFinite(minTemperature) && Number.isFinite(maxTemperature)) {
+      return {
+        min: minTemperature,
+        max: maxTemperature,
+      };
+    }
+  }
+
+  const logLuminosities = target.lightCurve.logLuminosities;
+  for (let index = 0; index < target.lightCurve.colorOffsets.length; index += 1) {
+    const offset = target.lightCurve.colorOffsets[index];
+    if (!Number.isFinite(offset)) continue;
+    const logLuminosity = Number.isFinite(logLuminosities?.[index])
+      ? logLuminosities[index]
+      : currentCatalogLogLuminosity(target);
+    const temperature = effectiveTemperatureForCatalogState(
+      target.row,
+      target.vMinusI0 + offset,
+      logLuminosity,
+    );
+    if (!Number.isFinite(temperature)) continue;
+    minTemperature = Math.min(minTemperature, temperature);
+    maxTemperature = Math.max(maxTemperature, temperature);
+  }
+  if (!Number.isFinite(minTemperature) || !Number.isFinite(maxTemperature)) return null;
+
+  return {
+    min: minTemperature,
+    max: maxTemperature,
   };
 }
 
@@ -3329,10 +4045,18 @@ function pointRadiusZoomSize() {
   return 0.8 + Math.log2(Math.max(1, effectiveZoomScale())) * 0.16;
 }
 
-function starRadiusZoomSize() {
-  const zoomSize = 0.8 + Math.log2(Math.max(1, effectiveZoomScale())) * STAR_RADIUS_ZOOM_BASE_GAIN;
-  const boost = 1 + Math.min(STAR_RADIUS_ZOOM_MAX_BOOST, Math.log2(Math.max(1, state.zoom)) * STAR_RADIUS_ZOOM_GAIN);
+function pointRadiusZoomSizeForZoom(zoom = state.zoom) {
+  return 0.8 + Math.log2(Math.max(1, effectiveZoomScale(zoom))) * 0.16;
+}
+
+function starRadiusZoomSizeForZoom(zoom = state.zoom) {
+  const zoomSize = 0.8 + Math.log2(Math.max(1, effectiveZoomScale(zoom))) * STAR_RADIUS_ZOOM_BASE_GAIN;
+  const boost = 1 + Math.min(STAR_RADIUS_ZOOM_MAX_BOOST, Math.log2(Math.max(1, zoom)) * STAR_RADIUS_ZOOM_GAIN);
   return Math.min(zoomSize * boost, STAR_RADIUS_ZOOM_SIZE_MAX);
+}
+
+function starRadiusZoomSize() {
+  return starRadiusZoomSizeForZoom(state.zoom);
 }
 
 function pointRadiusBaseFromStellarRadius(radiusSolar) {
@@ -3349,6 +4073,10 @@ function pointRadiusFromUnitAtPerspective(radiusUnit, perspective, zoomSize = po
 
 function starRadiusFromUnitAtPerspective(radiusUnit, perspective, zoomSize = starRadiusZoomSize()) {
   return clamp(radiusUnit * zoomSize * perspective, 0.35, STAR_RADIUS_BASE_MAX) * starBaseRadiusViewportScale();
+}
+
+function starRadiusFromUnitAtPerspectiveForZoom(radiusUnit, perspective, zoom = state.zoom) {
+  return starRadiusFromUnitAtPerspective(radiusUnit, perspective, starRadiusZoomSizeForZoom(zoom));
 }
 
 function pointRadiusFromStellarRadiusAtPerspective(radiusSolar, perspective, zoomSize = starRadiusZoomSize()) {
@@ -3632,17 +4360,62 @@ function createRedClumpProgram(gl) {
     gl,
     gl.VERTEX_SHADER,
     `
-      attribute vec2 a_position;
-      attribute vec4 a_color;
+      precision highp float;
+
+      attribute vec3 a_position;
+      attribute vec3 a_alphaFactors;
 
       uniform vec2 u_resolution;
+      uniform vec2 u_center;
+      uniform vec3 u_color;
+      uniform vec4 u_yawPitch;
+      uniform vec2 u_roll;
+      uniform float u_scale;
+      uniform float u_depthScale;
+      uniform float u_density;
+      uniform float u_exposure;
+      uniform float u_alphaBaseUnit;
+      uniform float u_displayLuminosityBaseBoost;
+      uniform float u_displayAlphaMax;
+      uniform float u_surfaceAlphaScale;
+      uniform float u_surfaceAlphaMax;
 
       varying vec4 v_color;
 
       void main() {
-        vec2 clip = (a_position / u_resolution) * 2.0 - 1.0;
+        float cosy = u_yawPitch.x;
+        float siny = u_yawPitch.y;
+        float cosp = u_yawPitch.z;
+        float sinp = u_yawPitch.w;
+        float cosr = u_roll.x;
+        float sinr = u_roll.y;
+        float depthZ = a_position.z * u_depthScale;
+
+        float x1 = a_position.x * cosy - depthZ * siny;
+        float z1 = a_position.x * siny + depthZ * cosy;
+        float y1 = a_position.y * cosp - z1 * sinp;
+        float z2 = a_position.y * sinp + z1 * cosp;
+        float x2 = x1 * cosr - y1 * sinr;
+        float y2 = x1 * sinr + y1 * cosr;
+        float perspective = clamp(140.0 / (140.0 - z2), 0.45, 2.2);
+        vec2 screen = u_center + vec2(x2, -y2) * u_scale * perspective;
+        vec2 clip = (screen / u_resolution) * 2.0 - 1.0;
+        float alphaUnit = u_alphaBaseUnit * (0.64 + perspective * 0.24);
+        float exposure = (u_exposure / 10.0) * u_displayLuminosityBaseBoost * alphaUnit;
+        float pointAlpha = clamp(
+          u_displayAlphaMax * (1.0 - exp(-exposure / u_displayAlphaMax)),
+          0.001,
+          u_displayAlphaMax
+        );
+        float visible = step(a_alphaFactors.z, u_density);
+        float alpha = clamp(
+          pointAlpha * a_alphaFactors.x * a_alphaFactors.y * u_surfaceAlphaScale,
+          0.0,
+          u_surfaceAlphaMax
+        ) * visible;
+
         gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
-        v_color = a_color;
+        v_color = vec4(u_color * alpha, alpha);
       }
     `,
   );
@@ -3858,10 +4631,23 @@ function createRedClumpLayerRenderer(canvasElement) {
   const redClumpStride = RED_CLUMP_GPU_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
   const redClumpAttributes = {
     position: gl.getAttribLocation(redClumpProgram, "a_position"),
-    color: gl.getAttribLocation(redClumpProgram, "a_color"),
+    alphaFactors: gl.getAttribLocation(redClumpProgram, "a_alphaFactors"),
   };
   const redClumpUniforms = {
     resolution: gl.getUniformLocation(redClumpProgram, "u_resolution"),
+    center: gl.getUniformLocation(redClumpProgram, "u_center"),
+    color: gl.getUniformLocation(redClumpProgram, "u_color"),
+    yawPitch: gl.getUniformLocation(redClumpProgram, "u_yawPitch"),
+    roll: gl.getUniformLocation(redClumpProgram, "u_roll"),
+    scale: gl.getUniformLocation(redClumpProgram, "u_scale"),
+    depthScale: gl.getUniformLocation(redClumpProgram, "u_depthScale"),
+    density: gl.getUniformLocation(redClumpProgram, "u_density"),
+    exposure: gl.getUniformLocation(redClumpProgram, "u_exposure"),
+    alphaBaseUnit: gl.getUniformLocation(redClumpProgram, "u_alphaBaseUnit"),
+    displayLuminosityBaseBoost: gl.getUniformLocation(redClumpProgram, "u_displayLuminosityBaseBoost"),
+    displayAlphaMax: gl.getUniformLocation(redClumpProgram, "u_displayAlphaMax"),
+    surfaceAlphaScale: gl.getUniformLocation(redClumpProgram, "u_surfaceAlphaScale"),
+    surfaceAlphaMax: gl.getUniformLocation(redClumpProgram, "u_surfaceAlphaMax"),
   };
 
   gl.disable(gl.DEPTH_TEST);
@@ -3875,6 +4661,7 @@ function createRedClumpLayerRenderer(canvasElement) {
 
   return {
     mode: "gpu",
+    projectsInShader: true,
     gl,
     canvas: canvasElement,
     redClumpProgram,
@@ -3890,8 +4677,8 @@ function createRedClumpLayerRenderer(canvasElement) {
     redClumpIndexType,
     redClumpUsesIndexedDraw: true,
     redClumpCount: 0,
-    redClumpExposure: null,
     redClumpSourceCount: -1,
+    redClumpCoordinateCacheKey: null,
     ensureRedClumpCapacity(vertexCount) {
       if (this.redClumpCapacity >= vertexCount) return this.redClumpData;
       this.redClumpCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, vertexCount)));
@@ -3920,41 +4707,49 @@ function createRedClumpLayerRenderer(canvasElement) {
     bindRedClumpAttributes() {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.redClumpBuffer);
       this.gl.enableVertexAttribArray(this.redClumpAttributes.position);
-      this.gl.vertexAttribPointer(this.redClumpAttributes.position, 2, this.gl.FLOAT, false, redClumpStride, 0);
-      this.gl.enableVertexAttribArray(this.redClumpAttributes.color);
+      this.gl.vertexAttribPointer(this.redClumpAttributes.position, 3, this.gl.FLOAT, false, redClumpStride, 0);
+      this.gl.enableVertexAttribArray(this.redClumpAttributes.alphaFactors);
       this.gl.vertexAttribPointer(
-        this.redClumpAttributes.color,
-        4,
+        this.redClumpAttributes.alphaFactors,
+        3,
         this.gl.FLOAT,
         false,
         redClumpStride,
-        2 * Float32Array.BYTES_PER_ELEMENT,
+        3 * Float32Array.BYTES_PER_ELEMENT,
       );
     },
-    updateRedClumpBuffer(items, rgbValue) {
+    updateRedClumpBuffer() {
+      const cells = scene.redClumpSurface;
       const maxIndexedVertexCount = uintIndexExtension ? Infinity : 65535;
-      const canUseIndexedDraw = items.length * 4 <= maxIndexedVertexCount;
-      const alphaSignature = redClumpAlphaCacheSignature();
-      const data = this.ensureRedClumpCapacity(items.length * (canUseIndexedDraw ? 4 : 6));
-      const indexData = canUseIndexedDraw ? this.ensureRedClumpIndexCapacity(items.length * 6) : null;
+      const canUseIndexedDraw = cells.length * 4 <= maxIndexedVertexCount;
+      const data = this.ensureRedClumpCapacity(cells.length * (canUseIndexedDraw ? 4 : 6));
+      const indexData = canUseIndexedDraw ? this.ensureRedClumpIndexCapacity(cells.length * 6) : null;
       const triangleIndexes = [0, 1, 2, 0, 2, 3];
       let offset = 0;
       let vertexCount = 0;
       let indexCount = 0;
-      for (const item of items) {
-        if (updateRedClumpSurfaceAlphaCache(item, false, alphaSignature) <= 0.001) continue;
+      for (const cell of cells) {
+        const points = cell.points;
+        const coordinates = points.map((point) => point.activeCoordinates);
+        if (coordinates.some((pointCoordinates) => !pointCoordinates)) continue;
+        const sampleMax = Math.max(
+          points[0].sample || 0,
+          points[1].sample || 0,
+          points[2].sample || 0,
+          points[3].sample || 0,
+        );
 
         if (canUseIndexedDraw) {
           const baseIndex = vertexCount;
           for (let pointIndex = 0; pointIndex < 4; pointIndex += 1) {
-            const point = item.projected[pointIndex];
-            const alpha = item.surfaceVertexAlphas[pointIndex];
-            data[offset] = point.x;
-            data[offset + 1] = point.y;
-            data[offset + 2] = rgbValue[0] * alpha;
-            data[offset + 3] = rgbValue[1] * alpha;
-            data[offset + 4] = rgbValue[2] * alpha;
-            data[offset + 5] = alpha;
+            const point = points[pointIndex];
+            const pointCoordinates = coordinates[pointIndex];
+            data[offset] = pointCoordinates[0];
+            data[offset + 1] = pointCoordinates[1];
+            data[offset + 2] = pointCoordinates[2];
+            data[offset + 3] = point.edgeAlpha;
+            data[offset + 4] = point.densityAlpha;
+            data[offset + 5] = sampleMax;
             offset += RED_CLUMP_GPU_VERTEX_FLOATS;
             vertexCount += 1;
           }
@@ -3967,14 +4762,14 @@ function createRedClumpLayerRenderer(canvasElement) {
           indexCount += 6;
         } else {
           for (const pointIndex of triangleIndexes) {
-            const point = item.projected[pointIndex];
-            const alpha = item.surfaceVertexAlphas[pointIndex];
-            data[offset] = point.x;
-            data[offset + 1] = point.y;
-            data[offset + 2] = rgbValue[0] * alpha;
-            data[offset + 3] = rgbValue[1] * alpha;
-            data[offset + 4] = rgbValue[2] * alpha;
-            data[offset + 5] = alpha;
+            const point = points[pointIndex];
+            const pointCoordinates = coordinates[pointIndex];
+            data[offset] = pointCoordinates[0];
+            data[offset + 1] = pointCoordinates[1];
+            data[offset + 2] = pointCoordinates[2];
+            data[offset + 3] = point.edgeAlpha;
+            data[offset + 4] = point.densityAlpha;
+            data[offset + 5] = sampleMax;
             offset += RED_CLUMP_GPU_VERTEX_FLOATS;
             vertexCount += 1;
           }
@@ -3984,8 +4779,8 @@ function createRedClumpLayerRenderer(canvasElement) {
       this.redClumpCount = vertexCount;
       this.redClumpIndexCount = indexCount;
       this.redClumpUsesIndexedDraw = canUseIndexedDraw;
-      this.redClumpExposure = redClumpRenderExposureValue();
-      this.redClumpSourceCount = items.length;
+      this.redClumpSourceCount = cells.length;
+      this.redClumpCoordinateCacheKey = scene.coordinateCacheKey;
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.redClumpBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, data.subarray(0, offset), this.gl.DYNAMIC_DRAW);
       if (canUseIndexedDraw) {
@@ -3994,20 +4789,44 @@ function createRedClumpLayerRenderer(canvasElement) {
       }
       scene.redClumpGpuDirty = false;
     },
-    drawRedClump(items, rgbValue) {
+    drawRedClump(rgbValue) {
       this.resize();
+      rebuildCoordinateCache();
       if (
         scene.redClumpGpuDirty ||
-        this.redClumpExposure !== redClumpRenderExposureValue() ||
-        this.redClumpSourceCount !== items.length
+        this.redClumpSourceCount !== scene.redClumpSurface.length ||
+        this.redClumpCoordinateCacheKey !== scene.coordinateCacheKey
       ) {
-        this.updateRedClumpBuffer(items, rgbValue);
+        this.updateRedClumpBuffer();
       }
       if (this.redClumpCount <= 0) return;
 
+      const transform = makeProjectionTransform();
       this.gl.useProgram(this.redClumpProgram);
       this.bindRedClumpAttributes();
       this.gl.uniform2f(this.redClumpUniforms.resolution, scene.width, scene.height);
+      this.gl.uniform2f(this.redClumpUniforms.center, scene.centerX, scene.centerY);
+      this.gl.uniform3f(this.redClumpUniforms.color, rgbValue[0], rgbValue[1], rgbValue[2]);
+      this.gl.uniform4f(
+        this.redClumpUniforms.yawPitch,
+        transform.cosy,
+        transform.siny,
+        transform.cosp,
+        transform.sinp,
+      );
+      this.gl.uniform2f(this.redClumpUniforms.roll, transform.cosr, transform.sinr);
+      this.gl.uniform1f(this.redClumpUniforms.scale, transform.scale);
+      this.gl.uniform1f(this.redClumpUniforms.depthScale, transform.depthScale);
+      this.gl.uniform1f(this.redClumpUniforms.density, state.density);
+      this.gl.uniform1f(this.redClumpUniforms.exposure, redClumpRenderExposureValue());
+      this.gl.uniform1f(
+        this.redClumpUniforms.alphaBaseUnit,
+        pointAlphaUnitBaseFromLuminosity(RED_CLUMP_LUMINOSITY) * BASE_LUMINOSITY_FACTOR,
+      );
+      this.gl.uniform1f(this.redClumpUniforms.displayLuminosityBaseBoost, DISPLAY_LUMINOSITY_BASE_BOOST);
+      this.gl.uniform1f(this.redClumpUniforms.displayAlphaMax, DISPLAY_ALPHA_MAX);
+      this.gl.uniform1f(this.redClumpUniforms.surfaceAlphaScale, RED_CLUMP_SURFACE_ALPHA_SCALE);
+      this.gl.uniform1f(this.redClumpUniforms.surfaceAlphaMax, RED_CLUMP_SURFACE_ALPHA_MAX);
       this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
       if (this.redClumpUsesIndexedDraw) {
         this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.redClumpIndexBuffer);
@@ -4141,13 +4960,18 @@ function resizeCanvas() {
   markProjectionDirty();
 }
 
-function getBaseSceneLayout() {
+function baseSceneScaleForZoom(zoom = state.zoom) {
   const centerOffsetX = scene.width > 860 ? DESKTOP_SCENE_CENTER_OFFSET_X : 0;
   const availableWidth = Math.max(320, scene.width - Math.abs(centerOffsetX) * 2);
+  return (Math.min(availableWidth, scene.height) / 64) * effectiveZoomScale(zoom);
+}
+
+function getBaseSceneLayout() {
+  const centerOffsetX = scene.width > 860 ? DESKTOP_SCENE_CENTER_OFFSET_X : 0;
   return {
     centerX: scene.width / 2 + centerOffsetX,
     centerY: scene.height * (scene.width > 860 ? 0.53 : 0.42),
-    scale: (Math.min(availableWidth, scene.height) / 64) * effectiveZoomScale(),
+    scale: baseSceneScaleForZoom(),
   };
 }
 
@@ -4225,7 +5049,7 @@ function zoomViewportByStep(direction, multiplier = 1) {
   cancelIntroRotation();
   cancelAxisSpinAnimation();
   const zoomGain = Math.exp(Math.log(VIEWPORT_ZOOM_STEP_GAIN) * direction * multiplier);
-  setZoom(state.zoom * zoomGain);
+  setZoom(state.zoom * zoomGain, scene.centerX, scene.centerY, { allowTargetZoom: true, focusTarget: true });
   syncRangeOutputs();
 }
 
@@ -4341,17 +5165,33 @@ function setOrbitAngle(axis, value) {
   markProjectionDirty();
 }
 
-function setZoom(nextZoom, focusX = scene.centerX, focusY = scene.centerY) {
+function zoomFocusPointForTarget(target) {
+  if (!target) return null;
+  const coordinates = coordinatesForPoint(target);
+  const projected = projectPoint(coordinates[0], coordinates[1], coordinates[2]);
+  return Number.isFinite(projected.x) && Number.isFinite(projected.y) ? projected : null;
+}
+
+function setZoom(
+  nextZoom,
+  focusX = scene.centerX,
+  focusY = scene.centerY,
+  { allowTargetZoom = false, focusTarget = false } = {},
+) {
   markOrientationGridActive();
+  const target = selectedTargetForDeepZoom();
+  const targetFocus = focusTarget ? zoomFocusPointForTarget(target) : null;
+  const anchorX = targetFocus?.x ?? focusX;
+  const anchorY = targetFocus?.y ?? focusY;
   const oldScale = scene.scale || 1;
   const oldCenterX = scene.centerX;
   const oldCenterY = scene.centerY;
-  state.zoom = clampZoomScale(nextZoom);
+  state.zoom = clampZoomScale(nextZoom, { allowTargetZoom, target });
   updateSceneLayout();
 
   const ratio = scene.scale / oldScale;
-  const targetCenterX = focusX - (focusX - oldCenterX) * ratio;
-  const targetCenterY = focusY - (focusY - oldCenterY) * ratio;
+  const targetCenterX = anchorX - (anchorX - oldCenterX) * ratio;
+  const targetCenterY = anchorY - (anchorY - oldCenterY) * ratio;
   const base = getBaseSceneLayout();
   state.panX = targetCenterX - base.centerX;
   state.panY = targetCenterY - base.centerY;
@@ -4703,6 +5543,7 @@ function rebuildProjectionCache() {
   const catalogDrawList = scene.catalogDrawList;
   const clusterTargetDrawList = scene.clusterTargetDrawList;
   const projectionTransform = makeProjectionTransform();
+  const redClumpProjectsInShader = Boolean(scene.redClumpRenderer?.projectsInShader);
   const project = (target, x, y, z) => {
     projectOffsetWithTransformInto(target, x, y, z, projectionTransform);
     target.x += scene.centerX;
@@ -4734,67 +5575,69 @@ function rebuildProjectionCache() {
       updateStats(redStats, projected.z);
     }
 
-    const surfaceMargin = RED_CLUMP_SURFACE_VIEWPORT_MARGIN;
-    for (const cell of scene.redClumpSurface) {
-      const projected = cell.projected;
-      const p0 = cell.points[0].activeProjected;
-      const p1 = cell.points[1].activeProjected;
-      const p2 = cell.points[2].activeProjected;
-      const p3 = cell.points[3].activeProjected;
-      if (!p0 || !p1 || !p2 || !p3) continue;
-      projected[0] = p0;
-      projected[1] = p1;
-      projected[2] = p2;
-      projected[3] = p3;
+    if (!redClumpProjectsInShader) {
+      const surfaceMargin = RED_CLUMP_SURFACE_VIEWPORT_MARGIN;
+      for (const cell of scene.redClumpSurface) {
+        const projected = cell.projected;
+        const p0 = cell.points[0].activeProjected;
+        const p1 = cell.points[1].activeProjected;
+        const p2 = cell.points[2].activeProjected;
+        const p3 = cell.points[3].activeProjected;
+        if (!p0 || !p1 || !p2 || !p3) continue;
+        projected[0] = p0;
+        projected[1] = p1;
+        projected[2] = p2;
+        projected[3] = p3;
 
-      const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
-      const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
-      const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
-      const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
-      if (
-        maxX <= -surfaceMargin ||
-        minX >= scene.width + surfaceMargin ||
-        maxY <= -surfaceMargin ||
-        minY >= scene.height + surfaceMargin
-      ) {
-        continue;
+        const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
+        const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
+        const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
+        const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
+        if (
+          maxX <= -surfaceMargin ||
+          minX >= scene.width + surfaceMargin ||
+          maxY <= -surfaceMargin ||
+          minY >= scene.height + surfaceMargin
+        ) {
+          continue;
+        }
+
+        const item = cell.drawItem;
+        item.z = (p0.z + p1.z + p2.z + p3.z) * 0.25;
+        const alpha0 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p0.perspective);
+        const alpha1 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p1.perspective);
+        const alpha2 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p2.perspective);
+        const alpha3 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p3.perspective);
+        item.vertexAlphaUnits[0] = alpha0;
+        item.vertexAlphaUnits[1] = alpha1;
+        item.vertexAlphaUnits[2] = alpha2;
+        item.vertexAlphaUnits[3] = alpha3;
+        item.alphaUnit = (alpha0 + alpha1 + alpha2 + alpha3) * 0.25;
+        item.starRadius =
+          (starRadiusFromBase(
+            starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p0.perspective, catalogRadiusZoomSize),
+            1,
+            PULSATOR_BASE_RADIUS_FACTOR,
+          ) +
+            starRadiusFromBase(
+              starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p1.perspective, catalogRadiusZoomSize),
+              1,
+              PULSATOR_BASE_RADIUS_FACTOR,
+            ) +
+            starRadiusFromBase(
+              starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p2.perspective, catalogRadiusZoomSize),
+              1,
+              PULSATOR_BASE_RADIUS_FACTOR,
+            ) +
+            starRadiusFromBase(
+              starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p3.perspective, catalogRadiusZoomSize),
+              1,
+              PULSATOR_BASE_RADIUS_FACTOR,
+            )) *
+          0.25;
+        updateRedClumpSurfaceAlphaCache(item, true, redClumpAlphaSignature);
+        redClumpSurfaceDrawList.push(item);
       }
-
-      const item = cell.drawItem;
-      item.z = (p0.z + p1.z + p2.z + p3.z) * 0.25;
-      const alpha0 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p0.perspective);
-      const alpha1 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p1.perspective);
-      const alpha2 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p2.perspective);
-      const alpha3 = pointAlphaUnitFromBaseAtPerspective(redClumpAlphaBaseUnit, p3.perspective);
-      item.vertexAlphaUnits[0] = alpha0;
-      item.vertexAlphaUnits[1] = alpha1;
-      item.vertexAlphaUnits[2] = alpha2;
-      item.vertexAlphaUnits[3] = alpha3;
-      item.alphaUnit = (alpha0 + alpha1 + alpha2 + alpha3) * 0.25;
-      item.starRadius =
-        (starRadiusFromBase(
-          starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p0.perspective, catalogRadiusZoomSize),
-          1,
-          PULSATOR_BASE_RADIUS_FACTOR,
-        ) +
-          starRadiusFromBase(
-            starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p1.perspective, catalogRadiusZoomSize),
-            1,
-            PULSATOR_BASE_RADIUS_FACTOR,
-          ) +
-          starRadiusFromBase(
-            starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p2.perspective, catalogRadiusZoomSize),
-            1,
-            PULSATOR_BASE_RADIUS_FACTOR,
-          ) +
-          starRadiusFromBase(
-            starRadiusFromUnitAtPerspective(redClumpRadiusUnit, p3.perspective, catalogRadiusZoomSize),
-            1,
-            PULSATOR_BASE_RADIUS_FACTOR,
-          )) *
-        0.25;
-      updateRedClumpSurfaceAlphaCache(item, true, redClumpAlphaSignature);
-      redClumpSurfaceDrawList.push(item);
     }
   }
 
@@ -4832,7 +5675,7 @@ function rebuildProjectionCache() {
     clusterTargetDrawList.push(item);
   }
 
-  markRedClumpLayerDirty();
+  if (!redClumpProjectsInShader) markRedClumpLayerDirty();
   markCatalogStaticDirty();
   if (PERF_HUD_ENABLED) {
     const projectionMs = performance.now() - projectionStartMs;
@@ -5113,7 +5956,7 @@ function drawClusterGlows() {
     if (alpha <= 0.001) continue;
 
     const profileRadius = Math.max(7, item.screenRadius * CLUSTER_GLOW_RADIUS_SCALE);
-    const radius = profileRadius * (1 + CLUSTER_GLOW_EDGE_FEATHER);
+    const radius = clusterGlowOuterRadiusFromCoreRadius(item.screenRadius);
     const halfLightFraction = clusterGlowHalfLightFraction(bins);
     const scaleRadius = Math.max(0.08, halfLightFraction) * profileRadius;
     const glowColor = cssColorToRgb(colorForVMinusI(row[CL.unresolvedVMinusI0], 4));
@@ -5148,18 +5991,28 @@ function drawRedClumpGpu() {
   const renderer = scene.redClumpRenderer;
   if (!renderer) return false;
 
-  renderer.drawRedClump(scene.redClumpSurfaceDrawList, normalizedRgbFromCssColor(scene.spectralClasses[4].color));
+  renderer.drawRedClump(normalizedRgbFromCssColor(scene.spectralClasses[4].color));
   return true;
 }
 
 function redClumpStaticSignature() {
+  const surfaceCount = scene.redClumpRenderer?.projectsInShader
+    ? scene.redClumpSurface.length
+    : scene.redClumpSurfaceDrawList.length;
   return [
     scene.width,
     scene.height,
     scene.dpr,
-    scene.redClumpSurfaceDrawList.length,
+    surfaceCount,
+    state.density,
     redClumpRenderExposureValue().toFixed(6),
   ].join("|");
+}
+
+function redClumpSurfaceRenderCount() {
+  return scene.redClumpRenderer?.projectsInShader
+    ? scene.redClumpSurface.length
+    : scene.redClumpSurfaceDrawList.length;
 }
 
 function drawRedClumpSurfaceToContext(context) {
@@ -5187,7 +6040,7 @@ function rebuildRedClumpStaticLayerGpu() {
   const renderer = scene.redClumpRenderer;
   if (!renderer) return false;
 
-  renderer.drawRedClump(scene.redClumpSurfaceDrawList, normalizedRgbFromCssColor(scene.spectralClasses[4].color));
+  renderer.drawRedClump(normalizedRgbFromCssColor(scene.spectralClasses[4].color));
   return true;
 }
 
@@ -5196,7 +6049,7 @@ function rebuildRedClumpStaticLayer() {
   clearRedClumpStaticCanvas();
 
   const signature = redClumpStaticSignature();
-  if (!state.datasets.redclump || scene.redClumpSurfaceDrawList.length === 0) {
+  if (!state.datasets.redclump || redClumpSurfaceRenderCount() === 0) {
     scene.redClumpStaticDirty = false;
     scene.redClumpStaticSignature = signature;
     return;
@@ -5250,16 +6103,18 @@ function starRadiusFactorForPoint(point) {
   return point.kind === "catalog" ? PULSATOR_BASE_RADIUS_FACTOR : 1;
 }
 
-function starRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1) {
-  return clamp(
+function rawStarRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1) {
+  return (
     baseRadius *
       PULSATOR_RADIUS_BASE_SCALE *
       state.radiusScale *
       radiusFactor *
-      Math.sqrt(Math.max(0.000001, areaPulse)),
-    0.18,
-    28,
+      Math.sqrt(Math.max(0.000001, areaPulse))
   );
+}
+
+function starRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1, maxRadius = 28) {
+  return clamp(rawStarRadiusFromBase(baseRadius, areaPulse, radiusFactor), 0.18, maxRadius);
 }
 
 function starRadius(point, projected, areaPulse = 1) {
@@ -5268,6 +6123,39 @@ function starRadius(point, projected, areaPulse = 1) {
     areaPulse,
     starRadiusFactorForPoint(point),
   );
+}
+
+function catalogTargetStarMaxRadius() {
+  return Math.max(28, targetZoomLimitRadius() - TARGET_SELECTION_RING_PADDING_PX);
+}
+
+function catalogMaxAreaPulse(point) {
+  const maxFluxPulse = Math.max(1, pulsationAmplitudeScaledMaxFlux(point?.lightCurve));
+  return Math.max(1, lightCurveVisualPulses(maxFluxPulse, point).areaPulse);
+}
+
+function catalogNormalVisualRadiusAtZoom(point, projected, zoom = state.zoom, areaPulse = 1) {
+  const baseRadius = starRadiusFromUnitAtPerspectiveForZoom(point.radiusUnit, projected.perspective, zoom);
+  return starRadiusFromBase(baseRadius, areaPulse, starRadiusFactorForPoint(point));
+}
+
+function catalogDeepZoomVisualRadiusAtZoom(point, projected, zoom = state.zoom, areaPulse = 1) {
+  const normalRadius = catalogNormalVisualRadiusAtZoom(point, projected, zoom, areaPulse);
+  if (zoom <= ZOOM_SCALE_MAX) return normalRadius;
+
+  const maxAreaPulse = Math.max(areaPulse, catalogMaxAreaPulse(point));
+  const sliderProjected = targetProjectedAtZoom(point, ZOOM_SCALE_MAX);
+  const sliderMaxRadius = catalogNormalVisualRadiusAtZoom(point, sliderProjected, ZOOM_SCALE_MAX, maxAreaPulse);
+  const grownMaxRadius = Math.min(catalogTargetStarMaxRadius(), sliderMaxRadius * (zoom / ZOOM_SCALE_MAX));
+  const pulseScale = Math.sqrt(Math.max(0.000001, areaPulse) / Math.max(0.000001, maxAreaPulse));
+  return Math.max(normalRadius, grownMaxRadius * Math.min(1, pulseScale));
+}
+
+function catalogRenderVisualRadius(item, areaPulse = 1) {
+  if (item.point === state.locked) {
+    return catalogDeepZoomVisualRadiusAtZoom(item.point, item.projected, state.zoom, areaPulse);
+  }
+  return starRadiusFromBase(item.baseRadius, areaPulse, starRadiusFactorForPoint(item.point));
 }
 
 function pulseSafeAlphaForPoint(point, lightCurve = null) {
@@ -5394,6 +6282,11 @@ function updateCatalogStaticStyle(item) {
 
 function shouldAnimateCatalogItem(item, baseRadius, baseAlpha) {
   if (item.point.kind === "clusterStar") return false;
+  if (item.point === state.locked || item.point === state.hovered) {
+    item.point.animatePulse = true;
+    return true;
+  }
+
   if (pulsationTooFastForAnimation(item.point)) {
     item.point.animatePulse = false;
     return false;
@@ -5403,8 +6296,6 @@ function shouldAnimateCatalogItem(item, baseRadius, baseAlpha) {
     item.point.animatePulse = true;
     return true;
   }
-
-  if (item.point === state.locked || item.point === state.hovered) return true;
 
   const lodRadius = baseRadius / Math.max(1, state.radiusScale);
   const visualWeight = lodRadius * lodRadius * baseAlpha;
@@ -5460,11 +6351,7 @@ function updateAnimatedCatalogItem(item, simulationDay) {
     item.point,
     item.staticExposure,
   );
-  item.currentRadius = starRadiusFromBase(
-    item.baseRadius,
-    pulseSample.areaPulse,
-    starRadiusFactorForPoint(item.point),
-  );
+  item.currentRadius = catalogRenderVisualRadius(item, pulseSample.areaPulse);
   return pulseSample.color;
 }
 
@@ -5479,11 +6366,7 @@ function updateStaticCatalogItem(item) {
       item.point,
       item.staticExposure,
     );
-    item.currentRadius = starRadiusFromBase(
-      item.baseRadius,
-      pulseSample.areaPulse,
-      starRadiusFactorForPoint(item.point),
-    );
+    item.currentRadius = catalogRenderVisualRadius(item, pulseSample.areaPulse);
     return pulseSample.color;
   }
 
@@ -5674,18 +6557,58 @@ function drawCatalog(useStaticCache = true) {
   return scene.cachedStats.catalog;
 }
 
+function targetProjectedAtZoom(target, zoom = state.zoom) {
+  const coordinates = coordinatesForPoint(target);
+  const transform = makeProjectionTransform(baseSceneScaleForZoom(zoom));
+  return projectOffsetWithTransform(coordinates[0], coordinates[1], coordinates[2], transform);
+}
+
+function clusterGlowOuterRadiusFromCoreRadius(coreRadius) {
+  const profileRadius = Math.max(7, coreRadius * CLUSTER_GLOW_RADIUS_SCALE);
+  return profileRadius * (1 + CLUSTER_GLOW_EDGE_FEATHER);
+}
+
+function clusterCoreRadiusAtZoom(target, projected, zoom = state.zoom, { bounded = false } = {}) {
+  const physicalRadius = (target.radiusPc / 1000) * baseSceneScaleForZoom(zoom) * projected.perspective;
+  return bounded ? clamp(physicalRadius, 8, 260) : Math.max(8, physicalRadius);
+}
+
+function catalogTargetVisualRadiusAtZoom(target, projected, zoom = state.zoom) {
+  return catalogDeepZoomVisualRadiusAtZoom(target, projected, zoom, catalogMaxAreaPulse(target));
+}
+
+function redClumpTargetVisualRadiusAtZoom(projected, zoom = state.zoom) {
+  const radiusUnit = pointRadiusUnitFromStellarRadius(RED_CLUMP_RADIUS);
+  return pointRadiusFromUnitAtPerspective(radiusUnit, projected.perspective, pointRadiusZoomSizeForZoom(zoom));
+}
+
+function targetVisualRadiusAtZoom(target, zoom = state.zoom) {
+  if (!target) return 0;
+  const projected = targetProjectedAtZoom(target, zoom);
+  if (target.kind === "catalog") return catalogTargetVisualRadiusAtZoom(target, projected, zoom);
+  if (target.kind === "cluster") {
+    const boundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom, { bounded: true }));
+    const unboundedRadius = clusterGlowOuterRadiusFromCoreRadius(clusterCoreRadiusAtZoom(target, projected, zoom));
+    return Math.max(boundedRadius, unboundedRadius);
+  }
+  if (target.kind === "redclump") return redClumpTargetVisualRadiusAtZoom(projected, zoom);
+  return TARGET_SELECTION_RING_MIN_RADIUS;
+}
+
+function targetSelectionRadiusAtZoom(target, zoom = state.zoom) {
+  return Math.max(
+    TARGET_SELECTION_RING_MIN_RADIUS,
+    targetVisualRadiusAtZoom(target, zoom) + TARGET_SELECTION_RING_PADDING_PX,
+  );
+}
+
 function drawSelection(target) {
   if (!target) return;
   const coordinates = coordinatesForPoint(target);
   const projected = projectPoint(coordinates[0], coordinates[1], coordinates[2]);
-  if (!withinViewport(projected, 60)) return;
+  const radius = targetSelectionRadiusAtZoom(target, state.zoom);
+  if (!withinViewport(projected, radius + 8)) return;
 
-  const radius =
-    target.kind === "catalog"
-      ? starRadius(target, projected, 1) + 7
-      : target.kind === "cluster"
-        ? Math.max(10, target.drawItem?.screenRadius || 10)
-        : 8;
   const context = selectionCtx || ctx;
   context.save();
   context.lineWidth = 1.5;
@@ -5842,7 +6765,7 @@ function syncOrientationPresetButtons() {
 }
 
 function syncRangeOutputs() {
-  state.zoom = clampZoomScale(state.zoom);
+  state.zoom = clampZoomScale(state.zoom, { allowTargetZoom: Boolean(selectedTargetForDeepZoom()) });
   state.radiusScale = clampRadiusScale(state.radiusScale);
   state.pulsationSpeed = clampPulsationSpeed(state.pulsationSpeed);
   state.pulsationSpeedLog = Math.log10(state.pulsationSpeed);
@@ -5852,6 +6775,7 @@ function syncRangeOutputs() {
   syncEditableMultiplierOutput("roll", radiansToDegrees(state.roll));
   syncEditableMultiplierOutput("zoom", state.zoom);
   syncEditableMultiplierOutput("radiusScale", state.radiusScale);
+  syncEditableMultiplierOutput("uncertaintySeed", state.uncertaintySeed);
   syncEditableMultiplierOutput("pulsationSpeed", state.pulsationSpeed);
   syncEditableMultiplierOutput("pulsationAmplitude", state.pulsationAmplitudeScale);
   outputs.pulsationDaySeconds.textContent = `1 d = ${formatPulsationDuration(
@@ -5861,8 +6785,9 @@ function syncRangeOutputs() {
   controls.yaw.value = String(radiansToDegrees(state.yaw));
   controls.pitch.value = String(radiansToDegrees(state.pitch));
   controls.roll.value = String(radiansToDegrees(state.roll));
-  controls.zoom.value = String(Math.log10(state.zoom));
+  controls.zoom.value = String(Math.log10(clampZoomScale(state.zoom)));
   controls.radiusScale.value = String(Math.log10(state.radiusScale));
+  controls.uncertaintySeed.value = String(state.uncertaintySeed);
   controls.pulsationSpeed.value = String(state.pulsationSpeedLog);
   controls.pulsationAmplitude.value = String(Math.log10(state.pulsationAmplitudeScale));
   [
@@ -5871,6 +6796,7 @@ function syncRangeOutputs() {
     controls.roll,
     controls.zoom,
     controls.radiusScale,
+    controls.uncertaintySeed,
     controls.pulsationSpeed,
     controls.pulsationAmplitude,
   ].forEach(syncRangeProgress);
@@ -6761,6 +7687,7 @@ function resetAppState() {
   state.pulsationSpeed = INITIAL_PULSATION_SPEED;
   state.pulsationSpeedLog = Math.log10(INITIAL_PULSATION_SPEED);
   state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(PULSATOR_DEFAULT_PRESET);
+  state.uncertaintySeed = DEFAULT_UNCERTAINTY_SEED;
   state.datasetPreset = null;
   state.pulsatorPreset = null;
   state.datasets = {
@@ -6788,6 +7715,7 @@ function resetAppState() {
   state.locked = null;
   state.cameraLocked = false;
   activeLightcurveInset = null;
+  applyUncertaintyRealization({ updateTarget: false });
 
   updateSceneLayout();
   syncTargetSearchInput();
@@ -6994,12 +7922,22 @@ function catalogMatchMeta(point) {
   ].join(" | ");
 }
 
+function clampZoomToTarget(target = selectedTargetForDeepZoom()) {
+  const previousZoom = state.zoom;
+  state.zoom = clampZoomScale(state.zoom, { allowTargetZoom: Boolean(target), target });
+  if (state.zoom === previousZoom) return false;
+  updateSceneLayout();
+  return true;
+}
+
 function selectCatalogSearchTarget(target) {
   if (!targetIsPickable(target)) return;
   state.locked = target;
   state.hovered = null;
   state.cameraLocked = false;
+  const zoomChanged = clampZoomToTarget(target);
   setTarget(state.locked);
+  if (zoomChanged) syncRangeOutputs();
   markProjectionDirty();
 }
 
@@ -7075,6 +8013,7 @@ function handleTargetSearchInput() {
     state.hovered = null;
     state.cameraLocked = false;
     activeLightcurveInset = null;
+    if (clampZoomToTarget(null)) syncRangeOutputs();
   }
 
   setTarget(null);
@@ -7099,22 +8038,30 @@ function clearTargetSelection() {
   state.locked = null;
   state.hovered = null;
   state.cameraLocked = false;
+  const zoomChanged = clampZoomToTarget(null);
   setTarget(null);
+  if (zoomChanged) {
+    syncRangeOutputs();
+    markProjectionDirty();
+  }
 }
 
 function setCameraLock(enabled, target = state.locked) {
   markOrientationGridActive();
+  let zoomChanged = false;
   if (enabled && target) {
     state.locked = target;
     state.hovered = null;
     state.cameraLocked = true;
     clearCenterSelectionForTarget(target);
+    zoomChanged = clampZoomToTarget(target);
   } else {
     state.cameraLocked = false;
   }
 
   updateSceneLayout();
   setTarget(state.locked || state.hovered);
+  if (zoomChanged) syncRangeOutputs();
   markProjectionDirty();
 }
 
@@ -7225,6 +8172,7 @@ function targetRowsForCatalog(target) {
       ? `${reddeningSource} #${reddeningPartition}`
       : reddeningSource;
   const colorPulseRange = vMinusIPulseRangeForTarget(target);
+  const temperaturePulseRange = temperaturePulseRangeForTarget(target);
   const colorPulseSource =
     target.lightCurve.colorSource === "mira-v-prior"
       ? "learned Mira V/I prior"
@@ -7246,16 +8194,29 @@ function targetRowsForCatalog(target) {
         ? `OGLE V/I Q${row[IDX.colorCurveQuality]}`
         : "template";
   const distanceError = Number.isFinite(row[IDX.distanceError]) ? row[IDX.distanceError] : null;
+  const sampledDistance =
+    state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED && Number.isFinite(target.currentDistance)
+      ? target.currentDistance
+      : null;
   const distanceLabel =
-    distanceError !== null
+    sampledDistance !== null && distanceError !== null && Math.abs(sampledDistance - row[IDX.distance]) > 0.005
+      ? `${formatNumber(sampledDistance, 2)} sampled (${formatNumber(row[IDX.distance], 2)} +/- ${formatNumber(distanceError, 2)} kpc)`
+      : distanceError !== null
       ? `${formatNumber(row[IDX.distance], 2)} +/- ${formatNumber(distanceError, 2)} kpc`
       : `${formatNumber(row[IDX.distance], 2)} kpc`;
+  const datasetKey = DATASET_KEYS[row[IDX.dataset]];
+  const metallicityFeH = metallicityForCatalogRow(row);
+  const metallicitySource = Number.isFinite(row[IDX.feh]) ? "catalog" : "mean";
+  const miraTeffSource = datasetKey === "miras" ? miraTemperatureSourceLabel(row) : null;
+  const luminosity = Number.isFinite(target.currentLum) ? target.currentLum : row[IDX.lum];
+  const logLuminosity = Number.isFinite(target.currentLogLum) ? target.currentLogLum : row[IDX.logLum];
+  const radius = Number.isFinite(target.currentRadius) ? target.currentRadius : row[IDX.radius];
   const details = [
     ["Type", `${dataset}, ${location}, ${spec}`],
     ["Period", formatPeriodDays(row)],
-    ["Lum", `${formatNumber(row[IDX.lum], 0)} Lsun`],
-    ["Radius", `${formatNumber(row[IDX.radius], 1)} Rsun`],
-    ["vs RC", `${formatNumber(row[IDX.lum] / RED_CLUMP_LUMINOSITY, 1)}x`],
+    ["Lum", `${formatNumber(luminosity, 0)} Lsun`],
+    ["Radius", `${formatNumber(radius, 1)} Rsun`],
+    ["vs RC", `${formatNumber(luminosity / RED_CLUMP_LUMINOSITY, 1)}x`],
     ["Dist", distanceLabel],
     ["V-I obs", formatNumber(row[IDX.vMinusI], 3)],
     ["E(V-I)", `${formatNumber(reddeningEVI, 3)} ${reddeningLabel}`],
@@ -7263,9 +8224,10 @@ function targetRowsForCatalog(target) {
     [
       "Teff",
       Number.isFinite(intrinsicVMinusI)
-        ? `${formatNumber(effectiveTemperatureFromVMinusI(intrinsicVMinusI), 0)} K`
+        ? `${formatNumber(effectiveTemperatureForCatalogState(row, intrinsicVMinusI, logLuminosity), 0)} K`
         : "n/a",
     ],
+    ["Fe/H used", `${formatNumber(metallicityFeH, 2)} ${metallicitySource}`],
     [
       "Amp",
       `${formatNumber(lightCurve?.vAmplitude, 3)} mag V (${formatNumber(lightCurve?.iAmplitude, 3)} I)`,
@@ -7292,9 +8254,14 @@ function targetRowsForCatalog(target) {
         ? `${formatNumber(colorPulseRange.min, 3)}-${formatNumber(colorPulseRange.max, 3)} ${colorPulseSource}`
         : "n/a",
     ],
+    [
+      "Teff pulse",
+      temperaturePulseRange
+        ? `${formatNumber(temperaturePulseRange.min, 0)}-${formatNumber(temperaturePulseRange.max, 0)} K`
+        : "n/a",
+    ],
   ];
 
-  const datasetKey = DATASET_KEYS[row[IDX.dataset]];
   if (datasetKey === "cepheids") {
     details.push(["Age", `${formatNumber(row[IDX.age], 0)} Myr`], ["Mode", row[IDX.mode] || "n/a"]);
   } else if (datasetKey === "rrlyrae") {
@@ -7303,6 +8270,12 @@ function targetRowsForCatalog(target) {
     details.push(["Mode", row[IDX.mode] || "n/a"]);
   } else if (datasetKey === "miras") {
     details.push(["Chemistry", row[IDX.mode] || "n/a"]);
+    details.push([
+      "Teff src",
+      miraTeffSource && Number.isFinite(row[IDX.miraTeff])
+        ? `${formatNumber(row[IDX.miraTeff], 0)} K ${miraTeffSource}`
+        : "MIST V-I prior",
+    ]);
     if (Array.isArray(row[IDX.miraPeriods]) && row[IDX.miraPeriods].length) {
       details.push([
         "Components",
@@ -7365,6 +8338,16 @@ function targetRowsForCluster(target) {
   const ageMinus = Number.isFinite(row[CL.eLogAge]) ? (ageMyr - 10 ** (row[CL.logAge] - row[CL.eLogAge] - 6)) / ageScale : null;
   const ageDigits = ageUnit === "Gyr" ? 2 : 0;
   const distanceError = Number.isFinite(row[CL.eMu0]) ? (Math.log(10) / 5) * row[CL.distance] * row[CL.eMu0] : null;
+  const sampledDistance =
+    state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED && Number.isFinite(target.currentDistance)
+      ? target.currentDistance
+      : null;
+  const distanceLabel =
+    sampledDistance !== null && Number.isFinite(distanceError) && Math.abs(sampledDistance - row[CL.distance]) > 0.005
+      ? `${formatNumber(sampledDistance, 2)} sampled (${formatNumber(row[CL.distance], 2)} +/- ${formatNumber(distanceError, 2)})`
+      : Number.isFinite(distanceError)
+        ? `${formatNumber(row[CL.distance], 2)} +/- ${formatNumber(distanceError, 2)}`
+        : formatNumber(row[CL.distance], 2);
   const ageLabel =
     Number.isFinite(agePlus) && Number.isFinite(ageMinus)
       ? `${formatNumber(ageValue, ageDigits)} +${formatNumber(agePlus, ageDigits)}/-${formatNumber(ageMinus, ageDigits)}`
@@ -7378,12 +8361,7 @@ function targetRowsForCluster(target) {
     ["log age [dex]", `${formatNumber(row[CL.logAge], 2)} +/- ${formatNumber(row[CL.eLogAge], 2)}`],
     [`Age [${ageUnit}]`, ageLabel],
     ["E(B-V) [mag]", `${formatNumber(row[CL.ebv], 3)} +/- ${formatNumber(row[CL.eEbv], 3)}`],
-    [
-      "Dist [kpc]",
-      Number.isFinite(distanceError)
-        ? `${formatNumber(row[CL.distance], 2)} +/- ${formatNumber(distanceError, 2)}`
-        : formatNumber(row[CL.distance], 2),
-    ],
+    ["Dist [kpc]", distanceLabel],
     ["Isochrones", row[CL.isochroneSummary]],
     [
       "Glow [Lsun]",
@@ -7448,6 +8426,19 @@ function targetNavigationHilbertIndex(x, y) {
   return index;
 }
 
+function targetNavigationKindWeight(target) {
+  if (target?.kind === "catalog") return 0;
+  if (target?.kind === "cluster") return 1;
+  if (target?.kind === "redclump") return 2;
+  return Infinity;
+}
+
+function targetNavigationTargetIsAllowed(target, includeRedClump) {
+  if (!target || !targetIsPickable(target)) return false;
+  if (target.kind === "redclump") return includeRedClump;
+  return target.kind === "catalog" || target.kind === "cluster";
+}
+
 function buildTargetNavigationCandidates() {
   if (projectionDirty) rebuildProjectionCache();
   if (scene.width <= 0 || scene.height <= 0) return [];
@@ -7506,6 +8497,75 @@ function buildTargetNavigationCandidates() {
   return candidates;
 }
 
+function buildFullTargetNavigationCandidates() {
+  if (projectionDirty) rebuildProjectionCache();
+  else {
+    rebuildActivePointLists();
+    rebuildCoordinateCache();
+  }
+
+  const includeRedClump = targetNavigationIncludesRedClump();
+  const entries = [];
+  const transform = makeProjectionTransform(1);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  const append = (target) => {
+    if (!targetNavigationTargetIsAllowed(target, includeRedClump)) return;
+    const coordinates = coordinatesForPoint(target);
+    if (!coordinates) return;
+    const navigationProjected = projectOffsetWithTransform(coordinates[0], coordinates[1], coordinates[2], transform);
+    if (!Number.isFinite(navigationProjected.x) || !Number.isFinite(navigationProjected.y)) return;
+
+    const screenProjected = target.activeProjected || target.projected || navigationProjected;
+    const dx = (screenProjected.x || 0) - scene.width * 0.5;
+    const dy = (screenProjected.y || 0) - scene.height * 0.5;
+    entries.push({
+      target,
+      navigationProjected,
+      centerDistance2: dx * dx + dy * dy,
+      depth: Number.isFinite(navigationProjected.z) ? navigationProjected.z : 0,
+      kindWeight: targetNavigationKindWeight(target),
+      label: targetNavigationSortLabel(target),
+    });
+    minX = Math.min(minX, navigationProjected.x);
+    maxX = Math.max(maxX, navigationProjected.x);
+    minY = Math.min(minY, navigationProjected.y);
+    maxY = Math.max(maxY, navigationProjected.y);
+  };
+
+  for (const target of scene.activeCatalog) append(target);
+  for (const target of scene.activeClusters) append(target);
+  if (includeRedClump) {
+    for (const target of scene.activeRedClump) append(target);
+  }
+
+  if (!entries.length) return [];
+
+  const maxHilbertCoordinate = (1 << TARGET_NAVIGATION_HILBERT_BITS) - 1;
+  const spanX = Math.max(0.000001, maxX - minX);
+  const spanY = Math.max(0.000001, maxY - minY);
+  const candidates = entries.map((entry) => {
+    const hilbertX = Math.round(((entry.navigationProjected.x - minX) / spanX) * maxHilbertCoordinate);
+    const hilbertY = Math.round(((entry.navigationProjected.y - minY) / spanY) * maxHilbertCoordinate);
+    return {
+      ...entry,
+      key: targetNavigationHilbertIndex(hilbertX, hilbertY),
+    };
+  });
+
+  candidates.sort(
+    (left, right) =>
+      left.key - right.key ||
+      left.kindWeight - right.kindWeight ||
+      left.depth - right.depth ||
+      left.label.localeCompare(right.label),
+  );
+  return candidates;
+}
+
 function nearestTargetNavigationCandidateIndex(candidates) {
   let bestIndex = -1;
   let bestDistance = Infinity;
@@ -7519,7 +8579,16 @@ function nearestTargetNavigationCandidateIndex(candidates) {
   return bestIndex;
 }
 
-function selectNavigationTarget(target) {
+function centerViewportOnTarget(target) {
+  const base = getBaseSceneLayout();
+  const coordinates = targetCoordinates(target);
+  const offset = projectedOffsetFor(coordinates.x, coordinates.y, coordinates.z, base.scale);
+  state.panX = -offset.x;
+  state.panY = -offset.y;
+  updateSceneLayout();
+}
+
+function selectNavigationTarget(target, { centerViewport = false } = {}) {
   if (!target) return;
   cancelIntroRotation();
   cancelAxisSpinAnimation();
@@ -7532,23 +8601,42 @@ function selectNavigationTarget(target) {
 
   state.locked = target;
   state.hovered = null;
+  const zoomChanged = clampZoomToTarget(target);
+  if (centerViewport) centerViewportOnTarget(target);
   setTarget(target);
-  updateCoordinateReadout();
-  queueRender();
+  if (zoomChanged) syncRangeOutputs();
+  if (centerViewport || zoomChanged) markProjectionDirty();
+  else {
+    updateCoordinateReadout();
+    queueRender();
+  }
 }
 
 function stepTargetNavigation(direction) {
-  const candidates = buildTargetNavigationCandidates();
-  if (!candidates.length) return;
-
+  const visibleCandidates = buildTargetNavigationCandidates();
   const current = state.locked || state.hovered;
-  const currentIndex = current ? candidates.findIndex((candidate) => candidate.target === current) : -1;
+  const visibleCurrentIndex = current
+    ? visibleCandidates.findIndex((candidate) => candidate.target === current)
+    : -1;
+
+  if (visibleCandidates.length && (visibleCurrentIndex < 0 || visibleCandidates.length > 1)) {
+    const nextVisibleIndex =
+      visibleCurrentIndex >= 0
+        ? positiveModulo(visibleCurrentIndex + direction, visibleCandidates.length)
+        : nearestTargetNavigationCandidateIndex(visibleCandidates);
+    selectNavigationTarget(visibleCandidates[nextVisibleIndex]?.target);
+    return;
+  }
+
+  const fullCandidates = buildFullTargetNavigationCandidates();
+  if (!fullCandidates.length) return;
+  const currentIndex = current ? fullCandidates.findIndex((candidate) => candidate.target === current) : -1;
   const nextIndex =
     currentIndex >= 0
-      ? positiveModulo(currentIndex + direction, candidates.length)
-      : nearestTargetNavigationCandidateIndex(candidates);
+      ? positiveModulo(currentIndex + direction, fullCandidates.length)
+      : nearestTargetNavigationCandidateIndex(fullCandidates);
 
-  selectNavigationTarget(candidates[nextIndex]?.target);
+  selectNavigationTarget(fullCandidates[nextIndex]?.target, { centerViewport: true });
 }
 
 function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
@@ -7566,7 +8654,7 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
       item.point.animatePulse || item.point === state.locked
         ? lightCurveVisualPulses(pulseFactor(item.point, simulationDay), item.point).areaPulse
         : 1;
-    const radius = (starRadiusFromBase(item.baseRadius, areaPulse, starRadiusFactorForPoint(item.point)) + 5) * radiusScale;
+    const radius = (catalogRenderVisualRadius(item, areaPulse) + 5) * radiusScale;
     const dx = item.projected.x - clientX;
     const dy = item.projected.y - clientY;
     const distance = dx * dx + dy * dy;
@@ -7629,8 +8717,10 @@ function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOn
   state.hovered = null;
   clearCenterSelectionForTarget(state.locked);
   if (!state.locked) state.cameraLocked = false;
+  const zoomChanged = clampZoomToTarget(state.locked);
   setTarget(state.locked);
-  if (wasCameraLocked) {
+  if (zoomChanged) syncRangeOutputs();
+  if (wasCameraLocked || zoomChanged) {
     markProjectionDirty();
   } else {
     updateCoordinateReadout();
@@ -7671,6 +8761,9 @@ function resetRangeControl(controlId) {
       markRedClumpLayerDirty();
       syncRangeOutputs();
       queueRender();
+      break;
+    case "uncertaintySeed":
+      setUncertaintySeed(DEFAULT_UNCERTAINTY_SEED);
       break;
     case "pulsationSpeed":
       state.pulsationSpeed = defaultPulsationSpeedForPreset(preset);
@@ -7863,6 +8956,12 @@ function bindControls() {
     markRedClumpLayerDirty();
     syncRangeOutputs();
     queueRender();
+  });
+  controls.uncertaintySeed.addEventListener("input", () => {
+    requestUncertaintySeed(controls.uncertaintySeed.value);
+  });
+  controls.uncertaintySeed.addEventListener("change", () => {
+    setUncertaintySeed(controls.uncertaintySeed.value);
   });
   document.querySelectorAll("[data-exposure]").forEach((input) => {
     input.addEventListener("input", () => {
@@ -8087,7 +9186,7 @@ function bindControls() {
       event.preventDefault();
       setCursorPosition(event);
       const next = state.zoom * Math.exp(-event.deltaY * 0.0012);
-      setZoom(next, event.clientX, event.clientY);
+      setZoom(next, event.clientX, event.clientY, { allowTargetZoom: true, focusTarget: true });
       syncRangeOutputs();
     },
     { passive: false },
@@ -8251,23 +9350,37 @@ function buildRedClumpSurface(points) {
 function preparePoints(payload) {
   scene.payload = payload;
   scene.spectralClasses = payload.spectralClasses;
+  scene.temperatureAnchors = normalizedTemperatureAnchors(payload.meta?.viTemperatureCalibration?.anchors);
+  scene.temperatureGrid = normalizedTemperatureGrid(payload.meta?.viLuminosityTemperatureCalibration);
+  scene.meanMetallicityFeHByLocation = normalizedMeanMetallicityFeHByLocation(payload.meta?.meanMetallicityFeHByLocation);
+  scene.miraTemperatureSources = Array.isArray(payload.meta?.miraTemperatureSources)
+    ? payload.meta.miraTemperatureSources
+    : [];
+  colorCache.clear();
+  catalogTemperatureColorCache.clear();
   scene.bounds = payload.bounds;
   scene.coordinateContext = coordinateContextFromPayload(payload);
   scene.skyGridBounds = skyGridBoundsFromPayload(payload);
   scene.catalog = payload.datasets.catalog.map((row) => {
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const intrinsicVMinusI = intrinsicVMinusIForRow(row);
+    const baseCoordinates = catalogCoordinates(row);
     const point = {
       kind: "catalog",
       row,
-      coordinates: catalogCoordinates(row),
+      baseCoordinates,
+      coordinates: baseCoordinates,
       activeCoordinates: null,
       projected,
+      currentDistance: row[IDX.distance],
+      currentLum: row[IDX.lum],
+      currentLogLum: row[IDX.logLum],
+      currentRadius: row[IDX.radius],
       radiusUnit: pointRadiusUnitFromStellarRadius(row[IDX.radius]),
       alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[IDX.lum]) * BASE_LUMINOSITY_FACTOR,
       vMinusI: Number.isFinite(row[IDX.vMinusI]) ? row[IDX.vMinusI] : null,
       vMinusI0: Number.isFinite(intrinsicVMinusI) ? intrinsicVMinusI : null,
-      color: colorForVMinusI(intrinsicVMinusI, row[IDX.spectral]),
+      color: colorForCatalogState(row, intrinsicVMinusI, row[IDX.logLum]),
       sample: hashString(String(row[IDX.id])) % 100,
       searchText: catalogSearchTextForRow(row),
       lightCurve: makeWaveform(row),
@@ -8329,17 +9442,30 @@ function preparePoints(payload) {
   for (const bins of clusterHrBinsByIndex.values()) {
     bins.sort((left, right) => left.logLum - right.logLum);
   }
+  const clusterBaseCoordinatesByIndex = (payload.datasets.clusters || []).map((row) => clusterCoordinates(row));
   scene.clusterStarsByCluster = new Map();
   scene.clusterStars = (payload.datasets.clusterStars || []).map((row, index) => {
     const clusterIndex = row[CS.cluster];
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
+    const baseCoordinates = clusterStarCoordinates(row);
+    const clusterBaseCoordinates = clusterBaseCoordinatesByIndex[clusterIndex];
+    const clusterOffsetVector = clusterBaseCoordinates
+      ? [
+          baseCoordinates.galacticVector[0] - clusterBaseCoordinates.galacticVector[0],
+          baseCoordinates.galacticVector[1] - clusterBaseCoordinates.galacticVector[1],
+          baseCoordinates.galacticVector[2] - clusterBaseCoordinates.galacticVector[2],
+        ]
+      : [0, 0, 0];
     const point = {
       kind: "clusterStar",
       row,
       clusterIndex,
-      coordinates: clusterStarCoordinates(row),
+      baseCoordinates,
+      coordinates: baseCoordinates,
+      clusterOffsetVector,
       activeCoordinates: null,
       projected,
+      currentDistance: row[CS.distance],
       radiusUnit: pointRadiusUnitFromStellarRadius(row[CS.radius]),
       alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CS.lum]),
       vMinusI0: Number.isFinite(row[CS.vMinusI0]) ? row[CS.vMinusI0] : null,
@@ -8375,14 +9501,17 @@ function preparePoints(payload) {
   });
   scene.clusters = (payload.datasets.clusters || []).map((row, index) => {
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
+    const baseCoordinates = clusterBaseCoordinatesByIndex[index] || clusterCoordinates(row);
     const point = {
       kind: "cluster",
       index,
       row,
-      coordinates: clusterCoordinates(row),
+      baseCoordinates,
+      coordinates: baseCoordinates,
       activeCoordinates: null,
       projected,
       activeProjected: null,
+      currentDistance: row[CL.distance],
       radiusPc: row[CL.radiusPc],
       glowAlphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CL.unresolvedLum] || 0),
       glowBins: clusterGlowBinsByIndex.get(index) || [],
@@ -8426,6 +9555,9 @@ function preparePoints(payload) {
   });
   smoothRedClumpDensities(scene.redClump);
   scene.redClumpSurface = buildRedClumpSurface(scene.redClump);
+  if (state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED) {
+    applyUncertaintyRealization({ updateTarget: false });
+  }
   invalidateCoordinateCache();
   invalidateActivePointLists();
 

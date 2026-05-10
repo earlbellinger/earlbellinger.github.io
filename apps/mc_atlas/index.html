@@ -147,6 +147,11 @@
             <input id="radiusScale" type="range" min="-1" max="0.47712125471966244" step="any" value="0" aria-labelledby="radiusScaleLabel" />
             <output id="radiusValue" class="editableMultiplier" data-multiplier-output="radiusScale"><button class="editableMultiplierValue" type="button" aria-label="Edit radius value">1.00</button><span class="editableMultiplierUnit">x</span></output>
           </div>
+          <div class="range">
+            <span id="uncertaintySeedLabel" class="rangeReset" data-reset-control="uncertaintySeed" role="button" tabindex="0" title="Reset seed">Seed</span>
+            <input id="uncertaintySeed" type="range" min="0" max="100" step="1" value="0" aria-labelledby="uncertaintySeedLabel" />
+            <output id="uncertaintySeedValue" class="editableMultiplier" data-multiplier-output="uncertaintySeed"><button class="editableMultiplierValue" type="button" aria-label="Edit seed value">0</button><span class="editableMultiplierUnit"></span></output>
+          </div>
         </section>
 
         <section>
@@ -238,6 +243,6 @@
       <div id="perfHud" class="perfHud hidden" aria-live="off"></div>
     </main>
 
-    <script type="module" src="./src/app.js?v=20260509-cluster-isochrone-interp"></script>
+    <script type="module" src="./src/app.js?v=20260510-uncertainty-seed-cluster-isochrone-interp"></script>
   </body>
 </html>
