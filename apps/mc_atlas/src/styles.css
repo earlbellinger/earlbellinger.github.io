@@ -885,6 +885,10 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.mobileTargetPreview {
+  display: none;
+}
+
 .target dd.withLightcurve {
   display: grid;
   gap: 6px;
@@ -1616,6 +1620,77 @@ h2 {
     transform: translateY(8px);
   }
 
+  .mobileTargetPreview {
+    position: fixed;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 62px);
+    left: max(12px, env(safe-area-inset-left));
+    z-index: 5;
+    display: grid;
+    gap: 6px;
+    box-sizing: border-box;
+    max-width: min(248px, calc(100vw - 90px));
+    border: 1px solid rgba(229, 229, 229, 0.18);
+    border-radius: 8px;
+    background: rgba(8, 14, 27, 0.78);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.42);
+    padding: 8px;
+    pointer-events: none;
+    backdrop-filter: blur(14px);
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease;
+  }
+
+  .mobileTargetPreview[hidden] {
+    display: none;
+  }
+
+  .mobileTargetPreviewName {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--cream);
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobileTargetPreviewPlot {
+    display: grid;
+    min-width: 0;
+  }
+
+  .mobileTargetPreview .lightcurveInset {
+    width: min(190px, 100%);
+    background: rgba(8, 14, 27, 0.56);
+    padding: 4px;
+  }
+
+  .mobileTargetPreview .lightcurveInset.miraLightcurveInset {
+    width: min(232px, 100%);
+  }
+
+  .mobileTargetPreview .lightcurveInset svg {
+    height: 56px;
+  }
+
+  .mobileTargetPreview .lightcurveInset.miraLightcurveInset svg {
+    height: 62px;
+  }
+
+  .mobileTargetPreview .clusterHrDiagram {
+    width: min(232px, 100%);
+    margin-top: 0;
+    background: rgba(8, 14, 27, 0.56);
+    padding: 4px;
+  }
+
+  .mobile-controls-open .mobileTargetPreview {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
   .mobileControlsBackdrop {
     position: fixed;
     inset: 0;
@@ -1813,6 +1888,7 @@ h2 {
 .overlays-hidden .coordinateHud,
 .overlays-hidden .mobileControlsToggle,
 .overlays-hidden .mobilePresetToggle,
+.overlays-hidden .mobileTargetPreview,
 .overlays-hidden .mobileControlsBackdrop,
 .overlays-hidden .loading:not(.error),
 .overlays-hidden .perfHud {

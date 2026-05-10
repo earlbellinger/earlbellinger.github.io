@@ -923,6 +923,8 @@ const MOBILE_CONTROLS_MEDIA = window.matchMedia("(max-width: 860px)");
 const MOBILE_TOUCH_MOVE_THRESHOLD = 7;
 const MOBILE_PINCH_MOVE_THRESHOLD = 3;
 const MOBILE_TARGET_PICK_RADIUS_SCALE = 2.25;
+const MOBILE_DOUBLE_TAP_MAX_MS = 320;
+const MOBILE_DOUBLE_TAP_MAX_DISTANCE = 28;
 const MOBILE_STAR_BASE_RADIUS_SCALE = 0.5;
 const MOBILE_DRAWER_SWIPE_CLOSE_DISTANCE = 58;
 let mobileControlsOpen = false;
@@ -985,6 +987,9 @@ const elements = {
   mobileControlsToggle: document.querySelector("#mobileControlsToggle"),
   mobileControlsBackdrop: document.querySelector("#mobileControlsBackdrop"),
   mobileControlsClose: document.querySelector("#mobileControlsClose"),
+  mobileTargetPreview: document.querySelector("#mobileTargetPreview"),
+  mobileTargetPreviewName: document.querySelector("#mobileTargetPreviewName"),
+  mobileTargetPreviewPlot: document.querySelector("#mobileTargetPreviewPlot"),
   mobilePanelHeader: document.querySelector(".mobilePanelHeader"),
   shortcutHelp: document.querySelector("#shortcutHelp"),
   shortcutHelpList: document.querySelector("#shortcutHelpList"),
@@ -1215,8 +1220,9 @@ let hoverTimer = 0;
 let hoverSuppressedUntil = 0;
 let pointerMode = "orbit";
 let loadingProgress = 0;
-let activeLightcurveInset = null;
+let activeLightcurveInsets = [];
 let lastRightClick = { time: 0, x: 0, y: 0 };
+let lastMobileTap = { time: 0, x: 0, y: 0, target: null };
 let introRotation = null;
 let introCloudLabelAnimation = null;
 let axisSpinAnimation = null;
@@ -4345,7 +4351,7 @@ function createLightCurveInset(target) {
   }
   inset.append(svg);
 
-  activeLightcurveInset = {
+  activeLightcurveInsets.push({
     target,
     trace,
     phaseMarkers,
@@ -4354,43 +4360,49 @@ function createLightCurveInset(target) {
     height,
     padX,
     padY,
-  };
+  });
   updateLightcurveInset();
   return inset;
 }
 
+function clearActiveLightcurveInsets() {
+  activeLightcurveInsets = [];
+}
+
 function updateLightcurveInset() {
-  if (!activeLightcurveInset) return;
+  if (!activeLightcurveInsets.length) return;
 
-  const { target, trace, phaseMarkers, phaseDots, width, height, padX, padY } = activeLightcurveInset;
-  const simulationDay = lightCurveInsetSampleDay(target);
-  const sample = waveformSample(target, simulationDay);
-  const currentPulse = pulseState(target, simulationDay);
-  const flux = interpolateSamples(target.lightCurve.waveform, sample);
-  if (target.lightCurve?.timeDomain) {
-    const insetWindow = timeDomainInsetWindow(target, simulationDay);
-    trace.setAttribute("d", lightCurvePath(target, width, height, padX, padY, insetWindow));
-    const x = padX + insetWindow.currentFraction * (width - padX * 2);
-    const y = lightCurveY(target.lightCurve, insetWindow.currentFlux, height, padY, insetWindow.fluxRange);
-    phaseMarkers[0].setAttribute("x1", x.toFixed(2));
-    phaseMarkers[0].setAttribute("x2", x.toFixed(2));
-    phaseDots[0].setAttribute("cx", x.toFixed(2));
-    phaseDots[0].setAttribute("cy", y.toFixed(2));
-    phaseDots[0].style.fill = currentPulse.color;
-    return;
-  } else {
-    trace.setAttribute("d", lightCurvePath(target, width, height, padX, padY));
-  }
+  for (const activeLightcurveInset of activeLightcurveInsets) {
+    const { target, trace, phaseMarkers, phaseDots, width, height, padX, padY } = activeLightcurveInset;
+    const simulationDay = lightCurveInsetSampleDay(target);
+    const sample = waveformSample(target, simulationDay);
+    const currentPulse = pulseState(target, simulationDay);
+    const flux = interpolateSamples(target.lightCurve.waveform, sample);
+    if (target.lightCurve?.timeDomain) {
+      const insetWindow = timeDomainInsetWindow(target, simulationDay);
+      trace.setAttribute("d", lightCurvePath(target, width, height, padX, padY, insetWindow));
+      const x = padX + insetWindow.currentFraction * (width - padX * 2);
+      const y = lightCurveY(target.lightCurve, insetWindow.currentFlux, height, padY, insetWindow.fluxRange);
+      phaseMarkers[0].setAttribute("x1", x.toFixed(2));
+      phaseMarkers[0].setAttribute("x2", x.toFixed(2));
+      phaseDots[0].setAttribute("cx", x.toFixed(2));
+      phaseDots[0].setAttribute("cy", y.toFixed(2));
+      phaseDots[0].style.fill = currentPulse.color;
+      continue;
+    } else {
+      trace.setAttribute("d", lightCurvePath(target, width, height, padX, padY));
+    }
 
-  const cycleWidth = (width - padX * 2) / lightCurveInsetCycles(target);
-  const y = lightCurveY(target.lightCurve, flux, height, padY);
-  for (let cycle = 0; cycle < lightCurveInsetCycles(target); cycle += 1) {
-    const x = padX + (cycle + sample.phase) * cycleWidth;
-    phaseMarkers[cycle].setAttribute("x1", x.toFixed(2));
-    phaseMarkers[cycle].setAttribute("x2", x.toFixed(2));
-    phaseDots[cycle].setAttribute("cx", x.toFixed(2));
-    phaseDots[cycle].setAttribute("cy", y.toFixed(2));
-    phaseDots[cycle].style.fill = currentPulse.color;
+    const cycleWidth = (width - padX * 2) / lightCurveInsetCycles(target);
+    const y = lightCurveY(target.lightCurve, flux, height, padY);
+    for (let cycle = 0; cycle < lightCurveInsetCycles(target); cycle += 1) {
+      const x = padX + (cycle + sample.phase) * cycleWidth;
+      phaseMarkers[cycle].setAttribute("x1", x.toFixed(2));
+      phaseMarkers[cycle].setAttribute("x2", x.toFixed(2));
+      phaseDots[cycle].setAttribute("cx", x.toFixed(2));
+      phaseDots[cycle].setAttribute("cy", y.toFixed(2));
+      phaseDots[cycle].style.fill = currentPulse.color;
+    }
   }
 }
 
@@ -8204,7 +8216,7 @@ function setCoordinateCenter(centerId) {
   state.locked = null;
   state.hovered = null;
   state.cameraLocked = false;
-  activeLightcurveInset = null;
+  clearActiveLightcurveInsets();
   applyCoordinateChange();
 }
 
@@ -8723,6 +8735,28 @@ function applyMultiTouchGesture() {
   setCursorClientPosition(metrics.centerX, metrics.centerY);
 }
 
+function selectMobileTapTarget(point) {
+  const target = selectTargetAt(point.clientX, point.clientY, {
+    pickRadiusScale: MOBILE_TARGET_PICK_RADIUS_SCALE,
+  });
+  const now = performance.now();
+  const isDoubleTap =
+    target &&
+    target === lastMobileTap.target &&
+    now - lastMobileTap.time <= MOBILE_DOUBLE_TAP_MAX_MS &&
+    Math.hypot(point.clientX - lastMobileTap.x, point.clientY - lastMobileTap.y) <= MOBILE_DOUBLE_TAP_MAX_DISTANCE;
+
+  if (isDoubleTap) {
+    setCameraLock(true, target);
+    lastMobileTap = { time: 0, x: 0, y: 0, target: null };
+    return;
+  }
+
+  lastMobileTap = target
+    ? { time: now, x: point.clientX, y: point.clientY, target }
+    : { time: 0, x: 0, y: 0, target: null };
+}
+
 function handleCanvasTouchPointerDown(event) {
   if (!isMobileTouchPointer(event)) return false;
   event.preventDefault();
@@ -8770,10 +8804,7 @@ function handleCanvasTouchPointerUp(event) {
   releaseCanvasPointer(event);
 
   if (wasTap) {
-    selectTargetAt(point.clientX, point.clientY, {
-      pickRadiusScale: MOBILE_TARGET_PICK_RADIUS_SCALE,
-      focusSelectedOnRepeat: true,
-    });
+    selectMobileTapTarget(point);
   }
 
   if (activeTouchPointers.size >= 2) {
@@ -8889,7 +8920,7 @@ function resetAppState() {
   state.locked = null;
   state.cameraLocked = false;
   previousCustomView = null;
-  activeLightcurveInset = null;
+  clearActiveLightcurveInsets();
   applyUncertaintyRealization({ updateTarget: false });
 
   updateSceneLayout();
@@ -9383,6 +9414,41 @@ function renderNoTargetState() {
   elements.target.append(strong);
 }
 
+function mobileTargetPreviewName(target) {
+  if (target?.kind === "catalog") return String(target.row[IDX.id]);
+  if (target?.kind === "cluster") return String(target.row[CL.name]);
+  if (target?.kind === "clusterStar") {
+    const cluster = scene.clusters[target.clusterIndex] || scene.clusters[target.row?.[CS.cluster]];
+    return cluster ? `${cluster.row[CL.name]} star` : "Synthetic cluster star";
+  }
+  return "XMC surface cell";
+}
+
+function createMobileTargetPreviewPlot(target) {
+  if (target?.kind === "cluster") return createClusterHrDiagram(target);
+  if (target?.lightCurve?.waveform?.length) return createLightCurveInset(target);
+  return null;
+}
+
+function renderMobileTargetPreview(target) {
+  if (!elements.mobileTargetPreview || !elements.mobileTargetPreviewName || !elements.mobileTargetPreviewPlot) return;
+
+  elements.mobileTargetPreview.hidden = true;
+  elements.mobileTargetPreviewName.textContent = "";
+  elements.mobileTargetPreviewPlot.replaceChildren();
+
+  if (!MOBILE_CONTROLS_MEDIA.matches || !target || target !== state.locked) return;
+
+  const plot = createMobileTargetPreviewPlot(target);
+  if (!plot) return;
+
+  const name = mobileTargetPreviewName(target);
+  elements.mobileTargetPreviewName.textContent = name;
+  elements.mobileTargetPreview.setAttribute("aria-label", `${name} target preview`);
+  elements.mobileTargetPreviewPlot.append(plot);
+  elements.mobileTargetPreview.hidden = false;
+}
+
 function handleTargetSearchInput() {
   state.targetSearchQuery = controls.targetSearch.value;
   const { matches, total, exactMatch } = catalogSearchMatches();
@@ -9396,7 +9462,7 @@ function handleTargetSearchInput() {
     state.locked = null;
     state.hovered = null;
     state.cameraLocked = false;
-    activeLightcurveInset = null;
+    clearActiveLightcurveInsets();
     if (clampZoomToTarget(null)) syncRangeOutputs();
   }
 
@@ -9451,12 +9517,13 @@ function setCameraLock(enabled, target = state.locked) {
 
 function setTarget(target) {
   const current = target || state.locked || state.hovered;
-  activeLightcurveInset = null;
+  clearActiveLightcurveInsets();
   markCatalogStaticDirty();
   elements.target.classList.remove("hasMatches");
   elements.target.replaceChildren();
 
   if (!current) {
+    renderMobileTargetPreview(null);
     renderNoTargetState();
     updateCoordinateReadout();
     return;
@@ -9532,6 +9599,7 @@ function setTarget(target) {
     dl.append(dt, dd);
   }
   elements.target.append(dl);
+  renderMobileTargetPreview(current);
   updateCoordinateReadout();
 }
 
@@ -10122,12 +10190,12 @@ function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOn
   const target = nearestTarget(clientX, clientY, { pickRadiusScale });
   if (lockCamera) {
     if (target) setCameraLock(true, target);
-    return;
+    return target;
   }
 
   if (focusSelectedOnRepeat && target && target === state.locked) {
     setCameraLock(true, target);
-    return;
+    return target;
   }
 
   const wasCameraLocked = state.cameraLocked;
@@ -10144,6 +10212,7 @@ function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOn
     updateCoordinateReadout();
     queueRender();
   }
+  return target;
 }
 
 function resetRangeControl(controlId) {
@@ -10258,6 +10327,11 @@ function syncMobileControlsVisibility() {
   setMobileElementHidden(elements.coordinateHud, overlaysHidden || (isMobile && !isOpen));
 }
 
+function handleMobileControlsMediaChange() {
+  syncMobileControlsVisibility();
+  renderMobileTargetPreview(state.locked || state.hovered);
+}
+
 function setMobileControlsOpen(open, { restoreFocus = false, focusClose = true } = {}) {
   const isMobile = MOBILE_CONTROLS_MEDIA.matches;
   const nextOpen = isMobile && Boolean(open);
@@ -10316,9 +10390,9 @@ function bindMobileControls() {
     setMobileControlsOpen(false, { restoreFocus: true });
   });
   if (MOBILE_CONTROLS_MEDIA.addEventListener) {
-    MOBILE_CONTROLS_MEDIA.addEventListener("change", syncMobileControlsVisibility);
+    MOBILE_CONTROLS_MEDIA.addEventListener("change", handleMobileControlsMediaChange);
   } else {
-    MOBILE_CONTROLS_MEDIA.addListener(syncMobileControlsVisibility);
+    MOBILE_CONTROLS_MEDIA.addListener(handleMobileControlsMediaChange);
   }
   elements.mobilePanelHeader?.addEventListener("pointerdown", beginMobileDrawerSwipe);
   elements.mobilePanelHeader?.addEventListener("pointermove", updateMobileDrawerSwipe);
