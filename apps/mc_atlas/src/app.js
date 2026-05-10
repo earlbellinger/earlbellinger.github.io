@@ -1187,6 +1187,7 @@ const scene = {
   catalogDrawListScreenProjected: true,
   catalogProjectionFastPending: false,
   catalogAnimatedDrawList: [],
+  catalogWorldStaticDrawList: [],
   redClumpDrawList: [],
   redClumpSurfaceDrawList: [],
   clusterTargetDrawList: [],
@@ -8242,6 +8243,7 @@ function drawAnimatedCatalogItems(
 
 function rebuildCatalogGpuStaticLayer(renderer) {
   scene.catalogAnimatedDrawList.length = 0;
+  scene.catalogWorldStaticDrawList.length = 0;
   const now = performance.now();
   const usePulseLod = shouldUseCatalogPulseLod(now);
   const useWorldProjectionCache =
@@ -8251,21 +8253,41 @@ function rebuildCatalogGpuStaticLayer(renderer) {
     !usePulseLod;
 
   if (useWorldProjectionCache) {
+    let animatedCatalog = 0;
+    let staticCatalog = 0;
     for (const item of scene.catalogDrawList) {
-      item.slowPulseThrottle = shouldSlowPulseThrottleCatalogItem(item);
-      scene.catalogAnimatedDrawList.push(item);
+      updateCatalogStaticStyle(item);
+      const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
+      item.catalogWorldStaticPulseState = !animates;
+      if (animates) {
+        animatedCatalog += 1;
+        scene.catalogAnimatedDrawList.push(item);
+      } else {
+        updateStaticCatalogItem(item);
+        staticCatalog += 1;
+        scene.catalogWorldStaticDrawList.push(item);
+      }
     }
 
     renderer.resize();
     renderer.clear();
     renderer.uploadCatalogStatic(0);
     renderer.drawCatalogStatic();
-    let staticCatalog = 0;
+    const staticWorldCount = renderer.ensureCatalogWorldStatic(scene.catalogWorldStaticDrawList);
+    const staticWorldData = renderer.ensureCatalogWorldPulseCapacity(staticWorldCount);
+    for (const item of scene.catalogWorldStaticDrawList) {
+      const worldIndex = item.catalogWorldPulseIndex;
+      if (worldIndex < 0 || worldIndex >= staticWorldCount) continue;
+      writeCatalogGpuWorldPulseItemAt(staticWorldData, worldIndex, item, item.currentColor);
+    }
+    renderer.drawCatalogDynamicWorld(staticWorldCount, [], true);
     if (renderer.projectsClusterStarsInShader) {
       renderer.drawClusterStars();
       staticCatalog += renderer.clusterStarCount;
     }
-    stampCatalogStaticCache(scene.catalogAnimatedDrawList.length, staticCatalog, usePulseLod);
+    stampCatalogStaticCache(animatedCatalog, staticCatalog, usePulseLod);
+    renderer.catalogWorldStaticCacheVersion = scene.catalogStaticCacheVersion;
+    renderer.catalogWorldPulseCacheVersion = scene.catalogStaticCacheVersion;
     return;
   }
 
@@ -8280,9 +8302,11 @@ function rebuildCatalogGpuStaticLayer(renderer) {
     updateCatalogStaticStyle(item);
     const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     if (animates) {
+      item.catalogWorldStaticPulseState = false;
       scene.catalogAnimatedDrawList.push(item);
       animatedCatalog += 1;
     } else {
+      item.catalogWorldStaticPulseState = true;
       offset = writeCatalogGpuItem(
         data,
         offset,
@@ -8320,9 +8344,11 @@ function rebuildCatalogStaticLayer() {
     updateCatalogStaticStyle(item);
     const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     if (animates) {
+      item.catalogWorldStaticPulseState = false;
       scene.catalogAnimatedDrawList.push(item);
       animatedCatalog += 1;
     } else {
+      item.catalogWorldStaticPulseState = true;
       pushColorBucket(
         scene.staticColorBuckets,
         updateStaticCatalogItem(item),
@@ -8353,9 +8379,11 @@ function drawCatalogDirect(
     const animates = shouldAnimateCatalogItem(item, item.staticRadius, item.staticAlpha, usePulseLod);
     let color = item.point.color;
     if (animates) {
+      item.catalogWorldStaticPulseState = false;
       color = animatedCatalogItemColor(item, simulationDay, now, useNavigationPulseFloor);
       animatedCatalog += 1;
     } else {
+      item.catalogWorldStaticPulseState = true;
       color = updateStaticCatalogItem(item);
       staticCatalog += 1;
     }
@@ -8402,12 +8430,15 @@ function drawCatalogGpu(
     if (useWorldProjection && !needsScreenProjection) {
       const worldIndex = item.catalogWorldPulseIndex;
       if (worldIndex < 0 || worldIndex >= expectedWorldCount) continue;
-      const refreshed = updateAnimatedCatalogPulseStateIfNeeded(
-        item,
-        simulationDay,
-        pulseNow,
-        useNavigationPulseFloor,
-      );
+      const refreshed = item.catalogWorldStaticPulseState
+        ? Boolean(forceWorldPulseFullUpload || !animatedCatalogPulseStateValid(item))
+        : updateAnimatedCatalogPulseStateIfNeeded(
+            item,
+            simulationDay,
+            pulseNow,
+            useNavigationPulseFloor,
+          );
+      if (item.catalogWorldStaticPulseState && refreshed) updateStaticCatalogItem(item);
       if (forceWorldPulseFullUpload || refreshed) {
         writeCatalogGpuWorldPulseItemAt(worldData, worldIndex, item, item.currentColor);
         if (!forceWorldPulseFullUpload) appendCatalogWorldPulseDirtyRange(worldDirtyRanges, worldIndex);
