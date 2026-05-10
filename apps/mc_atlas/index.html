@@ -79,37 +79,37 @@
           <div class="datasetColumnHeader" aria-hidden="true">
             <span></span>
             <span></span>
-            <span>exposure</span>
+            <span>intensity</span>
             <span>N</span>
           </div>
           <div class="check datasetRow">
             <input type="checkbox" data-dataset="cepheids" checked aria-label="Show Cepheids" title="Show Cepheids" />
             <button class="datasetPresetText" type="button" data-dataset-preset="cepheids">Cepheids</button>
-            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="cepheids" aria-label="Cepheids exposure" title="Cepheids exposure" />
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="cepheids" aria-label="Cepheids intensity" title="Cepheids intensity" />
             <output id="cepheidCount">0</output>
           </div>
           <div class="check datasetRow">
             <input type="checkbox" data-dataset="rrlyrae" checked aria-label="Show RR Lyrae" title="Show RR Lyrae" />
             <button class="datasetPresetText" type="button" data-dataset-preset="rrlyrae">RR Lyrae</button>
-            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="rrlyrae" aria-label="RR Lyrae exposure" title="RR Lyrae exposure" />
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="rrlyrae" aria-label="RR Lyrae intensity" title="RR Lyrae intensity" />
             <output id="rrCount">0</output>
           </div>
           <div class="check datasetRow">
             <input type="checkbox" data-dataset="miras" checked aria-label="Show Miras" title="Show Miras" />
             <button class="datasetPresetText" type="button" data-dataset-preset="miras">Miras</button>
-            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="miras" aria-label="Miras exposure" title="Miras exposure" />
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="miras" aria-label="Miras intensity" title="Miras intensity" />
             <output id="miraCount">0</output>
           </div>
           <div class="check datasetRow">
             <input type="checkbox" data-dataset="clusters" checked aria-label="Show Clusters" title="Show Clusters" />
             <button class="datasetPresetText" type="button" data-dataset-preset="clusters">Clusters</button>
-            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="clusters" aria-label="Clusters exposure" title="Clusters exposure" />
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="clusters" aria-label="Clusters intensity" title="Clusters intensity" />
             <output id="clusterCount">0</output>
           </div>
           <div class="check datasetRow">
             <input type="checkbox" data-dataset="redclump" checked aria-label="Show Red clump" title="Show Red clump" />
             <button class="datasetPresetText" type="button" data-dataset-preset="redclump">Red clump</button>
-            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="-0.09691001300805639" data-exposure="redclump" aria-label="Red clump exposure" title="Red clump exposure" />
+            <input class="datasetExposure" type="range" min="-2" max="2" step="any" value="0" data-exposure="redclump" aria-label="Red clump intensity" title="Red clump intensity" />
           </div>
         </section>
 
@@ -169,8 +169,8 @@
           </div>
           <div class="range">
             <span id="pulsationAmplitudeLabel" class="rangeReset" data-reset-control="pulsationAmplitude" role="button" tabindex="0" title="Reset amplitude">Amplitude</span>
-            <input id="pulsationAmplitude" type="range" min="0" max="1.3010299956639813" step="any" value="0.6989700043360189" aria-labelledby="pulsationAmplitudeLabel" />
-            <output id="pulsationAmplitudeValue" class="editableMultiplier" data-multiplier-output="pulsationAmplitude"><button class="editableMultiplierValue" type="button" aria-label="Edit amplitude value">5.0</button><span class="editableMultiplierUnit">x</span></output>
+            <input id="pulsationAmplitude" type="range" min="0" max="1.3010299956639813" step="any" value="0.8450980400142568" aria-labelledby="pulsationAmplitudeLabel" />
+            <output id="pulsationAmplitudeValue" class="editableMultiplier" data-multiplier-output="pulsationAmplitude"><button class="editableMultiplierValue" type="button" aria-label="Edit amplitude value">7.0</button><span class="editableMultiplierUnit">x</span></output>
           </div>
         </section>
 
@@ -243,6 +243,6 @@
       <div id="perfHud" class="perfHud hidden" aria-live="off"></div>
     </main>
 
-    <script type="module" src="./src/app.js?v=20260510-cluster-star-lod"></script>
+    <script type="module" src="./src/app.js?v=20260510-cluster-pick-halo"></script>
   </body>
 </html>

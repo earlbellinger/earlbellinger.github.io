@@ -11,6 +11,10 @@ const TARGET_SELECTION_RING_PADDING_PX = 7;
 const TARGET_SELECTION_RING_MIN_RADIUS = 8;
 const CLUSTER_TARGET_SELECTION_RADIUS_SCALE = 0.58;
 const CLUSTER_TARGET_SELECTION_MIN_RADIUS = 10;
+const CLUSTER_TARGET_PICK_MIN_RADIUS = 20;
+const CLUSTER_TARGET_PICK_RADIUS_SCALE = 1.25;
+const CATALOG_DIRECT_PICK_PADDING_PX = 2;
+const CATALOG_DIRECT_PICK_MIN_RADIUS = 5;
 const DEFAULT_UNCERTAINTY_SEED = 0;
 const UNCERTAINTY_SEED_MAX = 100;
 const UNCERTAINTY_TRUNCATION_SIGMA = 3;
@@ -50,7 +54,7 @@ const PULSATION_SPEED_MAX = 25_000_000;
 const PULSATION_FLICKER_FREQUENCY_HZ = 2;
 const PULSATION_AMPLITUDE_MIN = 1;
 const PULSATION_AMPLITUDE_MAX = 20;
-const PULSATION_AMPLITUDE_DEFAULT = 5;
+const PULSATION_AMPLITUDE_DEFAULT = 7;
 const SECONDS_PER_DAY = 86400;
 const INTRO_ROTATION_DURATION_MS = 3000;
 const INTRO_CLOUD_LABEL_TRIGGER_YAW_DEGREES = -10;
@@ -74,6 +78,14 @@ const CATALOG_PULSE_ALL_STARS = true;
 const NAVIGATION_PULSE_THROTTLE_SETTLE_MS = 400;
 const NAVIGATION_PULSE_UPDATE_INTERVAL_MS = 220;
 const NAVIGATION_SLOW_PULSE_PERIOD_SECONDS = 5;
+const INTRO_LIVE_PULSE_MIN_CYCLE_FRACTION = 0.12;
+const INTRO_LIVE_PULSE_MAX_PERIOD_SECONDS = 3.6;
+const INTRO_LIVE_PULSE_ISOLATION_CELL_PX = 22;
+const INTRO_LIVE_PULSE_MAX_NEARBY_COUNT = 24;
+const INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_DELTA = 0.06;
+const INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_RATIO = 0.12;
+const INTRO_LIVE_PULSE_SAMPLE_COUNT = 6;
+const INTRO_PULSE_THROTTLE_RELEASE_MS = 1000;
 const STAR_RADIUS_ZOOM_GAIN = 0.18;
 const STAR_RADIUS_ZOOM_MAX_BOOST = 1.2;
 const STAR_RADIUS_ZOOM_BASE_GAIN = 0.75;
@@ -103,7 +115,7 @@ const RED_CLUMP_ZOOM_FADE_END = 350;
 const OBSERVED_VIEW_YAW_DEGREES = -180;
 const OBSERVED_VIEW_ROLL_DEGREES = 0;
 const DEFAULT_VIEW_AXIS_ROTATION_DEGREES = 15;
-const INTRO_ROTATION_START_YAW_DEGREES = -180;
+const INTRO_ROTATION_START_YAW_DEGREES = -143;
 const INTRO_ROTATION_START_PITCH_DEGREES = 0;
 const INTRO_ROTATION_START_ROLL_DEGREES = 0;
 const AXIS_SPIN_AXES = new Set(["yaw", "pitch", "roll"]);
@@ -372,8 +384,8 @@ const RED_CLUMP_GRID_QUANTIZATION = 4;
 const RED_CLUMP_EDGE_FEATHER_CELLS = 10;
 const RED_CLUMP_EDGE_ALPHA_FLOOR = 0.08;
 // Keep the red clump map-like, but let the Gaia RC-like count proxy gently nudge brightness.
-const RED_CLUMP_EXPOSURE_DEFAULT = 0.8;
-const RED_CLUMP_EXPOSURE_RENDER_SCALE = 0.4;
+const RED_CLUMP_EXPOSURE_DEFAULT = 1;
+const RED_CLUMP_EXPOSURE_RENDER_SCALE = 0.256;
 const RED_CLUMP_SURFACE_ALPHA_SCALE = 0.46;
 const RED_CLUMP_COUNT_TO_STAR_EQUIVALENT = 0.01;
 const RED_CLUMP_DENSITY_SMOOTHING_BLEND = 0.45;
@@ -1182,11 +1194,16 @@ let introRotation = null;
 let introCloudLabelAnimation = null;
 let axisSpinAnimation = null;
 let datasetPresetPreview = null;
+const animationEpoch = 6000;
 const animationStartMs = performance.now();
 let orientationGridLastActivityMs = animationStartMs;
 let navigationPulseThrottleUntilMs = 0;
-let lastCatalogPulseUpdateMs = 0;
-const animationEpoch = 6000;
+let lastCatalogPulseUpdateMs = Number.NEGATIVE_INFINITY;
+let introPulseThrottleActive = false;
+let introPulseThrottleEndedThisFrame = false;
+let introPulseThrottleRelease = 0;
+let introPulseThrottleGeneration = 0;
+let introPulseThrottleStartDay = animationEpoch;
 const WAVEFORM_SAMPLES = 96;
 const LIGHTCURVE_INSET_CYCLES = 2;
 const MIRA_LIGHTCURVE_INSET_CYCLES = 10;
@@ -1258,7 +1275,11 @@ function orientationGridAlpha(now = performance.now()) {
 }
 
 function navigationPulseThrottleActive(now = performance.now()) {
-  return PULSE_LOD_ENABLED && CATALOG_PULSE_ALL_STARS && now < navigationPulseThrottleUntilMs;
+  return (
+    PULSE_LOD_ENABLED &&
+    CATALOG_PULSE_ALL_STARS &&
+    (introPulseThrottleActive || now < navigationPulseThrottleUntilMs)
+  );
 }
 
 function shouldUseCatalogPulseLod(now = performance.now()) {
@@ -1269,19 +1290,57 @@ function shouldUseCatalogPulseLod(now = performance.now()) {
 function catalogPulseModeLabel(now = performance.now()) {
   if (!PULSE_LOD_ENABLED) return "all";
   if (!CATALOG_PULSE_ALL_STARS) return "lod";
+  if (introPulseThrottleActive) return "intro throttle";
   return navigationPulseThrottleActive(now) ? "nav slow throttle" : "all";
 }
 
 function markNavigationPulseThrottleActive(now = performance.now()) {
-  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS) return;
+  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS || introPulseThrottleEndedThisFrame) return;
   navigationPulseThrottleUntilMs = Math.max(
     navigationPulseThrottleUntilMs,
     now + NAVIGATION_PULSE_THROTTLE_SETTLE_MS,
   );
 }
 
+function beginIntroPulseThrottle() {
+  if (!PULSE_LOD_ENABLED || !CATALOG_PULSE_ALL_STARS) return;
+  introPulseThrottleActive = true;
+  introPulseThrottleEndedThisFrame = false;
+  introPulseThrottleRelease = 0;
+  introPulseThrottleGeneration += 1;
+  introPulseThrottleStartDay = currentSimulationDay();
+  preselectIntroLivePulsators();
+  lastCatalogPulseUpdateMs = Number.NEGATIVE_INFINITY;
+}
+
+function endIntroPulseThrottle({ clearNavigationThrottle = false, skipProjectionThrottle = false } = {}) {
+  introPulseThrottleActive = false;
+  introPulseThrottleRelease = 1;
+  if (clearNavigationThrottle) navigationPulseThrottleUntilMs = 0;
+  if (skipProjectionThrottle) introPulseThrottleEndedThisFrame = true;
+}
+
+function updateIntroPulseThrottleRelease(progress) {
+  if (!introPulseThrottleActive) return;
+  const releaseStart = 1 - INTRO_PULSE_THROTTLE_RELEASE_MS / INTRO_ROTATION_DURATION_MS;
+  const release = smoothStep(
+    (progress - releaseStart) / Math.max(0.001, 1 - releaseStart),
+  );
+  introPulseThrottleRelease = release;
+}
+
+function catalogPulseUpdateIntervalMs() {
+  if (!introPulseThrottleActive) return NAVIGATION_PULSE_UPDATE_INTERVAL_MS;
+  return NAVIGATION_PULSE_UPDATE_INTERVAL_MS * (1 - introPulseThrottleRelease);
+}
+
 function shouldUpdateCatalogPulseState(now = performance.now()) {
-  return !navigationPulseThrottleActive(now) || now - lastCatalogPulseUpdateMs >= NAVIGATION_PULSE_UPDATE_INTERVAL_MS;
+  const updateIntervalMs = catalogPulseUpdateIntervalMs();
+  return (
+    !navigationPulseThrottleActive(now) ||
+    updateIntervalMs <= 1 ||
+    now - lastCatalogPulseUpdateMs >= updateIntervalMs
+  );
 }
 
 function markCatalogPulseStateUpdated(now = performance.now()) {
@@ -3607,12 +3666,138 @@ function renderedPulsationPeriodSeconds(point) {
   return frequencyHz > 0 ? 1 / frequencyHz : Infinity;
 }
 
-function shouldNavigationThrottlePulsator(point) {
-  return (
-    point?.kind === "catalog" &&
-    Boolean(point.lightCurve) &&
-    renderedPulsationPeriodSeconds(point) >= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS
+function introPulseDurationDays() {
+  return (INTRO_ROTATION_DURATION_MS / 1000 / SECONDS_PER_DAY) * state.pulsationSpeed;
+}
+
+function introPulseIsolationKeyForPosition(x, y) {
+  const cellSize = INTRO_LIVE_PULSE_ISOLATION_CELL_PX;
+  return `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
+}
+
+function introPulseIsolationGridForItems(items) {
+  const grid = new Map();
+  for (const item of items) {
+    const point = item.point;
+    if (point?.kind !== "catalog" || !point.lightCurve) continue;
+    const key = introPulseIsolationKeyForPosition(item.projected.x, item.projected.y);
+    grid.set(key, (grid.get(key) || 0) + 1);
+  }
+  return grid;
+}
+
+function introPulseNearbyCount(item, isolationGrid) {
+  const cellSize = INTRO_LIVE_PULSE_ISOLATION_CELL_PX;
+  const cellX = Math.floor(item.projected.x / cellSize);
+  const cellY = Math.floor(item.projected.y / cellSize);
+  let count = 0;
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      count += isolationGrid.get(`${cellX + dx},${cellY + dy}`) || 0;
+    }
+  }
+  return count;
+}
+
+function pulseScreenSignal(item, pulseSample) {
+  const radius = catalogRenderVisualRadius(item, pulseSample.areaPulse);
+  const alpha = starAlphaFromUnit(
+    item.alphaUnit,
+    pulseSample.opacityPulse,
+    item.point.lightCurve,
+    item.point,
+    item.staticExposure,
   );
+  return radius * radius * alpha;
+}
+
+function introPulsatorShouldLiveAtEnd(item, isolationGrid) {
+  const point = item.point;
+  if (point?.kind !== "catalog" || !point.lightCurve) return false;
+
+  const periodSeconds = renderedPulsationPeriodSeconds(point);
+  const cycleFraction = (INTRO_ROTATION_DURATION_MS / 1000) / periodSeconds;
+  if (pulsationTooFastForAnimation(point)) return false;
+  if (periodSeconds > INTRO_LIVE_PULSE_MAX_PERIOD_SECONDS) return false;
+  if (cycleFraction < INTRO_LIVE_PULSE_MIN_CYCLE_FRACTION) return false;
+  if (introPulseNearbyCount(item, isolationGrid) > INTRO_LIVE_PULSE_MAX_NEARBY_COUNT) return false;
+
+  item.staticExposure = datasetExposureForPoint(point);
+  const durationDays = introPulseDurationDays();
+  let minSignal = Infinity;
+  let maxSignal = -Infinity;
+  for (let index = 0; index < INTRO_LIVE_PULSE_SAMPLE_COUNT; index += 1) {
+    const fraction = index / Math.max(1, INTRO_LIVE_PULSE_SAMPLE_COUNT - 1);
+    const sample = pulseState(point, introPulseThrottleStartDay + durationDays * fraction);
+    const signal = pulseScreenSignal(item, sample);
+    if (!Number.isFinite(signal)) continue;
+    minSignal = Math.min(minSignal, signal);
+    maxSignal = Math.max(maxSignal, signal);
+  }
+
+  const signalDelta = maxSignal - minSignal;
+  const signalThreshold = Math.max(
+    INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_DELTA,
+    maxSignal * INTRO_LIVE_PULSE_MIN_SCREEN_SIGNAL_RATIO,
+  );
+  return Number.isFinite(minSignal) && signalDelta >= signalThreshold;
+}
+
+function preselectIntroLivePulsators() {
+  if (!introRotation) return;
+
+  const previousYaw = state.yaw;
+  const previousPitch = state.pitch;
+  const previousRoll = state.roll;
+  const introEndDrawList = [];
+  const introEndStats = resetStats({ count: 0, minDepth: Infinity, maxDepth: -Infinity });
+
+  state.yaw = introRotation.targetYaw;
+  state.pitch = introRotation.targetPitch;
+  state.roll = introRotation.targetRoll;
+  rebuildActivePointLists();
+  rebuildCoordinateCache();
+  projectCatalogItemsForCache(
+    scene.activeCatalog,
+    introEndDrawList,
+    introEndStats,
+    makeProjectionTransform(),
+    scene.centerX,
+    scene.centerY,
+    starRadiusZoomSize(),
+    Math.max(28, effectiveZoomScale() * 0.35),
+  );
+  const isolationGrid = introPulseIsolationGridForItems(introEndDrawList);
+  for (const item of introEndDrawList) {
+    const point = item.point;
+    point.introPulseLiveGeneration = introPulseThrottleGeneration;
+    point.introPulseLive = introPulsatorShouldLiveAtEnd(item, isolationGrid);
+  }
+
+  state.yaw = previousYaw;
+  state.pitch = previousPitch;
+  state.roll = previousRoll;
+  projectionDirty = true;
+}
+
+function shouldIntroThrottleCatalogItem(item) {
+  if (
+    item.point.introPulseLiveGeneration === introPulseThrottleGeneration &&
+    item.point.introPulseLive
+  ) {
+    return false;
+  }
+  return (
+    renderedPulsationPeriodSeconds(item.point) >=
+    NAVIGATION_SLOW_PULSE_PERIOD_SECONDS * introPulseThrottleRelease
+  );
+}
+
+function shouldNavigationThrottleCatalogItem(item) {
+  const point = item?.point;
+  if (!point?.lightCurve) return false;
+  if (introPulseThrottleActive) return shouldIntroThrottleCatalogItem(item);
+  return renderedPulsationPeriodSeconds(point) >= NAVIGATION_SLOW_PULSE_PERIOD_SECONDS;
 }
 
 function pulsationTooFastForAnimation(point) {
@@ -5872,6 +6057,7 @@ function startIntroRotation() {
   const now = performance.now();
   markOrientationGridActive(now);
   primeIntroRotation();
+  beginIntroPulseThrottle();
   introRotation.startMs = now;
   introCloudLabelAnimation = { startMs: null };
   projectionDirty = true;
@@ -5893,6 +6079,7 @@ function updateIntroRotation(now = performance.now()) {
   markOrientationGridActive(now);
   const elapsed = now - introRotation.startMs;
   const progress = clamp(elapsed / INTRO_ROTATION_DURATION_MS, 0, 1);
+  updateIntroPulseThrottleRelease(progress);
   const easedProgress = easeOutSine(progress);
   const yawDelta = introRotation.targetYaw - introRotation.startYaw;
   const pitchDelta = introRotation.targetPitch - introRotation.startPitch;
@@ -5909,6 +6096,7 @@ function updateIntroRotation(now = performance.now()) {
     state.pitch = introRotation.targetPitch;
     state.roll = introRotation.targetRoll;
     introRotation = null;
+    endIntroPulseThrottle();
     updateCoordinateReadout();
     syncRangeOutputs();
   }
@@ -5917,6 +6105,7 @@ function updateIntroRotation(now = performance.now()) {
 function cancelIntroRotation() {
   introRotation = null;
   introCloudLabelAnimation = null;
+  endIntroPulseThrottle();
 }
 
 function cancelAxisSpinAnimation() {
@@ -7012,7 +7201,6 @@ function catalogItemLodAlpha(item) {
 function updateCatalogStaticStyle(item) {
   const radiusFactor = starRadiusFactorForPoint(item.point);
   const lodAlpha = catalogItemLodAlpha(item);
-  item.navigationPulseThrottle = shouldNavigationThrottlePulsator(item.point);
   if (
     item.staticBaseRadius !== item.baseRadius ||
     item.staticAlphaUnit !== item.alphaUnit ||
@@ -7030,6 +7218,7 @@ function updateCatalogStaticStyle(item) {
     item.staticRadius = starRadiusFromBase(item.baseRadius, 1, radiusFactor);
     item.staticAlpha = starAlphaFromUnit(item.alphaUnit, 1, item.point.lightCurve, item.point, item.staticExposure) * lodAlpha;
   }
+  item.navigationPulseThrottle = shouldNavigationThrottleCatalogItem(item);
 }
 
 function shouldAnimateCatalogItem(item, baseRadius, baseAlpha, usePulseLod = shouldUseCatalogPulseLod()) {
@@ -7567,6 +7756,7 @@ function render(timestamp) {
     markNavigationPulseThrottleActive(timestamp);
     rebuildProjectionCache();
   }
+  introPulseThrottleEndedThisFrame = false;
   drawClusterGlows();
   beginGpuSceneLayer();
   const redStats = drawRedClump(rebuiltProjection);
@@ -7584,6 +7774,18 @@ function render(timestamp) {
   outputs.depthSpan.textContent = Number.isFinite(minDepth) ? formatNumber(Math.abs(maxDepth - minDepth), 0) : "0";
   updateLightcurveInset();
   queueRender();
+}
+
+async function prewarmIntroFrame() {
+  if (!scene.payload) return;
+  updatePulsationClock();
+  rebuildProjectionCache();
+  drawClusterGlows();
+  beginGpuSceneLayer();
+  drawRedClump(true);
+  drawCatalog(false);
+  endGpuSceneLayer();
+  await nextFrame();
 }
 
 function drawBackgroundStars() {
@@ -9552,12 +9754,13 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
       item.point.animatePulse || item.point === state.locked
         ? lightCurveVisualPulses(pulseFactor(item.point, simulationDay), item.point).areaPulse
         : 1;
-    const radius = (catalogRenderVisualRadius(item, areaPulse) + 5) * radiusScale;
+    const radius =
+      Math.max(CATALOG_DIRECT_PICK_MIN_RADIUS, catalogRenderVisualRadius(item, areaPulse) + CATALOG_DIRECT_PICK_PADDING_PX) *
+      radiusScale;
     const dx = item.projected.x - clientX;
     const dy = item.projected.y - clientY;
     const distance = dx * dx + dy * dy;
-    const threshold = Math.max(bestDistance, radius * radius);
-    if (distance < threshold && distance < bestDistance) {
+    if (distance <= radius * radius && distance < bestDistance) {
       best = item.point;
       bestDistance = distance;
     }
@@ -9571,7 +9774,8 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
     const dx = item.projected.x - clientX;
     const dy = item.projected.y - clientY;
     const distance = dx * dx + dy * dy;
-    const radius = Math.max(10, item.screenRadius) * radiusScale;
+    const radius =
+      Math.max(CLUSTER_TARGET_PICK_MIN_RADIUS, item.screenRadius * CLUSTER_TARGET_PICK_RADIUS_SCALE) * radiusScale;
     const radius2 = radius * radius;
     if (distance <= radius2) {
       const score = distance / radius2;
@@ -9579,6 +9783,26 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1 } = {}) {
         best = item.point;
         bestClusterScore = score;
       }
+    }
+  }
+
+  if (best) return best;
+
+  for (const item of scene.catalogDrawList) {
+    if (item.point.kind !== "catalog") continue;
+    if (!targetIsPickable(item.point)) continue;
+    const areaPulse =
+      item.point.animatePulse || item.point === state.locked
+        ? lightCurveVisualPulses(pulseFactor(item.point, simulationDay), item.point).areaPulse
+        : 1;
+    const radius = (catalogRenderVisualRadius(item, areaPulse) + 5) * radiusScale;
+    const dx = item.projected.x - clientX;
+    const dy = item.projected.y - clientY;
+    const distance = dx * dx + dy * dy;
+    const threshold = Math.max(bestDistance, radius * radius);
+    if (distance < threshold && distance < bestDistance) {
+      best = item.point;
+      bestDistance = distance;
     }
   }
 
@@ -10554,6 +10778,7 @@ async function init() {
     buildSources();
     setTarget(null);
     setLoadingProgress(1);
+    await prewarmIntroFrame();
     elements.loading.classList.add("hidden");
     startIntroRotation();
     queueRender();
