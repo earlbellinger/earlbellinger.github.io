@@ -62,6 +62,9 @@ const PULSATION_AMPLITUDE_DEFAULT = 7;
 const PULSATION_SPEED_KEY_GAIN = 10 ** 0.125;
 const PULSATION_SPEED_KEY_FAST_GAIN = 10;
 const SECONDS_PER_DAY = 86400;
+const MS_PER_DAY = SECONDS_PER_DAY * 1000;
+const JULIAN_DATE_UNIX_EPOCH = 2440587.5;
+const CATALOG_JULIAN_DATE_OFFSET = 2450000;
 const INTRO_ROTATION_DURATION_MS = 3000;
 const INTRO_CLOUD_LABEL_TRIGGER_YAW_DEGREES = -10;
 const INTRO_CLOUD_LABEL_FADE_IN_MS = 360;
@@ -73,6 +76,10 @@ const INTRO_CLOUD_LABEL_TOTAL_MS =
   INTRO_CLOUD_LABEL_FADE_OUT_MS;
 const FACE_VIEW_ANGLES_DEGREES = { yaw: 0, pitch: 0, roll: 0 };
 const EDGE_VIEW_ANGLES_DEGREES = { yaw: 88, pitch: 8, roll: 0 };
+
+function currentCatalogJulianDay(nowMs = Date.now()) {
+  return JULIAN_DATE_UNIX_EPOCH - CATALOG_JULIAN_DATE_OFFSET + nowMs / MS_PER_DAY;
+}
 const AXIS_SPIN_DURATION_MS = 1800;
 const PULSE_LOD_RADIUS_ON = 1.2;
 const PULSE_LOD_RADIUS_OFF = 0.95;
@@ -1267,7 +1274,7 @@ let introRotation = null;
 let introCloudLabelAnimation = null;
 let axisSpinAnimation = null;
 let datasetPresetPreview = null;
-const animationEpoch = 6000;
+const animationEpoch = currentCatalogJulianDay();
 const animationStartMs = performance.now();
 let simulationTimeOffsetDays = 0;
 let pausedSimulationDay = null;
