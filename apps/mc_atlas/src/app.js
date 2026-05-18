@@ -1,6 +1,30 @@
-const DATA_VERSION = "20260510-mira-literature-teff";
+const DATA_VERSION = "20260515-rrlyrae-labels";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
-const DATA_DOWNLOAD_PROGRESS_MAX = 0.88;
+const RED_CLUMP_VOLUME_DATA_URL = `./public/data/xmc-red-clump-volume-full-ruiz-dern-photometric.json?v=${DATA_VERSION}`;
+// Keep the unpublished RC volume analysis dormant for release; flip on when the UI returns.
+const RED_CLUMP_VOLUME_ANALYSIS_ENABLED = false;
+const LOADING_PROGRESS = {
+  requestStart: 0.02,
+  dataDownloadDone: 0.46,
+  parseStart: 0.48,
+  parseDone: 0.52,
+  sceneStart: 0.54,
+  catalogDone: 0.62,
+  annotationDone: 0.64,
+  clusterMetadataDone: 0.66,
+  clusterStarsDone: 0.76,
+  clustersDone: 0.78,
+  binariesDone: 0.8,
+  redClumpCellsDone: 0.86,
+  redClumpSurfaceDone: 0.88,
+  redClumpVolumeDone: 0.92,
+  controlsDone: 0.94,
+  projectionDone: 0.96,
+  buffersDone: 0.985,
+  complete: 1,
+};
+const DATA_DOWNLOAD_PROGRESS_MAX = LOADING_PROGRESS.dataDownloadDone;
+const LOADING_PROGRESS_CHUNK_SIZE = 4096;
 const ZOOM_BASE_SCALE = 1.62;
 const DEFAULT_ZOOM_SCALE = 1;
 const ZOOM_SCALE_MIN = 0.5;
@@ -13,6 +37,8 @@ const CLUSTER_TARGET_SELECTION_RADIUS_SCALE = 0.58;
 const CLUSTER_TARGET_SELECTION_MIN_RADIUS = 10;
 const CLUSTER_TARGET_PICK_MIN_RADIUS = 20;
 const CLUSTER_TARGET_PICK_RADIUS_SCALE = 1.25;
+const EB_TARGET_PICK_MIN_RADIUS = 11;
+const EB_TARGET_PICK_PADDING_PX = 5;
 const CATALOG_DIRECT_PICK_PADDING_PX = 2;
 const CATALOG_DIRECT_PICK_MIN_RADIUS = 5;
 const DEFAULT_UNCERTAINTY_SEED = 0;
@@ -28,6 +54,8 @@ const CLUSTER_PRESET_CONTEXT_EXPOSURE = 0.12;
 const CLUSTERS_PRESET_PULSATOR_CONTEXT_EXPOSURE = DATASET_EXPOSURE_MIN;
 const CLUSTERS_PRESET_RED_CLUMP_CONTEXT_EXPOSURE = 0.5;
 const RED_CLUMP_PRESET_HIGHLIGHT_EXPOSURE = 2;
+const EB_PRESET_HIGHLIGHT_EXPOSURE = 2;
+const EB_PRESET_CONTEXT_EXPOSURE = 0.16;
 const PULSATOR_PRESET_HIGHLIGHT_EXPOSURE = 1;
 const PULSATOR_PRESET_HIGHLIGHT_EXPOSURES = {
   rrlyrae: 2,
@@ -121,9 +149,17 @@ const CATALOG_DYNAMIC_GPU_PULSE_VERTEX_FLOATS = 5;
 const CATALOG_WORLD_PULSE_DIRTY_RANGE_MERGE_GAP = 8;
 const CATALOG_WORLD_PULSE_FULL_UPLOAD_DIRTY_FRACTION = 0.55;
 const CATALOG_WORLD_PULSE_FULL_UPLOAD_RANGE_LIMIT = 160;
-const CLUSTER_STAR_GPU_VERTEX_FLOATS = 9;
+const CLUSTER_STAR_GPU_VERTEX_FLOATS = 10;
 const RED_CLUMP_GPU_VERTEX_FLOATS = 6;
+const RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS = 7;
 const RED_CLUMP_SOURCE_STAR_COUNT_LABEL = "2.3M";
+const RED_CLUMP_RENDER_MODE_SURFACE = "surface";
+const RED_CLUMP_RENDER_MODE_VOLUME = "volume";
+const RED_CLUMP_RENDER_MODES = new Set(
+  RED_CLUMP_VOLUME_ANALYSIS_ENABLED
+    ? [RED_CLUMP_RENDER_MODE_SURFACE, RED_CLUMP_RENDER_MODE_VOLUME]
+    : [RED_CLUMP_RENDER_MODE_SURFACE],
+);
 const RED_CLUMP_ZOOM_FADE_START = 75;
 const RED_CLUMP_ZOOM_FADE_END = 350;
 // User-facing yaw zero is the observer-side OGLE view.
@@ -139,14 +175,15 @@ const KEYBOARD_DATASET_PRESETS = {
   1: "cepheids",
   2: "rrlyrae",
   3: "miras",
-  4: "clusters",
-  5: "redclump",
+  4: "eb",
+  5: "clusters",
+  6: "redclump",
 };
 const SHORTCUT_HELP_ITEMS = [
   { keys: ["/"], label: "Search targets" },
   { keys: ["Esc"], label: "Unlock or clear target" },
   { keys: ["Space"], label: "Pause or resume pulsation" },
-  { keys: ["1", "2", "3", "4", "5"], label: "Activate dataset presets" },
+  { keys: ["1", "2", "3", "4", "5", "6"], label: "Activate dataset presets" },
   { keys: ["["], label: "Previous target" },
   { keys: ["]"], label: "Next target" },
   { keys: ["L"], label: "Lock camera to target" },
@@ -275,6 +312,18 @@ const CL = {
   segregation: 31,
   ageOutlier: 32,
   source: 33,
+  aliases: 34,
+  component: 35,
+  rvHelio: 36,
+  eRvHelio: 37,
+  pmRa: 38,
+  ePmRa: 39,
+  pmDec: 40,
+  ePmDec: 41,
+  fehSpectroscopic: 42,
+  eFehSpectroscopic: 43,
+  structureSource: 44,
+  massSource: 45,
 };
 
 const CS = {
@@ -295,6 +344,41 @@ const CS = {
   galLonDeg: 14,
   galLatDeg: 15,
   distance: 16,
+};
+
+const EB = {
+  x: 0,
+  y: 1,
+  z: 2,
+  id: 3,
+  ocvsId: 4,
+  cloud: 5,
+  raDeg: 6,
+  decDeg: 7,
+  galLonDeg: 8,
+  galLatDeg: 9,
+  distance: 10,
+  distanceError: 11,
+  distanceModulus: 12,
+  distanceModulusStatError: 13,
+  distanceModulusSystematicError: 14,
+  centerCorrection: 15,
+  sourceId: 16,
+  quality: 17,
+  period: 18,
+  t0: 19,
+  primaryRadius: 20,
+  secondaryRadius: 21,
+  equivalentRadius: 22,
+  primaryTeff: 23,
+  secondaryTeff: 24,
+  primaryLum: 25,
+  secondaryLum: 26,
+  systemLum: 27,
+  lightCurveBand: 28,
+  lightCurveFluxSamples: 29,
+  lightCurveQuality: 30,
+  notes: 31,
 };
 
 const CG = {
@@ -362,9 +446,9 @@ const CLUSTER_PULSATOR_NEAREST_REFERENCE_COUNT = 160;
 const PULSATOR_DEFAULT_PRESET = "default";
 const PULSATOR_PRESETS = ["cepheids", "rrlyrae", "miras"];
 const PULSATOR_PRESET_SEQUENCE = [...PULSATOR_PRESETS, PULSATOR_DEFAULT_PRESET];
-const AUXILIARY_DATASET_PRESETS = ["clusters", "redclump"];
+const AUXILIARY_DATASET_PRESETS = ["eb", "clusters", "redclump"];
 const DATASET_PRESETS = [...PULSATOR_PRESETS, ...AUXILIARY_DATASET_PRESETS];
-const DATASET_PRESET_EXPOSURE_KEYS = [...DATASET_KEYS, "clusters", "redclump"];
+const DATASET_PRESET_EXPOSURE_KEYS = [...DATASET_KEYS, "eb", "clusters", "redclump"];
 const PULSATOR_PRESET_LABELS = {
   cepheids: "Cepheids",
   rrlyrae: "RR Lyrae",
@@ -372,6 +456,7 @@ const PULSATOR_PRESET_LABELS = {
 };
 const DATASET_PRESET_LABELS = {
   ...PULSATOR_PRESET_LABELS,
+  eb: "Binaries",
   clusters: "Clusters",
   redclump: "Red clump",
 };
@@ -383,6 +468,7 @@ const PULSATOR_PRESET_DATASET_KEYS = {
 const AUXILIARY_DATASET_PRESET_KEYS = {
   clusters: ["clusters", "redclump"],
   redclump: ["redclump"],
+  eb: ["eb"],
 };
 // Current catalog medians; matching speed values make each median period last 3 real seconds.
 const PULSATOR_PRESET_MEDIAN_PERIOD_DAYS = {
@@ -390,11 +476,14 @@ const PULSATOR_PRESET_MEDIAN_PERIOD_DAYS = {
   rrlyrae: 0.5907994,
   miras: 359.8,
 };
+const BINARY_PRESET_MEDIAN_PERIOD_DAYS = 169.19835;
 const PULSATOR_PRESET_SPEEDS = {
   cepheids: 59_000,
   rrlyrae: 17_000,
   miras: 7_000_000,
 };
+const BINARY_PRESET_SPEED =
+  Math.round((BINARY_PRESET_MEDIAN_PERIOD_DAYS * SECONDS_PER_DAY) / 3 / 100_000) * 100_000;
 // Baseline radii are calibrated so 1x matches the former 0.8x visual scale.
 const PULSATOR_PRESET_RADIUS_SCALES = {
   default: 1,
@@ -402,6 +491,9 @@ const PULSATOR_PRESET_RADIUS_SCALES = {
   rrlyrae: 1.3333333333333333,
   miras: 1,
 };
+// The detached EB median equivalent radius is 34.9 R_sun; 0.6x keeps the median glyph
+// close to the Cepheid/RR Lyrae preset sizes while still preserving the giant scale.
+const BINARY_PRESET_RADIUS_SCALE = 0.6;
 const PULSATOR_PRESET_AMPLITUDE_SCALES = {
   default: PULSATION_AMPLITUDE_DEFAULT,
   cepheids: 5,
@@ -414,11 +506,13 @@ const OGLE_OCVS_OBJECT_URL = "https://ogledb.astrouw.edu.pl/~ogle/OCVS/getobj.ph
 const OGLE_III_CVS_OBJECT_URL = "https://ogledb.astrouw.edu.pl/~ogle/CVS/o.php?";
 const SUN_ABSOLUTE_I_MAG = 4.1;
 const SUN_EFFECTIVE_TEMPERATURE = 5772;
+const I_BAND_EXTINCTION_PER_EVI = 1.55;
 const RED_CLUMP_MI = -0.25;
 const RED_CLUMP_LUMINOSITY = 10 ** (-0.4 * (RED_CLUMP_MI - SUN_ABSOLUTE_I_MAG));
 const RED_CLUMP_TEMPERATURE = 4800;
 const RED_CLUMP_RADIUS = Math.sqrt(RED_CLUMP_LUMINOSITY) * (5772 / RED_CLUMP_TEMPERATURE) ** 2;
 const RED_CLUMP_GRID_QUANTIZATION = 4;
+const RED_CLUMP_CELL_SIZE_DEG = 1 / RED_CLUMP_GRID_QUANTIZATION;
 const RED_CLUMP_EDGE_FEATHER_CELLS = 10;
 const RED_CLUMP_EDGE_ALPHA_FLOOR = 0.08;
 // Keep the red clump map-like, but let the Gaia RC-like count proxy gently nudge brightness.
@@ -435,6 +529,84 @@ const RED_CLUMP_SURFACE_POINT_FILL = 1;
 const RED_CLUMP_SURFACE_VIEWPORT_MARGIN = 36;
 const RED_CLUMP_DENSITY_ALPHA_FLOOR = 0.075;
 const RED_CLUMP_DENSITY_ALPHA_POWER = 1.65;
+const RED_CLUMP_VOLUME_ALPHA_SCALE = 0.026;
+const RED_CLUMP_VOLUME_ALPHA_MAX = 0.018;
+const RED_CLUMP_VOLUME_SURFACE_ALPHA_SCALE = 0.13;
+const RED_CLUMP_VOLUME_SURFACE_ALPHA_MAX = 0.18;
+const RED_CLUMP_VOLUME_MAX_SIGMA_OFFSET = 2.7;
+const RED_CLUMP_VOLUME_MIN_DEPTH_KPC = 0.18;
+const RED_CLUMP_VOLUME_DENSITY_POWER = 0.56;
+const RED_CLUMP_VOLUME_DENSITY_FLOOR = 0.16;
+const RED_CLUMP_VOLUME_FALLBACK_CONFIDENCE = 0.1;
+const RED_CLUMP_VOLUME_UNCERTAINTY_SHIFT_SIGMA = 0.72;
+const RED_CLUMP_VOLUME_UNCERTAINTY_WIDTH_SCALE = 0.28;
+const RED_CLUMP_VOLUME_UNCERTAINTY_MIN_SIGMA_FACTOR = 0.65;
+const RED_CLUMP_VOLUME_UNCERTAINTY_MAX_SIGMA_FACTOR = 1.65;
+const RED_CLUMP_VOLUME_GRID_SPACING_KPC = 0.46;
+const RED_CLUMP_VOLUME_GRID_DEPTH_STEP_KPC = 0.58;
+const RED_CLUMP_VOLUME_GRID_MIN_DEPTH_SLICES = 4;
+const RED_CLUMP_VOLUME_GRID_MAX_DEPTH_SLICES = 16;
+const RED_CLUMP_VOLUME_GRID_ANGULAR_OFFSETS = [
+  [-0.3, -0.3],
+  [0.3, -0.3],
+  [-0.3, 0.3],
+  [0.3, 0.3],
+];
+const RED_CLUMP_VOLUME_GRID_JITTER = 0.92;
+const RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE = 5.2;
+const RED_CLUMP_LMC_CENTER = { lon: 280.47, lat: -32.89 };
+const RED_CLUMP_SMC_CENTER = { lon: 302.8, lat: -44.3 };
+const RED_CLUMP_LMC_PRIOR_DISTANCE_KPC = 50.0;
+const RED_CLUMP_SMC_PRIOR_DISTANCE_KPC = 62.0;
+const RED_CLUMP_LMC_SIGMA_KPC = 1.0;
+const RED_CLUMP_LMC_OUTER_SIGMA_KPC = 1.65;
+const RED_CLUMP_BRIDGE_SIGMA_KPC = 3.6;
+const RED_CLUMP_SMC_SIGMA_KPC = 3.2;
+const RED_CLUMP_SMC_OUTER_SIGMA_KPC = 5.2;
+const RED_CLUMP_SMC_WING_COMPONENT_SIGMA_KPC = 2.1;
+const RED_CLUMP_SMC_WING_COMPONENT_SEPARATION_KPC = 9.5;
+const RED_CLUMP_SMC_WING_NEAR_WEIGHT = 0.38;
+const ANNOTATION_ELLIPSE_SEGMENTS = 96;
+const ANNOTATION_LABEL_MARGIN = 18;
+// Atlas-fit wireframes use a robust errors-in-variables Gaussian: row distance
+// errors become line-of-sight covariances, with source-scatter floors where the
+// generated catalog has no per-star uncertainty column.
+const ANNOTATION_FIT_CONFIDENCE_RADIUS = 1.878;
+const ANNOTATION_FIT_MIN_POINTS = 24;
+const ANNOTATION_FIT_TRIM_FRACTION = 0.9;
+const ANNOTATION_FIT_MAX_ITERATIONS = 18;
+const ANNOTATION_FIT_STUDENT_T_DOF = 6;
+const ANNOTATION_FIT_EIGEN_FLOOR_KPC2 = 0.01;
+const ANNOTATION_FIT_MATRIX_JITTER = 1e-5;
+const ANNOTATION_FIT_POPULATIONS = [
+  {
+    id: "cepheids",
+    label: "Cepheids",
+    datasetIndexes: [0],
+    color: "112, 227, 255",
+    fallbackModulusError: 0.07,
+  },
+  {
+    id: "rrlyrae",
+    label: "RR Lyrae",
+    datasetIndexes: [1],
+    color: "255, 217, 128",
+    fallbackModulusError: 0.1,
+  },
+  {
+    id: "miras",
+    label: "Miras",
+    datasetIndexes: [3],
+    color: "252, 163, 17",
+    fallbackModulusError: 0.26,
+  },
+];
+const ANNOTATION_FIT_CLOUDS = [
+  { id: "lmc", label: "LMC", locationIndex: 0, lineDash: [] },
+  { id: "smc", label: "SMC", locationIndex: 1, lineDash: [] },
+];
+const ANNOTATION_SECONDARY_COMPONENT_LINE_DASH = [6, 5];
+const FEATURE_ANNOTATION_COLOR = "152, 255, 170";
 const CLUSTER_GLOW_ALPHA_SCALE = 0.22;
 const CLUSTER_GLOW_ALPHA_MAX = 0.16;
 const CLUSTER_GLOW_RADIUS_SCALE = 1.15;
@@ -442,6 +614,19 @@ const CLUSTER_GLOW_EDGE_FEATHER = 0.7;
 const CLUSTER_GLOW_PROFILE_STOPS = 14;
 const CLUSTER_STAR_LOD_CORE_RADIUS_START = 6;
 const CLUSTER_STAR_LOD_CORE_RADIUS_END = 13;
+const CLUSTER_STAR_RENDER_GLOBAL_BUDGET = 12000;
+const CLUSTER_STAR_RENDER_MIN_PER_CLUSTER = 2;
+const CLUSTER_STAR_RENDER_MAX_PER_CLUSTER = 64;
+const CLUSTER_STAR_RENDER_RADIUS_SCALE = 0.38;
+const CLUSTER_STAR_RENDER_LOD_EXTRA = 14;
+const CLUSTER_STAR_BRIGHT_LOD_LOG_SPAN = 2.35;
+const CLUSTER_STAR_BRIGHT_LOD_ALPHA_MAX = 0.92;
+const CLUSTER_STAR_POINT_RADIUS_UNIT_MIN = 0.26;
+const CLUSTER_STAR_POINT_RADIUS_UNIT_MAX = 1.18;
+const CLUSTER_STAR_POINT_RADIUS_MIN = 0.38;
+const CLUSTER_STAR_POINT_RADIUS_MAX = 7.5;
+const CLUSTER_STAR_POINT_RADIUS_CLUSTER_FRACTION = 0.105;
+const CLUSTER_STAR_RESOLVED_GLOW_SUBTRACTION = 0.62;
 const CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_SCALE = 0.16;
 const CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_MAX = 0.18;
 const CLUSTER_STAR_RESOLVED_GLOW_FLOOR = 0.18;
@@ -982,6 +1167,7 @@ const outputs = {
   miraCount: document.querySelector("#miraCount"),
   rcCount: document.querySelector("#rcCount"),
   clusterCount: document.querySelector("#clusterCount"),
+  ebCount: document.querySelector("#ebCount"),
   pulsationDaySeconds: document.querySelector("#pulsationDaySeconds"),
 };
 
@@ -999,6 +1185,8 @@ const elements = {
   coordinateReadout: document.querySelector("#coordinateReadout"),
   faceView: document.querySelector("#faceView"),
   edgeView: document.querySelector("#edgeView"),
+  annotationToggle: document.querySelector("#annotationToggle"),
+  featureAnnotationToggle: document.querySelector("#featureAnnotationToggle"),
   pulsationClockHourHand: document.querySelector("#pulsationClockHourHand"),
   perfHud: document.querySelector("#perfHud"),
   scaleBar: document.querySelector("#scaleBar"),
@@ -1032,6 +1220,7 @@ const state = {
     miras: DATASET_EXPOSURE_DEFAULT,
     redclump: RED_CLUMP_EXPOSURE_DEFAULT,
     clusters: DATASET_EXPOSURE_DEFAULT,
+    eb: DATASET_EXPOSURE_DEFAULT,
   },
   depthScale: 1,
   density: 100,
@@ -1041,6 +1230,7 @@ const state = {
   uncertaintySeed: DEFAULT_UNCERTAINTY_SEED,
   datasetPreset: null,
   pulsatorPreset: null,
+  redClumpMode: RED_CLUMP_RENDER_MODE_SURFACE,
   datasets: {
     cepheids: true,
     rrlyrae: true,
@@ -1048,6 +1238,7 @@ const state = {
     miras: true,
     redclump: true,
     clusters: true,
+    eb: true,
   },
   spectral: new Set([0, 1, 2, 3, 4, 5]),
   coordinateFrame: "atlas",
@@ -1057,6 +1248,8 @@ const state = {
   panLock: true,
   equatorialGrid: false,
   galacticGrid: false,
+  annotationsVisible: false,
+  featureAnnotationsVisible: false,
   cursorClientX: null,
   cursorClientY: null,
   targetSearchQuery: "",
@@ -1182,18 +1375,26 @@ const scene = {
   catalog: [],
   redClump: [],
   redClumpSurface: [],
+  redClumpVolume: [],
+  redClumpVolumePayload: null,
+  redClumpVolumeSeed: DEFAULT_UNCERTAINTY_SEED,
   clusters: [],
   clusterStars: [],
+  eclipsingBinaries: [],
   clusterStarsByCluster: new Map(),
   activeCatalog: [],
   activeRedClump: [],
   activeClusters: [],
   activeClusterStars: [],
+  activeClusterStarRenderList: [],
   activeClusterPulsatorStars: [],
+  activeEclipsingBinaries: [],
   activeClusterStarsByCluster: [],
   activeClusterStarCountsByCluster: [],
   activeClusterStarRenderCount: 0,
   clusterStarLodAlphaByCluster: [],
+  clusterStarRenderLimitByCluster: [],
+  clusterStarResolvedLuminosityFractionByCluster: [],
   clusterPulsatorStats: null,
   catalogDrawList: [],
   catalogDrawListScreenProjected: true,
@@ -1206,6 +1407,7 @@ const scene = {
   redClumpDrawList: [],
   redClumpSurfaceDrawList: [],
   clusterTargetDrawList: [],
+  eclipsingBinaryDrawList: [],
   catalogStaticCanvas: document.createElement("canvas"),
   catalogStaticCtx: null,
   catalogStaticDirty: true,
@@ -1234,7 +1436,10 @@ const scene = {
   cachedStats: {
     catalog: { count: 0, minDepth: Infinity, maxDepth: -Infinity },
     redClump: { count: 0, minDepth: Infinity, maxDepth: -Infinity },
+    eclipsingBinaries: { count: 0, minDepth: Infinity, maxDepth: -Infinity },
   },
+  annotationFits: [],
+  annotationTargets: [],
   coordinateContext: null,
   coordinateCacheKey: null,
   skyGridBounds: null,
@@ -1561,6 +1766,18 @@ function redClumpZoomFade(value = state.zoom) {
   return 1 - logarithmicZoomFade(value, RED_CLUMP_ZOOM_FADE_START, RED_CLUMP_ZOOM_FADE_END);
 }
 
+function redClumpVolumeEnabled() {
+  return RED_CLUMP_VOLUME_ANALYSIS_ENABLED && state.redClumpMode === RED_CLUMP_RENDER_MODE_VOLUME;
+}
+
+function redClumpSurfaceAlphaScale() {
+  return redClumpVolumeEnabled() ? RED_CLUMP_VOLUME_SURFACE_ALPHA_SCALE : RED_CLUMP_SURFACE_ALPHA_SCALE;
+}
+
+function redClumpSurfaceAlphaMax() {
+  return redClumpVolumeEnabled() ? RED_CLUMP_VOLUME_SURFACE_ALPHA_MAX : RED_CLUMP_SURFACE_ALPHA_MAX;
+}
+
 function starRadiusDeepZoomScale(value = state.zoom) {
   const fade = logarithmicZoomFade(value, STAR_RADIUS_DEEP_ZOOM_FADE_START, STAR_RADIUS_DEEP_ZOOM_FADE_END);
   return 1 - (1 - STAR_RADIUS_DEEP_ZOOM_MIN_SCALE) * fade;
@@ -1600,6 +1817,14 @@ function vectorFromLonLat(lonDeg, latDeg, distance) {
     distance * Math.cos(lat) * Math.sin(lon),
     distance * Math.sin(lat),
   ];
+}
+
+function angularSeparationDeg(lonA, latA, lonB, latB) {
+  const a = vectorFromLonLat(lonA, latA, 1);
+  const b = vectorFromLonLat(lonB, latB, 1);
+  return radiansToRawDegrees(
+    Math.acos(clamp(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1, 1)),
+  );
 }
 
 function lonLatFromVector(vector) {
@@ -1652,6 +1877,238 @@ function vectorFromEquatorial(raDeg, decDeg, distance) {
 
 function subtractVectors(left, right) {
   return [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
+}
+
+function addScaledVector(vector, direction, scale) {
+  return [
+    vector[0] + direction[0] * scale,
+    vector[1] + direction[1] * scale,
+    vector[2] + direction[2] * scale,
+  ];
+}
+
+function addVectors(left, right) {
+  return [left[0] + right[0], left[1] + right[1], left[2] + right[2]];
+}
+
+function scaleVector(vector, scale) {
+  return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
+}
+
+function normalizeVector(vector, fallback = [0, 0, 1]) {
+  const length = vectorLength(vector);
+  return length > 0 ? vector.map((component) => component / length) : fallback;
+}
+
+function distanceErrorFromModulusError(distanceKpc, modulusError) {
+  if (!Number.isFinite(distanceKpc) || distanceKpc <= 0 || !Number.isFinite(modulusError) || modulusError <= 0) {
+    return 0;
+  }
+  return (Math.log(10) / 5) * distanceKpc * modulusError;
+}
+
+function medianNumber(values, fallback = 0) {
+  const finite = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (!finite.length) return fallback;
+  const middle = Math.floor(finite.length / 2);
+  return finite.length % 2 ? finite[middle] : (finite[middle - 1] + finite[middle]) * 0.5;
+}
+
+function quantileNumber(values, quantile, fallback = 0) {
+  const finite = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (!finite.length) return fallback;
+  const position = clamp(quantile, 0, 1) * (finite.length - 1);
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  const fraction = position - lower;
+  return finite[lower] * (1 - fraction) + finite[upper] * fraction;
+}
+
+function matrix3Zero() {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+function matrix3Identity(scale = 1) {
+  return [scale, 0, 0, 0, scale, 0, 0, 0, scale];
+}
+
+function matrix3Add(left, right) {
+  return left.map((value, index) => value + right[index]);
+}
+
+function matrix3Subtract(left, right) {
+  return left.map((value, index) => value - right[index]);
+}
+
+function matrix3Scale(matrix, scale) {
+  return matrix.map((value) => value * scale);
+}
+
+function matrix3Outer(left, right = left) {
+  return [
+    left[0] * right[0],
+    left[0] * right[1],
+    left[0] * right[2],
+    left[1] * right[0],
+    left[1] * right[1],
+    left[1] * right[2],
+    left[2] * right[0],
+    left[2] * right[1],
+    left[2] * right[2],
+  ];
+}
+
+function matrix3Mul(left, right) {
+  return [
+    left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
+    left[0] * right[1] + left[1] * right[4] + left[2] * right[7],
+    left[0] * right[2] + left[1] * right[5] + left[2] * right[8],
+    left[3] * right[0] + left[4] * right[3] + left[5] * right[6],
+    left[3] * right[1] + left[4] * right[4] + left[5] * right[7],
+    left[3] * right[2] + left[4] * right[5] + left[5] * right[8],
+    left[6] * right[0] + left[7] * right[3] + left[8] * right[6],
+    left[6] * right[1] + left[7] * right[4] + left[8] * right[7],
+    left[6] * right[2] + left[7] * right[5] + left[8] * right[8],
+  ];
+}
+
+function matrix3MulVector(matrix, vector) {
+  return [
+    matrix[0] * vector[0] + matrix[1] * vector[1] + matrix[2] * vector[2],
+    matrix[3] * vector[0] + matrix[4] * vector[1] + matrix[5] * vector[2],
+    matrix[6] * vector[0] + matrix[7] * vector[1] + matrix[8] * vector[2],
+  ];
+}
+
+function matrix3Symmetrize(matrix) {
+  return [
+    matrix[0],
+    (matrix[1] + matrix[3]) * 0.5,
+    (matrix[2] + matrix[6]) * 0.5,
+    (matrix[3] + matrix[1]) * 0.5,
+    matrix[4],
+    (matrix[5] + matrix[7]) * 0.5,
+    (matrix[6] + matrix[2]) * 0.5,
+    (matrix[7] + matrix[5]) * 0.5,
+    matrix[8],
+  ];
+}
+
+function matrix3Inverse(matrix) {
+  const [
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+  ] = matrix;
+  const cofactor00 = e * i - f * h;
+  const cofactor01 = c * h - b * i;
+  const cofactor02 = b * f - c * e;
+  const determinant = a * cofactor00 + d * cofactor01 + g * cofactor02;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) return null;
+  const inverseDeterminant = 1 / determinant;
+  return [
+    cofactor00 * inverseDeterminant,
+    cofactor01 * inverseDeterminant,
+    cofactor02 * inverseDeterminant,
+    (f * g - d * i) * inverseDeterminant,
+    (a * i - c * g) * inverseDeterminant,
+    (c * d - a * f) * inverseDeterminant,
+    (d * h - e * g) * inverseDeterminant,
+    (b * g - a * h) * inverseDeterminant,
+    (a * e - b * d) * inverseDeterminant,
+  ];
+}
+
+function matrix3QuadraticForm(vector, matrix) {
+  return dotVectors(vector, matrix3MulVector(matrix, vector));
+}
+
+function dotVectors(left, right) {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function symmetricEigenDecomposition3(matrix) {
+  const a = matrix3Symmetrize(matrix);
+  const v = matrix3Identity();
+  const pairs = [
+    [0, 1, 1],
+    [0, 2, 2],
+    [1, 2, 5],
+  ];
+
+  for (let iteration = 0; iteration < 32; iteration += 1) {
+    let pair = pairs[0];
+    let largest = Math.abs(a[pair[2]]);
+    for (let index = 1; index < pairs.length; index += 1) {
+      const candidate = Math.abs(a[pairs[index][2]]);
+      if (candidate > largest) {
+        largest = candidate;
+        pair = pairs[index];
+      }
+    }
+    if (largest < 1e-10) break;
+
+    const [p, q] = pair;
+    const pp = p * 3 + p;
+    const qq = q * 3 + q;
+    const pq = p * 3 + q;
+    const tau = (a[qq] - a[pp]) / (2 * a[pq]);
+    const t = Math.sign(tau || 1) / (Math.abs(tau) + Math.sqrt(1 + tau * tau));
+    const cosine = 1 / Math.sqrt(1 + t * t);
+    const sine = t * cosine;
+
+    for (let row = 0; row < 3; row += 1) {
+      const rp = row * 3 + p;
+      const rq = row * 3 + q;
+      const oldP = a[rp];
+      const oldQ = a[rq];
+      a[rp] = cosine * oldP - sine * oldQ;
+      a[rq] = sine * oldP + cosine * oldQ;
+    }
+    for (let column = 0; column < 3; column += 1) {
+      const pc = p * 3 + column;
+      const qc = q * 3 + column;
+      const oldP = a[pc];
+      const oldQ = a[qc];
+      a[pc] = cosine * oldP - sine * oldQ;
+      a[qc] = sine * oldP + cosine * oldQ;
+    }
+    for (let row = 0; row < 3; row += 1) {
+      const rp = row * 3 + p;
+      const rq = row * 3 + q;
+      const oldP = v[rp];
+      const oldQ = v[rq];
+      v[rp] = cosine * oldP - sine * oldQ;
+      v[rq] = sine * oldP + cosine * oldQ;
+    }
+    a[pq] = 0;
+    a[q * 3 + p] = 0;
+  }
+
+  return [
+    { value: a[0], vector: normalizeVector([v[0], v[3], v[6]], [1, 0, 0]) },
+    { value: a[4], vector: normalizeVector([v[1], v[4], v[7]], [0, 1, 0]) },
+    { value: a[8], vector: normalizeVector([v[2], v[5], v[8]], [0, 0, 1]) },
+  ].sort((left, right) => right.value - left.value);
+}
+
+function matrix3FromEigen(eigen, floor = ANNOTATION_FIT_EIGEN_FLOOR_KPC2) {
+  return matrix3Symmetrize(
+    eigen.reduce((sum, item) => {
+      const value = Math.max(floor, item.value);
+      return matrix3Add(sum, matrix3Scale(matrix3Outer(item.vector), value));
+    }, matrix3Zero()),
+  );
+}
+
+function matrix3PositiveSemidefinite(matrix, floor = ANNOTATION_FIT_EIGEN_FLOOR_KPC2) {
+  return matrix3FromEigen(symmetricEigenDecomposition3(matrix), floor);
 }
 
 function rotateTangentBasis(east, north, angleDegrees) {
@@ -1855,6 +2312,12 @@ function nextFrame() {
   });
 }
 
+function setLoadingMessage(message) {
+  if (!elements.loading || !message) return;
+  elements.loading.textContent = message;
+  elements.loading.setAttribute("aria-label", message);
+}
+
 function setLoadingProgress(progress) {
   if (!elements.loading) return;
   loadingProgress = Math.max(loadingProgress, clamp(progress, 0, 1));
@@ -1864,10 +2327,47 @@ function setLoadingProgress(progress) {
   elements.loading.setAttribute("aria-valuenow", `${progressPercent}`);
 }
 
+function setLoadingStage(message, progress) {
+  setLoadingMessage(message);
+  setLoadingProgress(progress);
+}
+
+async function advanceLoadingStage(message, progress) {
+  setLoadingStage(message, progress);
+  await nextFrame();
+}
+
 function setIndeterminateLoadingProgress() {
   if (!elements.loading) return;
   elements.loading.classList.add("indeterminate");
   elements.loading.removeAttribute("aria-valuenow");
+}
+
+async function mapWithLoadingProgress(items, mapper, { start, end, message, chunkSize = LOADING_PROGRESS_CHUNK_SIZE }) {
+  const source = Array.isArray(items) ? items : [];
+  const result = new Array(source.length);
+  const total = source.length;
+  if (message) {
+    setLoadingStage(message, start);
+    await nextFrame();
+  }
+  if (!total) {
+    setLoadingProgress(end);
+    await nextFrame();
+    return result;
+  }
+
+  const progressSpan = end - start;
+  const stride = Math.max(1, Math.trunc(chunkSize));
+  for (let index = 0; index < total; index += 1) {
+    result[index] = mapper(source[index], index);
+    const completed = index + 1;
+    if (completed === total || completed % stride === 0) {
+      setLoadingProgress(start + (completed / total) * progressSpan);
+      await nextFrame();
+    }
+  }
+  return result;
 }
 
 function progressTrackedStream(stream, contentLength, progressMax) {
@@ -1908,15 +2408,27 @@ async function responseTextWithProgress(response) {
 }
 
 async function fetchAtlasPayload() {
+  setLoadingStage("Downloading atlas data", LOADING_PROGRESS.requestStart);
   const response = await fetch(DATA_URL);
   if (!response.ok) throw new Error(`Data request failed with ${response.status}`);
 
   const jsonText = await responseTextWithProgress(response);
-  setLoadingProgress(0.9);
-  await nextFrame();
+  await advanceLoadingStage("Parsing atlas data", LOADING_PROGRESS.parseStart);
   const payload = JSON.parse(jsonText);
-  setLoadingProgress(0.92);
+  setLoadingStage("Atlas data parsed", LOADING_PROGRESS.parseDone);
   return payload;
+}
+
+async function fetchRedClumpVolumePayload() {
+  if (!RED_CLUMP_VOLUME_ANALYSIS_ENABLED) return null;
+  try {
+    const response = await fetch(RED_CLUMP_VOLUME_DATA_URL);
+    if (!response.ok) throw new Error(`Volume data request failed with ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.warn("Red clump volume sidecar unavailable; using analytic fallback.", error);
+    return null;
+  }
 }
 
 function updatePerfHud({ catalogMs, redClumpMs, animatedCatalog, staticCatalog }) {
@@ -2092,7 +2604,7 @@ function activeCoordinateCenter() {
 }
 
 function activeCoordinateReference() {
-  if (state.cameraLocked && state.locked?.kind === "catalog") {
+  if (state.cameraLocked && (state.locked?.kind === "catalog" || state.locked?.kind === "eb")) {
     return {
       label: "Target",
       context: centerContext(state.locked.coordinates.galacticVector),
@@ -2244,13 +2756,20 @@ function catalogCoordinates(row) {
 }
 
 function redClumpCoordinates(row) {
-  const distance = row[RC.distance];
-  const galacticVector = vectorFromLonLat(row[RC.lon], row[RC.lat], distance);
+  return redClumpCoordinatesForDistance(row, row[RC.distance]);
+}
+
+function redClumpCoordinatesForDistance(row, distance) {
+  return redClumpCoordinatesForLonLat(row[RC.lon], row[RC.lat], distance);
+}
+
+function redClumpCoordinatesForLonLat(lonDeg, latDeg, distance) {
+  const galacticVector = vectorFromLonLat(lonDeg, latDeg, distance);
   return {
     galacticVector,
     distance,
-    lonDeg: row[RC.lon],
-    latDeg: row[RC.lat],
+    lonDeg,
+    latDeg,
   };
 }
 
@@ -2262,6 +2781,20 @@ function clusterCoordinates(row) {
     distance,
     lonDeg: row[CL.galLonDeg],
     latDeg: row[CL.galLatDeg],
+  };
+}
+
+function eclipsingBinaryCoordinates(row) {
+  return eclipsingBinaryCoordinatesForDistance(row, row[EB.distance]);
+}
+
+function eclipsingBinaryCoordinatesForDistance(row, distance) {
+  const galacticVector = vectorFromLonLat(row[EB.galLonDeg], row[EB.galLatDeg], distance);
+  return {
+    galacticVector,
+    distance,
+    lonDeg: row[EB.galLonDeg],
+    latDeg: row[EB.galLatDeg],
   };
 }
 
@@ -2359,9 +2892,13 @@ function sampledDistanceFromKpcError(distanceKpc, distanceErrorKpc, seed, key) {
   );
 }
 
-function luminosityFromIMagnitude(iMagnitude, distanceKpc) {
+function iBandExtinctionFromEVI(reddeningEVI) {
+  return Number.isFinite(reddeningEVI) && reddeningEVI > 0 ? I_BAND_EXTINCTION_PER_EVI * reddeningEVI : 0;
+}
+
+function luminosityFromIMagnitude(iMagnitude, distanceKpc, reddeningEVI = 0) {
   if (!Number.isFinite(iMagnitude) || !Number.isFinite(distanceKpc) || distanceKpc <= 0) return null;
-  const absoluteI = iMagnitude - kpcToDistanceModulus(distanceKpc);
+  const absoluteI = iMagnitude - iBandExtinctionFromEVI(reddeningEVI) - kpcToDistanceModulus(distanceKpc);
   const luminosity = 10 ** (-0.4 * (absoluteI - SUN_ABSOLUTE_I_MAG));
   return Number.isFinite(luminosity) && luminosity > 0 ? luminosity : null;
 }
@@ -2444,6 +2981,13 @@ function skyGridBoundsFromPayload(payload) {
     galacticLatitudes.push(row[CL.galLatDeg]);
   }
 
+  for (const row of payload.datasets.eclipsingBinaryDistances || []) {
+    equatorialLongitudes.push(row[EB.raDeg]);
+    equatorialLatitudes.push(row[EB.decDeg]);
+    galacticLongitudes.push(row[EB.galLonDeg]);
+    galacticLatitudes.push(row[EB.galLatDeg]);
+  }
+
   for (const row of payload.datasets.redClump) {
     const vector = vectorFromLonLat(row[RC.lon], row[RC.lat], 1);
     const equatorial = equatorialFromGalacticVector(vector);
@@ -2493,7 +3037,16 @@ function rebuildCoordinateCache(reference = activeCoordinateReference()) {
   for (const point of scene.clusters) {
     point.activeCoordinates = coordinatesForReference(point, reference);
   }
+  for (const point of scene.eclipsingBinaries) {
+    point.activeCoordinates = coordinatesForReference(point, reference);
+  }
   for (const point of scene.redClump) {
+    point.activeCoordinates = coordinatesForReference(point, reference);
+  }
+  for (const point of scene.redClumpVolume) {
+    point.activeCoordinates = coordinatesForReference(point, reference);
+  }
+  for (const point of scene.annotationTargets) {
     point.activeCoordinates = coordinatesForReference(point, reference);
   }
   scene.coordinateCacheKey = cacheKey;
@@ -2872,6 +3425,32 @@ function colorForTemperature(temperature) {
   return rgb(displayRgbFromBlackbodyRgb(rgbForTemperature(displayTemperatureFromPhysicalTemperature(temperature))));
 }
 
+function blendedEclipsingBinaryRgb(row) {
+  const primaryRgb = Number.isFinite(row?.[EB.primaryTeff]) ? cssColorToRgb(colorForTemperature(row[EB.primaryTeff])) : null;
+  const secondaryRgb = Number.isFinite(row?.[EB.secondaryTeff])
+    ? cssColorToRgb(colorForTemperature(row[EB.secondaryTeff]))
+    : null;
+  if (!primaryRgb && !secondaryRgb) return cssColorToRgb(colorForTemperature(5000));
+  if (!primaryRgb) return secondaryRgb;
+  if (!secondaryRgb) return primaryRgb;
+
+  const primaryWeight = Math.max(0, Number(row[EB.primaryLum]) || 0);
+  const secondaryWeight = Math.max(0, Number(row[EB.secondaryLum]) || 0);
+  const totalWeight = primaryWeight + secondaryWeight;
+  const w1 = totalWeight > 0 ? primaryWeight : 1;
+  const w2 = totalWeight > 0 ? secondaryWeight : 1;
+  const total = w1 + w2 || 1;
+  return [
+    Math.round((primaryRgb[0] * w1 + secondaryRgb[0] * w2) / total),
+    Math.round((primaryRgb[1] * w1 + secondaryRgb[1] * w2) / total),
+    Math.round((primaryRgb[2] * w1 + secondaryRgb[2] * w2) / total),
+  ];
+}
+
+function colorForEclipsingBinaryRow(row) {
+  return rgb(blendedEclipsingBinaryRgb(row));
+}
+
 function colorForVMinusI(vMinusI, spectralIndex) {
   if (!Number.isFinite(vMinusI)) {
     return scene.spectralClasses[spectralIndex]?.color || "#dfeaff";
@@ -2985,7 +3564,7 @@ function updateCatalogPointForDistance(point, distance) {
 
   let luminosity = row[IDX.lum];
   if (hasSampledDistance) {
-    luminosity = luminosityFromIMagnitude(row[IDX.iMag], distance) || row[IDX.lum];
+    luminosity = luminosityFromIMagnitude(row[IDX.iMag], distance, reddeningEVIForRow(row)) || row[IDX.lum];
   }
   const logLuminosity = Number.isFinite(luminosity) && luminosity > 0 ? Math.log10(luminosity) : row[IDX.logLum];
   const radius =
@@ -3011,6 +3590,18 @@ function updateClusterPointForDistance(point, distance) {
     Number.isFinite(catalogDistance) &&
     Math.abs(distance - catalogDistance) > 1e-8;
   point.coordinates = hasSampledDistance ? clusterCoordinatesForDistance(row, distance) : point.baseCoordinates;
+  point.currentDistance = point.coordinates.distance;
+}
+
+function updateEclipsingBinaryPointForDistance(point, distance) {
+  const row = point.row;
+  const catalogDistance = row[EB.distance];
+  const hasSampledDistance =
+    state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED &&
+    Number.isFinite(distance) &&
+    Number.isFinite(catalogDistance) &&
+    Math.abs(distance - catalogDistance) > 1e-8;
+  point.coordinates = hasSampledDistance ? eclipsingBinaryCoordinatesForDistance(row, distance) : point.baseCoordinates;
   point.currentDistance = point.coordinates.distance;
 }
 
@@ -3065,6 +3656,11 @@ function refreshTemperatureDrivenColors() {
     }
   }
 
+  for (const point of scene.eclipsingBinaries) {
+    point.color = colorForEclipsingBinaryRow(point.row);
+    point.rgb = cssColorToRgb(point.color);
+  }
+
   markCatalogStaticDirty();
   markClusterStarGpuDirty();
   setTarget(state.locked || state.hovered);
@@ -3078,7 +3674,15 @@ function setColorContrast(value) {
   refreshTemperatureDrivenColors();
 }
 
-function applyUncertaintyRealization({ updateTarget = true } = {}) {
+function rebuildRedClumpVolumeForSeed(seed) {
+  if (!RED_CLUMP_VOLUME_ANALYSIS_ENABLED || !scene.redClump.length) return;
+  const clampedSeed = clampUncertaintySeed(seed);
+  scene.redClumpVolume = buildRedClumpVolume(scene.redClump, scene.redClumpVolumePayload, clampedSeed);
+  scene.redClumpVolumeSeed = clampedSeed;
+  markRedClumpLayerDirty();
+}
+
+function applyUncertaintyRealization({ updateTarget = true, updateRedClumpVolume = true } = {}) {
   const seed = clampUncertaintySeed(state.uncertaintySeed);
   state.uncertaintySeed = seed;
 
@@ -3102,6 +3706,16 @@ function applyUncertaintyRealization({ updateTarget = true } = {}) {
     updateClusterPointForDistance(point, sampledDistance);
   }
 
+  for (const point of scene.eclipsingBinaries) {
+    const sampledDistance = sampledDistanceFromKpcError(
+      point.row[EB.distance],
+      point.row[EB.distanceError],
+      seed,
+      `eb:${point.row[EB.id]}:${point.index}`,
+    );
+    updateEclipsingBinaryPointForDistance(point, sampledDistance);
+  }
+
   for (const point of scene.clusterStars) {
     const cluster = scene.clusters[point.clusterIndex];
     if (seed === DEFAULT_UNCERTAINTY_SEED || !cluster || cluster.coordinates === cluster.baseCoordinates) {
@@ -3116,19 +3730,33 @@ function applyUncertaintyRealization({ updateTarget = true } = {}) {
     point.currentDistance = point.coordinates.distance;
   }
 
+  if (updateRedClumpVolume && scene.redClumpVolumeSeed !== seed) {
+    rebuildRedClumpVolumeForSeed(seed);
+  }
   invalidateCoordinateCache();
-  if (state.cameraLocked && state.locked && (state.locked.kind === "catalog" || state.locked.kind === "cluster")) {
+  if (
+    state.cameraLocked &&
+    state.locked &&
+    (state.locked.kind === "catalog" || state.locked.kind === "cluster" || state.locked.kind === "eb")
+  ) {
     state.customCoordinateContext = centerContext(state.locked.coordinates.galacticVector);
   }
   if (updateTarget && (state.locked || state.hovered)) setTarget(state.locked || state.hovered);
   markCatalogStaticDirty();
 }
 
-function setUncertaintySeed(value) {
+function setUncertaintySeed(value, { updateRedClumpVolume = true } = {}) {
   const seed = clampUncertaintySeed(value);
-  if (state.uncertaintySeed === seed) return;
+  if (state.uncertaintySeed === seed) {
+    if (updateRedClumpVolume && scene.redClumpVolumeSeed !== seed) {
+      rebuildRedClumpVolumeForSeed(seed);
+      invalidateCoordinateCache();
+      markProjectionDirty();
+    }
+    return;
+  }
   state.uncertaintySeed = seed;
-  applyUncertaintyRealization();
+  applyUncertaintyRealization({ updateRedClumpVolume });
   syncRangeOutputs();
   markProjectionDirty();
 }
@@ -3140,7 +3768,9 @@ function requestUncertaintySeed(value) {
     uncertaintySeedFrame = 0;
     const seed = pendingUncertaintySeed;
     pendingUncertaintySeed = null;
-    setUncertaintySeed(seed);
+    controls.uncertaintySeed.value = String(seed);
+    syncEditableMultiplierOutput("uncertaintySeed", seed);
+    syncRangeProgress(controls.uncertaintySeed);
   });
 }
 
@@ -3246,6 +3876,12 @@ function seededUnit32(value) {
 
 function seededUnit(value) {
   return (hashString(value) % 100000) / 100000;
+}
+
+function seededGaussian(value) {
+  const radiusUnit = Math.max(0.000001, seededUnit(`${value}:radius`));
+  const angleUnit = seededUnit(`${value}:angle`);
+  return Math.sqrt(-2 * Math.log(radiusUnit)) * Math.cos(Math.PI * 2 * angleUnit);
 }
 
 function positiveModulo(value, divisor) {
@@ -3870,6 +4506,7 @@ function clusterLocationIndexForRow(clusterRow) {
   const galaxy = String(clusterRow?.[CL.galaxy] || "").toUpperCase();
   if (galaxy === "LMC") return 0;
   if (galaxy === "SMC") return 1;
+  if (galaxy === "BRIDGE" || galaxy === "SMC/BRIDGE") return 2;
   return 3;
 }
 
@@ -3932,6 +4569,7 @@ function makeClusterStarWaveform(clusterStarRow, clusterStarIndex, clusterRow, m
 }
 
 function pulsationPeriodDays(point) {
+  if (point?.kind === "eb") return Math.max(0.05, Number(point?.row?.[EB.period] || 1));
   return Math.max(0.05, Number(point?.lightCurve?.params?.period || point?.row?.[IDX.period] || 1));
 }
 
@@ -3991,6 +4629,55 @@ function lightCurveInsetSampleDay(point) {
 
 function interpolateSamples(samples, sample) {
   return samples[sample.index] * (1 - sample.fraction) + samples[sample.next] * sample.fraction;
+}
+
+function makeEclipsingBinaryLightCurve(row) {
+  const samples = Array.isArray(row?.[EB.lightCurveFluxSamples])
+    ? row[EB.lightCurveFluxSamples].map(Number).filter(Number.isFinite)
+    : [];
+  if (!samples.length) return null;
+  let minFlux = Infinity;
+  let maxFlux = -Infinity;
+  let meanFlux = 0;
+  for (const value of samples) {
+    minFlux = Math.min(minFlux, value);
+    maxFlux = Math.max(maxFlux, value);
+    meanFlux += value;
+  }
+  meanFlux /= samples.length;
+  return {
+    samples,
+    params: {
+      period: Number(row[EB.period]) || 1,
+      t0: Number.isFinite(row[EB.t0]) ? row[EB.t0] : animationEpoch,
+    },
+    minFlux,
+    maxFlux,
+    meanFlux,
+    brightnessBand: row[EB.lightCurveBand] || "I",
+    sourceQuality: row[EB.lightCurveQuality] || "missing",
+  };
+}
+
+function eclipsingBinaryLightCurveSample(point, simulationDay = currentSimulationDay()) {
+  const lightCurve = point?.lightCurve;
+  const samples = lightCurve?.samples;
+  if (!samples?.length) {
+    return { phase: 0, index: 0, next: 0, fraction: 0, flux: 1 };
+  }
+  const period = Math.max(0.05, Number(point.row[EB.period]) || lightCurve.params.period || 1);
+  const t0 = Number.isFinite(point.row[EB.t0]) ? point.row[EB.t0] : lightCurve.params.t0;
+  const phase = positiveModulo((simulationDay - t0) / period, 1);
+  const scaled = phase * samples.length;
+  const index = Math.floor(scaled) % samples.length;
+  const next = (index + 1) % samples.length;
+  const fraction = scaled - Math.floor(scaled);
+  const flux = interpolateSamples(samples, { index, next, fraction });
+  return { phase, index, next, fraction, flux };
+}
+
+function eclipsingBinaryFluxAtDay(point, simulationDay = currentSimulationDay()) {
+  return clamp(eclipsingBinaryLightCurveSample(point, simulationDay).flux || 1, 0.02, 1);
 }
 
 function amplitudeFluxRatio(flux, meanFlux) {
@@ -4430,6 +5117,90 @@ function createLightCurveInset(target) {
   return inset;
 }
 
+function eclipsingBinaryLightCurvePath(target, width, height, padX, padY) {
+  const samples = target.lightCurve?.samples || [];
+  const commands = [];
+  if (!samples.length) return "";
+  const cycles = LIGHTCURVE_INSET_CYCLES;
+  const totalSamples = samples.length * cycles;
+  const plotWidth = width - padX * 2;
+  const fluxRange = lightCurveInsetFluxRange(target.lightCurve, samples);
+  for (let index = 0; index <= totalSamples; index += 1) {
+    const phase = index / totalSamples;
+    const x = padX + phase * plotWidth;
+    const y = lightCurveY(target.lightCurve, samples[index % samples.length], height, padY, fluxRange);
+    commands.push(`${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`);
+  }
+  return commands.join(" ");
+}
+
+function createEclipsingBinaryLightCurveInset(target) {
+  const width = 164;
+  const height = 52;
+  const padX = 8;
+  const padY = 7;
+  const inset = document.createElement("div");
+  inset.className = "lightcurveInset ebLightcurveInset";
+  inset.title = "OGLE I-band relative flux folded over the eclipsing-binary period";
+
+  const svg = createSvgElement("svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Target eclipsing-binary lightcurve");
+
+  const fluxRange = lightCurveInsetFluxRange(target.lightCurve, target.lightCurve?.samples || []);
+  const outOfEclipseY = lightCurveY(target.lightCurve, 1, height, padY, fluxRange);
+  const midLine = createSvgElement("line");
+  midLine.classList.add("lightcurveGrid");
+  midLine.setAttribute("x1", String(padX));
+  midLine.setAttribute("x2", String(width - padX));
+  midLine.setAttribute("y1", outOfEclipseY.toFixed(2));
+  midLine.setAttribute("y2", outOfEclipseY.toFixed(2));
+
+  const cycleLine = createSvgElement("line");
+  cycleLine.classList.add("lightcurveGrid");
+  cycleLine.setAttribute("x1", String(width / 2));
+  cycleLine.setAttribute("x2", String(width / 2));
+  cycleLine.setAttribute("y1", String(padY - 1));
+  cycleLine.setAttribute("y2", String(height - padY + 1));
+
+  const trace = createSvgElement("path");
+  trace.classList.add("lightcurveTrace");
+  trace.setAttribute("d", eclipsingBinaryLightCurvePath(target, width, height, padX, padY));
+  trace.style.stroke = target.color;
+
+  const phaseMarkers = [];
+  const phaseDots = [];
+  for (let cycle = 0; cycle < LIGHTCURVE_INSET_CYCLES; cycle += 1) {
+    const phaseMarker = createSvgElement("line");
+    phaseMarker.classList.add("lightcurvePhase");
+    phaseMarker.setAttribute("y1", String(padY - 1));
+    phaseMarker.setAttribute("y2", String(height - padY + 1));
+
+    const phaseDot = createSvgElement("circle");
+    phaseDot.classList.add("lightcurveDot");
+    phaseDot.setAttribute("r", "2.5");
+    phaseMarkers.push(phaseMarker);
+    phaseDots.push(phaseDot);
+  }
+
+  svg.append(midLine, cycleLine, trace, ...phaseMarkers, ...phaseDots);
+  inset.append(svg);
+  activeLightcurveInsets.push({
+    kind: "eb",
+    target,
+    trace,
+    phaseMarkers,
+    phaseDots,
+    width,
+    height,
+    padX,
+    padY,
+  });
+  updateLightcurveInset();
+  return inset;
+}
+
 function clearActiveLightcurveInsets() {
   activeLightcurveInsets = [];
 }
@@ -4439,6 +5210,22 @@ function updateLightcurveInset() {
 
   for (const activeLightcurveInset of activeLightcurveInsets) {
     const { target, trace, phaseMarkers, phaseDots, width, height, padX, padY } = activeLightcurveInset;
+    if (activeLightcurveInset.kind === "eb") {
+      const sample = eclipsingBinaryLightCurveSample(target, currentSimulationDay());
+      const fluxRange = lightCurveInsetFluxRange(target.lightCurve, target.lightCurve?.samples || []);
+      const cycleWidth = (width - padX * 2) / LIGHTCURVE_INSET_CYCLES;
+      const y = lightCurveY(target.lightCurve, sample.flux, height, padY, fluxRange);
+      trace.style.stroke = target.color;
+      for (let cycle = 0; cycle < LIGHTCURVE_INSET_CYCLES; cycle += 1) {
+        const x = padX + (cycle + sample.phase) * cycleWidth;
+        phaseMarkers[cycle].setAttribute("x1", x.toFixed(2));
+        phaseMarkers[cycle].setAttribute("x2", x.toFixed(2));
+        phaseDots[cycle].setAttribute("cx", x.toFixed(2));
+        phaseDots[cycle].setAttribute("cy", y.toFixed(2));
+        phaseDots[cycle].style.fill = target.color;
+      }
+      continue;
+    }
     const simulationDay = lightCurveInsetSampleDay(target);
     const sample = waveformSample(target, simulationDay);
     const currentPulse = pulseState(target, simulationDay);
@@ -4761,6 +5548,46 @@ function pointRadiusUnitFromStellarRadius(radiusSolar) {
   return 0.35 + radiusLevel ** 0.75 * 3.0;
 }
 
+function clusterStarBrightLodAlphaFromLuminosity(luminositySolar) {
+  if (!Number.isFinite(luminositySolar) || luminositySolar <= 0) return 0;
+  const logLuminosity = Math.log10(luminositySolar);
+  const redClumpLogLuminosity = Math.log10(RED_CLUMP_LUMINOSITY);
+  return (
+    smoothStep((logLuminosity - redClumpLogLuminosity + 0.1) / CLUSTER_STAR_BRIGHT_LOD_LOG_SPAN) *
+    CLUSTER_STAR_BRIGHT_LOD_ALPHA_MAX
+  );
+}
+
+function clusterStarRenderPriorityForRow(row, sample = 0) {
+  const luminosity = row?.[CS.lum];
+  const logLuminosity = Number.isFinite(luminosity) && luminosity > 0 ? Math.log10(luminosity) : -Infinity;
+  const luminosityPriority = smoothStep((logLuminosity - 0.35) / 4.0);
+  const brightPriority =
+    clusterStarBrightLodAlphaFromLuminosity(luminosity) / CLUSTER_STAR_BRIGHT_LOD_ALPHA_MAX;
+  const samplePriority = 1 - clamp(sample / 100, 0, 1);
+  return clamp(brightPriority * 0.7 + luminosityPriority * 0.24 + samplePriority * 0.06, 0, 1);
+}
+
+function clusterStarDensitySampleFromPriority(sample, priority) {
+  const brightnessBias = smoothStep(priority);
+  return clamp(sample * (1 - brightnessBias * 0.86) - brightnessBias * 16, 0, 100);
+}
+
+function clusterStarRadiusUnitFromLuminosityAndRadius(luminositySolar, radiusSolar) {
+  const luminosityLevel = luminosityDisplayLevel(luminositySolar);
+  const luminosityRadius =
+    CLUSTER_STAR_POINT_RADIUS_UNIT_MIN +
+    luminosityLevel ** 0.68 * (CLUSTER_STAR_POINT_RADIUS_UNIT_MAX - CLUSTER_STAR_POINT_RADIUS_UNIT_MIN);
+  const radiusHint = Number.isFinite(radiusSolar)
+    ? clamp(pointRadiusUnitFromStellarRadius(radiusSolar) * 0.075, 0, 0.2)
+    : 0;
+  return clamp(
+    luminosityRadius + radiusHint,
+    CLUSTER_STAR_POINT_RADIUS_UNIT_MIN,
+    CLUSTER_STAR_POINT_RADIUS_UNIT_MAX,
+  );
+}
+
 function pointRadiusZoomSize() {
   return 0.8 + Math.log2(Math.max(1, effectiveZoomScale())) * 0.16;
 }
@@ -4843,6 +5670,11 @@ function polygonArea(points) {
 function redClumpDensityCountForPoint(point) {
   const smoothedCount = Number(point?.smoothedDensityCount);
   const count = Number.isFinite(smoothedCount) ? smoothedCount : Number(point?.row?.[RC.densityCount]);
+  return Number.isFinite(count) ? Math.max(0, count) : 0;
+}
+
+function redClumpGaiaDensityCountForPoint(point) {
+  const count = Number(point?.row?.[RC.densityCount]);
   return Number.isFinite(count) ? Math.max(0, count) : 0;
 }
 
@@ -5232,6 +6064,7 @@ function createClusterStarProgram(gl) {
       attribute float a_radiusUnit;
       attribute float a_alphaBaseUnit;
       attribute float a_lodAlpha;
+      attribute float a_radiusMax;
       attribute vec3 a_color;
 
       uniform vec2 u_resolution;
@@ -5279,8 +6112,8 @@ function createClusterStarProgram(gl) {
         ) * u_starBaseRadiusViewportScale;
         float radius = clamp(
           baseRadius * ${PULSATOR_RADIUS_BASE_SCALE.toFixed(6)} * ${PULSATOR_BASE_RADIUS_FACTOR.toFixed(2)} * u_radiusScale,
-          0.18,
-          28.0
+          ${CLUSTER_STAR_POINT_RADIUS_MIN.toFixed(2)},
+          max(${CLUSTER_STAR_POINT_RADIUS_MIN.toFixed(2)}, a_radiusMax)
         );
         float alphaUnit = a_alphaBaseUnit * (0.64 + perspective * 0.24);
         float exposure = (u_exposure / 10.0) * u_displayLuminosityBaseBoost * alphaUnit;
@@ -5392,7 +6225,8 @@ function createRedClumpProgram(gl) {
         ) * visible;
 
         gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
-        v_color = vec4(u_color * alpha, alpha);
+        vec3 volumeColor = mix(u_color, vec3(1.0, 0.93, 0.76), 0.42);
+        v_color = vec4(volumeColor * alpha, alpha);
       }
     `,
   );
@@ -5420,6 +6254,98 @@ function createRedClumpProgram(gl) {
   if (gl.getProgramParameter(program, gl.LINK_STATUS)) return program;
 
   console.warn("Red clump WebGL program link failed", gl.getProgramInfoLog(program));
+  gl.deleteProgram(program);
+  return null;
+}
+
+function createRedClumpVolumeProgram(gl) {
+  const vertexShader = compileCatalogShader(
+    gl,
+    gl.VERTEX_SHADER,
+    `
+      precision highp float;
+
+      attribute vec3 a_position;
+      attribute vec4 a_alphaFactors;
+
+      uniform vec2 u_resolution;
+      uniform vec2 u_center;
+      uniform vec3 u_color;
+      uniform vec4 u_yawPitch;
+      uniform vec2 u_roll;
+      uniform float u_scale;
+      uniform float u_depthScale;
+      uniform float u_density;
+      uniform float u_exposure;
+      uniform float u_dpr;
+      uniform float u_voxelSize;
+      uniform float u_alphaScale;
+      uniform float u_alphaMax;
+
+      varying vec4 v_color;
+
+      void main() {
+        float cosy = u_yawPitch.x;
+        float siny = u_yawPitch.y;
+        float cosp = u_yawPitch.z;
+        float sinp = u_yawPitch.w;
+        float cosr = u_roll.x;
+        float sinr = u_roll.y;
+        float depthZ = a_position.z * u_depthScale;
+
+        float x1 = a_position.x * cosy - depthZ * siny;
+        float z1 = a_position.x * siny + depthZ * cosy;
+        float y1 = a_position.y * cosp - z1 * sinp;
+        float z2 = a_position.y * sinp + z1 * cosp;
+        float x2 = x1 * cosr - y1 * sinr;
+        float y2 = x1 * sinr + y1 * cosr;
+        float perspective = clamp(140.0 / (140.0 - z2), 0.45, 2.2);
+        vec2 screen = u_center + vec2(x2, -y2) * u_scale * perspective;
+        vec2 clip = (screen / u_resolution) * 2.0 - 1.0;
+        float visible = step(a_alphaFactors.z, u_density);
+        float exposure = max(0.02, u_exposure * 0.72);
+        float alpha = clamp(
+          exposure * a_alphaFactors.x * a_alphaFactors.y * a_alphaFactors.w * u_alphaScale,
+          0.0,
+          u_alphaMax
+        ) * visible;
+
+        gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+        gl_PointSize = clamp(u_voxelSize * u_scale * perspective * u_dpr, 4.0 * u_dpr, 72.0 * u_dpr);
+        v_color = vec4(u_color * alpha, alpha);
+      }
+    `,
+  );
+  const fragmentShader = compileCatalogShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    `
+      precision mediump float;
+
+      varying vec4 v_color;
+
+      void main() {
+        vec2 uv = gl_PointCoord * 2.0 - 1.0;
+        float radiusSquared = dot(uv, uv);
+        if (radiusSquared > 1.0) discard;
+        float core = exp(-radiusSquared * 1.08);
+        float edge = 1.0 - smoothstep(0.78, 1.0, radiusSquared);
+        float alpha = core * edge;
+        gl_FragColor = vec4(v_color.rgb * alpha, v_color.a * alpha);
+      }
+    `,
+  );
+  if (!vertexShader || !fragmentShader) return null;
+
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+  if (gl.getProgramParameter(program, gl.LINK_STATUS)) return program;
+
+  console.warn("Red clump volume WebGL program link failed", gl.getProgramInfoLog(program));
   gl.deleteProgram(program);
   return null;
 }
@@ -5502,6 +6428,7 @@ function createCatalogRenderer(canvasElement, options = {}) {
         radiusUnit: gl.getAttribLocation(clusterStarProgram, "a_radiusUnit"),
         alphaBaseUnit: gl.getAttribLocation(clusterStarProgram, "a_alphaBaseUnit"),
         lodAlpha: gl.getAttribLocation(clusterStarProgram, "a_lodAlpha"),
+        radiusMax: gl.getAttribLocation(clusterStarProgram, "a_radiusMax"),
         color: gl.getAttribLocation(clusterStarProgram, "a_color"),
       }
     : null;
@@ -5759,6 +6686,15 @@ function createCatalogRenderer(canvasElement, options = {}) {
         clusterStarStride,
         5 * Float32Array.BYTES_PER_ELEMENT,
       );
+      this.gl.enableVertexAttribArray(this.clusterStarAttributes.radiusMax);
+      this.gl.vertexAttribPointer(
+        this.clusterStarAttributes.radiusMax,
+        1,
+        this.gl.FLOAT,
+        false,
+        clusterStarStride,
+        6 * Float32Array.BYTES_PER_ELEMENT,
+      );
       this.gl.enableVertexAttribArray(this.clusterStarAttributes.color);
       this.gl.vertexAttribPointer(
         this.clusterStarAttributes.color,
@@ -5766,7 +6702,7 @@ function createCatalogRenderer(canvasElement, options = {}) {
         this.gl.FLOAT,
         false,
         clusterStarStride,
-        6 * Float32Array.BYTES_PER_ELEMENT,
+        7 * Float32Array.BYTES_PER_ELEMENT,
       );
       return true;
     },
@@ -5775,14 +6711,21 @@ function createCatalogRenderer(canvasElement, options = {}) {
       const data = this.ensureClusterStarCapacity(scene.activeClusterStarRenderCount);
       const buckets = scene.activeClusterStarsByCluster;
       const lodAlphaByCluster = scene.clusterStarLodAlphaByCluster;
+      const renderLimitByCluster = scene.clusterStarRenderLimitByCluster;
       let offset = 0;
       let count = 0;
       for (let clusterIndex = 0; clusterIndex < buckets.length; clusterIndex += 1) {
         const lodAlpha = lodAlphaByCluster[clusterIndex] || 0;
-        if (lodAlpha <= 0.001) continue;
+        const radiusMax = clusterStarRadiusCapForClusterIndex(clusterIndex);
+        const renderLimit = renderLimitByCluster[clusterIndex] || 0;
+        if (renderLimit <= 0) continue;
         const stars = buckets[clusterIndex];
         if (!stars || stars.length === 0) continue;
-        for (const point of stars) {
+        const starLimit = Math.min(stars.length, renderLimit);
+        for (let starIndex = 0; starIndex < starLimit; starIndex += 1) {
+          const point = stars[starIndex];
+          const effectiveLodAlpha = clusterStarEffectiveLodAlpha(point, lodAlpha);
+          if (effectiveLodAlpha <= 0.001) continue;
           const coordinates = point.activeCoordinates || coordinatesForPoint(point);
           const rgbValue = normalizedRgbFromCssColor(point.color);
           data[offset] = coordinates[0];
@@ -5790,10 +6733,11 @@ function createCatalogRenderer(canvasElement, options = {}) {
           data[offset + 2] = coordinates[2];
           data[offset + 3] = point.radiusUnit;
           data[offset + 4] = point.alphaBaseUnit;
-          data[offset + 5] = lodAlpha;
-          data[offset + 6] = rgbValue[0];
-          data[offset + 7] = rgbValue[1];
-          data[offset + 8] = rgbValue[2];
+          data[offset + 5] = effectiveLodAlpha;
+          data[offset + 6] = radiusMax;
+          data[offset + 7] = rgbValue[0];
+          data[offset + 8] = rgbValue[1];
+          data[offset + 9] = rgbValue[2];
           offset += CLUSTER_STAR_GPU_VERTEX_FLOATS;
           count += 1;
         }
@@ -6009,17 +6953,26 @@ function createRedClumpLayerRenderer(canvasElement) {
 
   const redClumpProgram = createRedClumpProgram(gl);
   if (!redClumpProgram) return null;
+  const redClumpVolumeProgram = createRedClumpVolumeProgram(gl);
 
   const redClumpBuffer = gl.createBuffer();
   const redClumpIndexBuffer = gl.createBuffer();
+  const redClumpVolumeBuffer = redClumpVolumeProgram ? gl.createBuffer() : null;
   const uintIndexExtension = gl.getExtension("OES_element_index_uint");
   const redClumpIndexArrayType = uintIndexExtension ? Uint32Array : Uint16Array;
   const redClumpIndexType = uintIndexExtension ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
   const redClumpStride = RED_CLUMP_GPU_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+  const redClumpVolumeStride = RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
   const redClumpAttributes = {
     position: gl.getAttribLocation(redClumpProgram, "a_position"),
     alphaFactors: gl.getAttribLocation(redClumpProgram, "a_alphaFactors"),
   };
+  const redClumpVolumeAttributes = redClumpVolumeProgram
+    ? {
+        position: gl.getAttribLocation(redClumpVolumeProgram, "a_position"),
+        alphaFactors: gl.getAttribLocation(redClumpVolumeProgram, "a_alphaFactors"),
+      }
+    : null;
   const redClumpUniforms = {
     resolution: gl.getUniformLocation(redClumpProgram, "u_resolution"),
     center: gl.getUniformLocation(redClumpProgram, "u_center"),
@@ -6036,6 +6989,23 @@ function createRedClumpLayerRenderer(canvasElement) {
     surfaceAlphaScale: gl.getUniformLocation(redClumpProgram, "u_surfaceAlphaScale"),
     surfaceAlphaMax: gl.getUniformLocation(redClumpProgram, "u_surfaceAlphaMax"),
   };
+  const redClumpVolumeUniforms = redClumpVolumeProgram
+    ? {
+        resolution: gl.getUniformLocation(redClumpVolumeProgram, "u_resolution"),
+        center: gl.getUniformLocation(redClumpVolumeProgram, "u_center"),
+        color: gl.getUniformLocation(redClumpVolumeProgram, "u_color"),
+        yawPitch: gl.getUniformLocation(redClumpVolumeProgram, "u_yawPitch"),
+        roll: gl.getUniformLocation(redClumpVolumeProgram, "u_roll"),
+        scale: gl.getUniformLocation(redClumpVolumeProgram, "u_scale"),
+        depthScale: gl.getUniformLocation(redClumpVolumeProgram, "u_depthScale"),
+        density: gl.getUniformLocation(redClumpVolumeProgram, "u_density"),
+        exposure: gl.getUniformLocation(redClumpVolumeProgram, "u_exposure"),
+        dpr: gl.getUniformLocation(redClumpVolumeProgram, "u_dpr"),
+        voxelSize: gl.getUniformLocation(redClumpVolumeProgram, "u_voxelSize"),
+        alphaScale: gl.getUniformLocation(redClumpVolumeProgram, "u_alphaScale"),
+        alphaMax: gl.getUniformLocation(redClumpVolumeProgram, "u_alphaMax"),
+      }
+    : null;
 
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
@@ -6052,10 +7022,14 @@ function createRedClumpLayerRenderer(canvasElement) {
     gl,
     canvas: canvasElement,
     redClumpProgram,
+    redClumpVolumeProgram,
     redClumpBuffer,
     redClumpIndexBuffer,
+    redClumpVolumeBuffer,
     redClumpAttributes,
     redClumpUniforms,
+    redClumpVolumeAttributes,
+    redClumpVolumeUniforms,
     redClumpCapacity: 0,
     redClumpData: new Float32Array(0),
     redClumpIndexCapacity: 0,
@@ -6066,11 +7040,22 @@ function createRedClumpLayerRenderer(canvasElement) {
     redClumpCount: 0,
     redClumpSourceCount: -1,
     redClumpCoordinateCacheKey: null,
+    redClumpVolumeCapacity: 0,
+    redClumpVolumeData: new Float32Array(0),
+    redClumpVolumeCount: 0,
+    redClumpVolumeSourceCount: -1,
+    redClumpVolumeCoordinateCacheKey: null,
     ensureRedClumpCapacity(vertexCount) {
       if (this.redClumpCapacity >= vertexCount) return this.redClumpData;
       this.redClumpCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, vertexCount)));
       this.redClumpData = new Float32Array(this.redClumpCapacity * RED_CLUMP_GPU_VERTEX_FLOATS);
       return this.redClumpData;
+    },
+    ensureRedClumpVolumeCapacity(vertexCount) {
+      if (this.redClumpVolumeCapacity >= vertexCount) return this.redClumpVolumeData;
+      this.redClumpVolumeCapacity = 2 ** Math.ceil(Math.log2(Math.max(1, vertexCount)));
+      this.redClumpVolumeData = new Float32Array(this.redClumpVolumeCapacity * RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS);
+      return this.redClumpVolumeData;
     },
     ensureRedClumpIndexCapacity(indexCount) {
       if (this.redClumpIndexCapacity >= indexCount) return this.redClumpIndexData;
@@ -6104,6 +7089,52 @@ function createRedClumpLayerRenderer(canvasElement) {
         redClumpStride,
         3 * Float32Array.BYTES_PER_ELEMENT,
       );
+    },
+    bindRedClumpVolumeAttributes() {
+      if (!this.redClumpVolumeAttributes || !this.redClumpVolumeBuffer) return false;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.redClumpVolumeBuffer);
+      this.gl.enableVertexAttribArray(this.redClumpVolumeAttributes.position);
+      this.gl.vertexAttribPointer(this.redClumpVolumeAttributes.position, 3, this.gl.FLOAT, false, redClumpVolumeStride, 0);
+      this.gl.enableVertexAttribArray(this.redClumpVolumeAttributes.alphaFactors);
+      this.gl.vertexAttribPointer(
+        this.redClumpVolumeAttributes.alphaFactors,
+        4,
+        this.gl.FLOAT,
+        false,
+        redClumpVolumeStride,
+        3 * Float32Array.BYTES_PER_ELEMENT,
+      );
+      return true;
+    },
+    updateRedClumpVolumeBuffer(volumeSource = redClumpRenderVolumeSource()) {
+      if (!this.redClumpVolumeProgram || !this.redClumpVolumeBuffer) return false;
+      const data = this.ensureRedClumpVolumeCapacity(volumeSource.length);
+      let offset = 0;
+      let count = 0;
+      for (const vertex of volumeSource) {
+        const coordinates = vertex.activeCoordinates || coordinatesForPoint(vertex);
+        if (!coordinates) continue;
+        data[offset] = coordinates[0];
+        data[offset + 1] = coordinates[1];
+        data[offset + 2] = coordinates[2];
+        data[offset + 3] = vertex.edgeAlpha;
+        data[offset + 4] = vertex.densityAlpha;
+        data[offset + 5] = vertex.sample;
+        data[offset + 6] = vertex.weight;
+        offset += RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS;
+        count += 1;
+      }
+      this.redClumpVolumeCount = count;
+      this.redClumpVolumeSourceCount = volumeSource.length;
+      this.redClumpVolumeCoordinateCacheKey = scene.coordinateCacheKey;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.redClumpVolumeBuffer);
+      this.gl.bufferData(
+        this.gl.ARRAY_BUFFER,
+        data.subarray(0, count * RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS),
+        this.gl.DYNAMIC_DRAW,
+      );
+      scene.redClumpGpuDirty = false;
+      return true;
     },
     updateRedClumpBuffer() {
       const cells = scene.redClumpSurface;
@@ -6176,9 +7207,53 @@ function createRedClumpLayerRenderer(canvasElement) {
       }
       scene.redClumpGpuDirty = false;
     },
+    drawRedClumpVolume(rgbValue, transform, volumeSource = redClumpRenderVolumeSource()) {
+      if (!this.redClumpVolumeProgram || !this.redClumpVolumeBuffer) return false;
+      if (
+        scene.redClumpGpuDirty ||
+        this.redClumpVolumeSourceCount !== volumeSource.length ||
+        this.redClumpVolumeCoordinateCacheKey !== scene.coordinateCacheKey
+      ) {
+        this.updateRedClumpVolumeBuffer(volumeSource);
+      }
+      if (this.redClumpVolumeCount <= 0) return true;
+
+      this.gl.useProgram(this.redClumpVolumeProgram);
+      this.bindRedClumpVolumeAttributes();
+      this.gl.uniform2f(this.redClumpVolumeUniforms.resolution, scene.width, scene.height);
+      this.gl.uniform2f(this.redClumpVolumeUniforms.center, scene.centerX, scene.centerY);
+      this.gl.uniform3f(this.redClumpVolumeUniforms.color, rgbValue[0], rgbValue[1], rgbValue[2]);
+      this.gl.uniform4f(
+        this.redClumpVolumeUniforms.yawPitch,
+        transform.cosy,
+        transform.siny,
+        transform.cosp,
+        transform.sinp,
+      );
+      this.gl.uniform2f(this.redClumpVolumeUniforms.roll, transform.cosr, transform.sinr);
+      this.gl.uniform1f(this.redClumpVolumeUniforms.scale, transform.scale);
+      this.gl.uniform1f(this.redClumpVolumeUniforms.depthScale, transform.depthScale);
+      this.gl.uniform1f(this.redClumpVolumeUniforms.density, state.density);
+      this.gl.uniform1f(this.redClumpVolumeUniforms.exposure, redClumpRenderExposureValue());
+      this.gl.uniform1f(this.redClumpVolumeUniforms.dpr, scene.dpr);
+      this.gl.uniform1f(
+        this.redClumpVolumeUniforms.voxelSize,
+        RED_CLUMP_VOLUME_GRID_SPACING_KPC * RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE,
+      );
+      this.gl.uniform1f(this.redClumpVolumeUniforms.alphaScale, RED_CLUMP_VOLUME_ALPHA_SCALE);
+      this.gl.uniform1f(this.redClumpVolumeUniforms.alphaMax, RED_CLUMP_VOLUME_ALPHA_MAX);
+      this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
+      this.gl.drawArrays(this.gl.POINTS, 0, this.redClumpVolumeCount);
+      return true;
+    },
     drawRedClump(rgbValue) {
       this.resize();
       rebuildCoordinateCache();
+      const transform = makeProjectionTransform();
+      if (redClumpVolumeEnabled()) {
+        return this.drawRedClumpVolume(rgbValue, transform, redClumpRenderVolumeSource());
+      }
+
       if (
         scene.redClumpGpuDirty ||
         this.redClumpSourceCount !== scene.redClumpSurface.length ||
@@ -6186,9 +7261,8 @@ function createRedClumpLayerRenderer(canvasElement) {
       ) {
         this.updateRedClumpBuffer();
       }
-      if (this.redClumpCount <= 0) return;
+      if (this.redClumpCount <= 0) return true;
 
-      const transform = makeProjectionTransform();
       this.gl.useProgram(this.redClumpProgram);
       this.bindRedClumpAttributes();
       this.gl.uniform2f(this.redClumpUniforms.resolution, scene.width, scene.height);
@@ -6212,8 +7286,8 @@ function createRedClumpLayerRenderer(canvasElement) {
       );
       this.gl.uniform1f(this.redClumpUniforms.displayLuminosityBaseBoost, DISPLAY_LUMINOSITY_BASE_BOOST);
       this.gl.uniform1f(this.redClumpUniforms.displayAlphaMax, DISPLAY_ALPHA_MAX);
-      this.gl.uniform1f(this.redClumpUniforms.surfaceAlphaScale, RED_CLUMP_SURFACE_ALPHA_SCALE);
-      this.gl.uniform1f(this.redClumpUniforms.surfaceAlphaMax, RED_CLUMP_SURFACE_ALPHA_MAX);
+      this.gl.uniform1f(this.redClumpUniforms.surfaceAlphaScale, redClumpSurfaceAlphaScale());
+      this.gl.uniform1f(this.redClumpUniforms.surfaceAlphaMax, redClumpSurfaceAlphaMax());
       this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
       if (this.redClumpUsesIndexedDraw) {
         this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.redClumpIndexBuffer);
@@ -6221,6 +7295,7 @@ function createRedClumpLayerRenderer(canvasElement) {
       } else {
         this.gl.drawArrays(this.gl.TRIANGLES, 0, this.redClumpCount);
       }
+      return true;
     },
   };
 }
@@ -6805,7 +7880,9 @@ function projectCatalogItemsForCache(points, catalogDrawList, catalogStats, tran
     const coordinates = point.activeCoordinates;
     if (!coordinates) continue;
     const clusterStarLodAlpha =
-      point.kind === "clusterStar" ? scene.clusterStarLodAlphaByCluster[point.clusterIndex] || 0 : 1;
+      point.kind === "clusterStar"
+        ? clusterStarEffectiveLodAlpha(point, scene.clusterStarLodAlphaByCluster[point.clusterIndex] || 0)
+        : 1;
     if (clusterStarLodAlpha <= 0.001) continue;
 
     const x = coordinates[0];
@@ -6840,7 +7917,7 @@ function projectCatalogItemsForCache(points, catalogDrawList, catalogStats, tran
 function selectedCatalogProjectionTarget() {
   const target = state.locked || state.hovered;
   if (!target) return null;
-  return target.kind === "catalog" || target.kind === "clusterStar" ? target : null;
+  return target.kind === "catalog" || target.kind === "clusterStar" || target.kind === "eb" ? target : null;
 }
 
 function catalogCanUseFastProjectionCache(now = performance.now()) {
@@ -6867,7 +7944,10 @@ function appendCatalogItemsForGpuProjection(
 
     const item = point.drawItem;
     if (point.kind === "clusterStar") {
-      const clusterStarLodAlpha = clusterStarLodAlphaByCluster?.[point.clusterIndex] || 0;
+      const clusterStarLodAlpha = clusterStarEffectiveLodAlpha(
+        point,
+        clusterStarLodAlphaByCluster?.[point.clusterIndex] || 0,
+      );
       if (clusterStarLodAlpha <= 0.001) continue;
       item.clusterStarLodAlpha = clusterStarLodAlpha;
     } else {
@@ -6902,11 +7982,16 @@ function isRedClumpVisible(point) {
 }
 
 function isClusterStarVisible(point) {
-  return state.datasets.clusters && state.spectral.has(point.row[CS.spectral]) && point.sample <= state.density;
+  const sample = Number.isFinite(point.clusterVisibilitySample) ? point.clusterVisibilitySample : point.sample;
+  return state.datasets.clusters && state.spectral.has(point.row[CS.spectral]) && sample <= state.density;
 }
 
 function isClusterVisible() {
   return state.datasets.clusters;
+}
+
+function isEclipsingBinaryVisible() {
+  return state.datasets.eb;
 }
 
 function clusterStarLodAlphaForCoreRadius(coreRadiusPx) {
@@ -6916,6 +8001,52 @@ function clusterStarLodAlphaForCoreRadius(coreRadiusPx) {
   );
 }
 
+function clusterStarEffectiveLodAlpha(point, clusterLodAlpha) {
+  return clamp(Math.max(clusterLodAlpha || 0, point?.brightLodAlpha || 0), 0, 1);
+}
+
+function clusterStarRenderLimitForCoreRadius(coreRadiusPx, availableCount, remainingBudget) {
+  if (availableCount <= 0 || remainingBudget <= 0) return 0;
+  const resolvedLod = clusterStarLodAlphaForCoreRadius(coreRadiusPx);
+  const radiusBudget = Math.floor(
+    CLUSTER_STAR_RENDER_MIN_PER_CLUSTER +
+      Math.max(0, coreRadiusPx) * CLUSTER_STAR_RENDER_RADIUS_SCALE +
+      resolvedLod * CLUSTER_STAR_RENDER_LOD_EXTRA,
+  );
+  return Math.min(
+    availableCount,
+    remainingBudget,
+    clamp(radiusBudget, CLUSTER_STAR_RENDER_MIN_PER_CLUSTER, CLUSTER_STAR_RENDER_MAX_PER_CLUSTER),
+  );
+}
+
+function clusterStarRenderStatsForLimit(stars, renderLimit, clusterLodAlpha) {
+  const stats = { count: 0, luminosity: 0 };
+  if (!stars || renderLimit <= 0) return stats;
+  const starLimit = Math.min(stars.length, renderLimit);
+  for (let starIndex = 0; starIndex < starLimit; starIndex += 1) {
+    const point = stars[starIndex];
+    const effectiveLodAlpha = clusterStarEffectiveLodAlpha(point, clusterLodAlpha);
+    if (effectiveLodAlpha <= 0.001) continue;
+    stats.count += 1;
+    const luminosity = point?.row?.[CS.lum];
+    if (Number.isFinite(luminosity) && luminosity > 0) {
+      stats.luminosity += luminosity * effectiveLodAlpha;
+    }
+  }
+  return stats;
+}
+
+function appendClusterStarRenderListForLimit(target, stars, renderLimit, clusterLodAlpha) {
+  if (!stars || renderLimit <= 0) return;
+  const starLimit = Math.min(stars.length, renderLimit);
+  for (let starIndex = 0; starIndex < starLimit; starIndex += 1) {
+    const point = stars[starIndex];
+    if (clusterStarEffectiveLodAlpha(point, clusterLodAlpha) <= 0.001) continue;
+    target.push(point);
+  }
+}
+
 function rebuildActivePointLists() {
   if (!scene.activePointsDirty) return;
 
@@ -6923,6 +8054,7 @@ function rebuildActivePointLists() {
   scene.activeRedClump.length = 0;
   scene.activeClusterStars.length = 0;
   scene.activeClusterPulsatorStars.length = 0;
+  scene.activeEclipsingBinaries.length = 0;
   scene.activeClusters.length = 0;
   scene.activeClusterStarsByCluster.length = scene.clusters.length;
   scene.activeClusterStarCountsByCluster.length = scene.clusters.length;
@@ -6936,23 +8068,32 @@ function rebuildActivePointLists() {
     if (isCatalogVisible(point)) scene.activeCatalog.push(point);
   }
 
-  for (const point of scene.clusterStars) {
-    if (!isClusterStarVisible(point)) continue;
-    scene.activeClusterStars.push(point);
-    if (point.lightCurve) {
-      scene.activeClusterPulsatorStars.push(point);
-      continue;
+  for (const [clusterIndex, clusterStars] of scene.clusterStarsByCluster) {
+    const bucket = scene.activeClusterStarsByCluster[clusterIndex];
+    for (const point of clusterStars) {
+      if (!isClusterStarVisible(point)) continue;
+      scene.activeClusterStars.push(point);
+      if (point.lightCurve) {
+        scene.activeClusterPulsatorStars.push(point);
+        continue;
+      }
+      if (bucket) bucket.push(point);
+      scene.activeClusterStarCountsByCluster[clusterIndex] =
+        (scene.activeClusterStarCountsByCluster[clusterIndex] || 0) + 1;
     }
-    const bucket = scene.activeClusterStarsByCluster[point.clusterIndex];
-    if (bucket) bucket.push(point);
-    scene.activeClusterStarCountsByCluster[point.clusterIndex] =
-      (scene.activeClusterStarCountsByCluster[point.clusterIndex] || 0) + 1;
   }
 
   if (isClusterVisible()) {
     for (const point of scene.clusters) {
       point.activeProjected = null;
       scene.activeClusters.push(point);
+    }
+  }
+
+  if (isEclipsingBinaryVisible()) {
+    for (const point of scene.eclipsingBinaries) {
+      point.activeProjected = null;
+      scene.activeEclipsingBinaries.push(point);
     }
   }
 
@@ -7010,10 +8151,13 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
   const projectionStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
   const redStats = resetStats(scene.cachedStats.redClump);
   const catalogStats = resetStats(scene.cachedStats.catalog);
+  const ebStats = resetStats(scene.cachedStats.eclipsingBinaries);
   const redClumpDrawList = scene.redClumpDrawList;
   const redClumpSurfaceDrawList = scene.redClumpSurfaceDrawList;
   const catalogDrawList = scene.catalogDrawList;
   const clusterTargetDrawList = scene.clusterTargetDrawList;
+  const eclipsingBinaryDrawList = scene.eclipsingBinaryDrawList;
+  const clusterStarRenderList = scene.activeClusterStarRenderList;
   const projectionTransform = makeProjectionTransform();
   const redClumpProjectsInShader = Boolean(scene.redClumpRenderer?.projectsInShader);
   const clusterStarsProjectInShader = Boolean(scene.catalogStaticRenderer?.projectsClusterStarsInShader);
@@ -7032,14 +8176,21 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
   redClumpDrawList.length = 0;
   redClumpSurfaceDrawList.length = 0;
   catalogDrawList.length = 0;
+  eclipsingBinaryDrawList.length = 0;
+  clusterStarRenderList.length = 0;
   scene.catalogDrawListScreenProjected = !fastCatalogProjection;
   scene.catalogProjectionFastPending = fastCatalogProjection;
   clusterTargetDrawList.length = 0;
   scene.activeClusterStarRenderCount = 0;
   scene.clusterStarLodAlphaByCluster.length = scene.clusters.length;
   scene.clusterStarLodAlphaByCluster.fill(0);
+  scene.clusterStarRenderLimitByCluster.length = scene.clusters.length;
+  scene.clusterStarRenderLimitByCluster.fill(0);
+  scene.clusterStarResolvedLuminosityFractionByCluster.length = scene.clusters.length;
+  scene.clusterStarResolvedLuminosityFractionByCluster.fill(0);
   rebuildActivePointLists();
   rebuildCoordinateCache();
+  let clusterStarRenderBudgetRemaining = CLUSTER_STAR_RENDER_GLOBAL_BUDGET;
 
   if (state.datasets.redclump) {
     for (const point of scene.activeRedClump) {
@@ -7152,10 +8303,45 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
     item.clusterStarLodAlpha = clusterStarLodAlpha;
     if (!withinViewport(projected, item.screenRadius + 24)) continue;
     scene.clusterStarLodAlphaByCluster[point.index] = clusterStarLodAlpha;
-    if (clusterStarLodAlpha > 0.001) {
-      scene.activeClusterStarRenderCount += scene.activeClusterStarCountsByCluster[point.index] || 0;
+    const clusterStarBucket = scene.activeClusterStarsByCluster[point.index];
+    const availableClusterStars = scene.activeClusterStarCountsByCluster[point.index] || 0;
+    const renderLimit = clusterStarRenderLimitForCoreRadius(
+      physicalRadius,
+      availableClusterStars,
+      clusterStarRenderBudgetRemaining,
+    );
+    scene.clusterStarRenderLimitByCluster[point.index] = renderLimit;
+    if (renderLimit > 0) {
+      const renderStats = clusterStarRenderStatsForLimit(clusterStarBucket, renderLimit, clusterStarLodAlpha);
+      clusterStarRenderBudgetRemaining -= renderStats.count;
+      scene.activeClusterStarRenderCount += renderStats.count;
+      scene.clusterStarResolvedLuminosityFractionByCluster[point.index] =
+        point.renderedStarLuminosity > 0
+          ? clamp(renderStats.luminosity / point.renderedStarLuminosity, 0, 1)
+          : 0;
+      if (!clusterStarsProjectInShader) {
+        appendClusterStarRenderListForLimit(
+          clusterStarRenderList,
+          clusterStarBucket,
+          renderLimit,
+          clusterStarLodAlpha,
+        );
+      }
     }
     clusterTargetDrawList.push(item);
+  }
+
+  for (const point of scene.activeEclipsingBinaries) {
+    const coordinates = point.activeCoordinates || coordinatesForPoint(point);
+    const projected = project(point.projected, coordinates[0], coordinates[1], coordinates[2]);
+    point.activeProjected = projected;
+    const item = point.drawItem;
+    item.baseRadius = starRadiusFromUnitAtPerspective(point.radiusUnit, projected.perspective, catalogRadiusZoomSize);
+    item.alphaUnit = pointAlphaUnitFromBaseAtPerspective(point.alphaBaseUnit, projected.perspective);
+    item.currentRadius = starRadiusFromBase(item.baseRadius, 1, PULSATOR_BASE_RADIUS_FACTOR, 26);
+    if (!withinViewport(projected, item.currentRadius + 18)) continue;
+    eclipsingBinaryDrawList.push(item);
+    updateStats(ebStats, projected.z);
   }
 
   if (clusterStarsProjectInShader) {
@@ -7179,7 +8365,7 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
     }
   } else {
     projectCatalogItemsForCache(
-      scene.activeClusterStars,
+      clusterStarRenderList,
       catalogDrawList,
       catalogStats,
       projectionTransform,
@@ -7407,6 +8593,553 @@ function drawSkyGridLine(config, fixedAxis, fixedValue, label, bounds, reference
   if (labelCandidate) drawSkyGridLabel(label, labelCandidate, config, placedLabels, context);
 }
 
+function projectAnnotationVector(vector, reference, project) {
+  const coordinates = coordinatesForSkyGridVector(vector, reference);
+  if (!coordinates || coordinates.some((value) => !Number.isFinite(value))) return null;
+  const point = project(coordinates[0], coordinates[1], coordinates[2]);
+  return Number.isFinite(point.x) && Number.isFinite(point.y) ? point : null;
+}
+
+function drawAnnotationPath(context, vectors, reference, project, color, alpha, lineDash = []) {
+  let started = false;
+  let hasSegment = false;
+  context.beginPath();
+  for (const vector of vectors) {
+    const point = projectAnnotationVector(vector, reference, project);
+    if (!point) {
+      started = false;
+      continue;
+    }
+    if (!started) {
+      context.moveTo(point.x, point.y);
+      started = true;
+    } else {
+      context.lineTo(point.x, point.y);
+      hasSegment = true;
+    }
+  }
+  if (!hasSegment) return;
+  context.strokeStyle = `rgba(${color}, ${alpha})`;
+  context.setLineDash(lineDash);
+  context.stroke();
+  context.setLineDash([]);
+}
+
+function drawAnnotationLabel(context, label, vector, reference, project, color, options = {}) {
+  const point = projectAnnotationVector(vector, reference, project);
+  if (!point || !withinViewport(point, 120)) return;
+  const fontSize = clamp(Number(options.fontSizePx) || 11, 9, 18);
+  const fontWeight = Number.isFinite(Number(options.fontWeight)) ? Number(options.fontWeight) : 700;
+  const alpha = Number.isFinite(Number(options.alpha)) ? clamp(Number(options.alpha), 0.1, 1) : 0.96;
+  context.save();
+  context.font = `${fontWeight} ${fontSize}px Inter, system-ui, sans-serif`;
+  const metrics = context.measureText(label);
+  const x = clamp(point.x, ANNOTATION_LABEL_MARGIN + metrics.width * 0.5, scene.width - ANNOTATION_LABEL_MARGIN - metrics.width * 0.5);
+  const y = clamp(point.y - fontSize - 4, ANNOTATION_LABEL_MARGIN, scene.height - ANNOTATION_LABEL_MARGIN);
+  const leaderPoint = options.leaderVector ? projectAnnotationVector(options.leaderVector, reference, project) : null;
+  if (leaderPoint && Math.hypot(leaderPoint.x - x, leaderPoint.y - y) > fontSize * 1.4) {
+    context.lineWidth = 1;
+    context.strokeStyle = `rgba(${color}, ${Math.min(0.72, alpha * 0.7)})`;
+    context.setLineDash([4, 5]);
+    context.beginPath();
+    context.moveTo(leaderPoint.x, leaderPoint.y);
+    context.lineTo(x, y);
+    context.stroke();
+    context.setLineDash([]);
+  }
+  context.lineWidth = Math.max(3, fontSize * 0.25);
+  context.strokeStyle = "rgba(0, 0, 0, 0.84)";
+  context.fillStyle = `rgba(${color}, ${alpha})`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.strokeText(label, x, y);
+  context.fillText(label, x, y);
+  context.restore();
+}
+
+function annotationFallbackDistanceError(row, population) {
+  const distance = row[IDX.distance];
+  const explicitError = Number(row[IDX.distanceError]);
+  if (Number.isFinite(explicitError) && explicitError > 0) return explicitError;
+  return distanceErrorFromModulusError(distance, population.fallbackModulusError);
+}
+
+function annotationFitSample(point, population) {
+  const vector = point.baseCoordinates?.galacticVector || point.coordinates?.galacticVector;
+  const distance = point.row?.[IDX.distance];
+  if (!vector || !Number.isFinite(distance) || distance <= 0) return null;
+  const sigma = Math.max(
+    ANNOTATION_FIT_MATRIX_JITTER,
+    annotationFallbackDistanceError(point.row, population),
+    distance * 0.001,
+  );
+  return {
+    vector,
+    losUnit: normalizeVector(vector),
+    sigma,
+  };
+}
+
+function meanVectorForSamples(samples) {
+  if (!samples.length) return [0, 0, 0];
+  const total = samples.reduce(
+    (sum, sample) => [sum[0] + sample.vector[0], sum[1] + sample.vector[1], sum[2] + sample.vector[2]],
+    [0, 0, 0],
+  );
+  return total.map((component) => component / samples.length);
+}
+
+function robustInitialAnnotationMean(samples) {
+  const median = [
+    medianNumber(samples.map((sample) => sample.vector[0])),
+    medianNumber(samples.map((sample) => sample.vector[1])),
+    medianNumber(samples.map((sample) => sample.vector[2])),
+  ];
+  const distances = samples.map((sample) => vectorLength(subtractVectors(sample.vector, median)));
+  const cutoff = quantileNumber(distances, ANNOTATION_FIT_TRIM_FRACTION, Infinity);
+  const trimmed = samples.filter((sample, index) => distances[index] <= cutoff);
+  return meanVectorForSamples(trimmed.length ? trimmed : samples);
+}
+
+function measurementCovarianceForSample(sample) {
+  return matrix3Scale(matrix3Outer(sample.losUnit), sample.sigma * sample.sigma);
+}
+
+function observedCovarianceForSamples(samples, mean) {
+  let covariance = matrix3Zero();
+  let measurement = matrix3Zero();
+  for (const sample of samples) {
+    const delta = subtractVectors(sample.vector, mean);
+    covariance = matrix3Add(covariance, matrix3Outer(delta));
+    measurement = matrix3Add(measurement, measurementCovarianceForSample(sample));
+  }
+  const scale = 1 / Math.max(1, samples.length);
+  return matrix3PositiveSemidefinite(
+    matrix3Subtract(matrix3Scale(covariance, scale), matrix3Scale(measurement, scale)),
+  );
+}
+
+function invertCovarianceWithJitter(matrix) {
+  return (
+    matrix3Inverse(matrix) ||
+    matrix3Inverse(matrix3Add(matrix, matrix3Identity(ANNOTATION_FIT_MATRIX_JITTER))) ||
+    matrix3Inverse(matrix3Identity(1))
+  );
+}
+
+function robustErrorsInVariablesFit(samples) {
+  if (samples.length < ANNOTATION_FIT_MIN_POINTS) return null;
+  let mean = robustInitialAnnotationMean(samples);
+  let covariance = observedCovarianceForSamples(samples, mean);
+  const dimension = 3;
+
+  for (let iteration = 0; iteration < ANNOTATION_FIT_MAX_ITERATIONS; iteration += 1) {
+    const posteriors = [];
+    let weightSum = 0;
+    let nextMean = [0, 0, 0];
+
+    for (const sample of samples) {
+      const measurement = measurementCovarianceForSample(sample);
+      const totalCovariance = matrix3PositiveSemidefinite(
+        matrix3Add(covariance, measurement),
+        ANNOTATION_FIT_MATRIX_JITTER,
+      );
+      const inverseTotal = invertCovarianceWithJitter(totalCovariance);
+      const delta = subtractVectors(sample.vector, mean);
+      const mahalanobis = Math.max(0, matrix3QuadraticForm(delta, inverseTotal));
+      const robustWeight = (ANNOTATION_FIT_STUDENT_T_DOF + dimension) /
+        (ANNOTATION_FIT_STUDENT_T_DOF + mahalanobis);
+      const kalmanGain = matrix3Mul(covariance, inverseTotal);
+      const posteriorMean = addVectors(mean, matrix3MulVector(kalmanGain, delta));
+      const posteriorCovariance = matrix3PositiveSemidefinite(
+        matrix3Subtract(covariance, matrix3Mul(kalmanGain, covariance)),
+        ANNOTATION_FIT_MATRIX_JITTER,
+      );
+      posteriors.push({ weight: robustWeight, mean: posteriorMean, covariance: posteriorCovariance });
+      weightSum += robustWeight;
+      nextMean = addVectors(nextMean, scaleVector(posteriorMean, robustWeight));
+    }
+
+    if (weightSum <= 0) return null;
+    nextMean = scaleVector(nextMean, 1 / weightSum);
+
+    let nextCovariance = matrix3Zero();
+    for (const posterior of posteriors) {
+      const delta = subtractVectors(posterior.mean, nextMean);
+      nextCovariance = matrix3Add(
+        nextCovariance,
+        matrix3Scale(matrix3Add(posterior.covariance, matrix3Outer(delta)), posterior.weight),
+      );
+    }
+    nextCovariance = matrix3PositiveSemidefinite(matrix3Scale(nextCovariance, 1 / weightSum));
+
+    const meanShift = vectorLength(subtractVectors(nextMean, mean));
+    mean = nextMean;
+    covariance = nextCovariance;
+    if (meanShift < 0.0005) break;
+  }
+
+  const eigen = symmetricEigenDecomposition3(covariance);
+  return {
+    centerVector: mean,
+    axes: eigen.map((item) => item.vector),
+    axesKpc: eigen.map((item) => Math.sqrt(Math.max(ANNOTATION_FIT_EIGEN_FLOOR_KPC2, item.value)) * ANNOTATION_FIT_CONFIDENCE_RADIUS),
+  };
+}
+
+function normalizedAnnotationFitVector(vector) {
+  if (!Array.isArray(vector) || vector.length < 3) return null;
+  const values = vector.slice(0, 3).map(Number);
+  return values.every(Number.isFinite) ? values : null;
+}
+
+function normalizedAnnotationFitAxes(axes) {
+  if (!Array.isArray(axes) || axes.length < 3) return null;
+  const normalized = axes.slice(0, 3).map(normalizedAnnotationFitVector);
+  return normalized.every(Boolean) ? normalized : null;
+}
+
+function normalizedAnnotationFitRadii(values) {
+  if (!Array.isArray(values) || values.length < 3) return null;
+  const radii = values.slice(0, 3).map(Number);
+  return radii.every((value) => Number.isFinite(value) && value > 0) ? radii : null;
+}
+
+function normalizedAnnotationSegments(segments) {
+  if (!Array.isArray(segments)) return null;
+  const normalized = [];
+  for (const segment of segments) {
+    if (!Array.isArray(segment) || segment.length < 2) continue;
+    const vectors = segment.map(normalizedAnnotationFitVector).filter(Boolean);
+    if (vectors.length >= 2) normalized.push(vectors);
+  }
+  return normalized.length ? normalized : null;
+}
+
+function normalizedAnnotationSegmentGroups(segmentGroups) {
+  if (!segmentGroups || typeof segmentGroups !== "object") return null;
+  const normalized = {};
+  for (const [key, segments] of Object.entries(segmentGroups)) {
+    const group = normalizedAnnotationSegments(segments);
+    if (group) normalized[key] = group;
+  }
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function baseAnnotationSpec(fitRow, population, populationIndex, cloud) {
+  const roleLineDash = fitRow.componentRole === "secondary"
+    ? ANNOTATION_SECONDARY_COMPONENT_LINE_DASH
+    : fitRow.componentRole === "main"
+      ? []
+      : null;
+  return {
+    ...fitRow,
+    id: fitRow.id || `${population.id}-${cloud.id}`,
+    populationId: population.id,
+    populationLabel: population.label,
+    populationIndex,
+    cloudId: cloud.id,
+    cloudLabel: cloud.label,
+    label: fitRow.label === null ? "" : fitRow.label || `${population.label} ${cloud.label}`,
+    color: fitRow.color || population.color,
+    lineDash: roleLineDash || (Array.isArray(fitRow.lineDash) ? fitRow.lineDash : cloud.lineDash),
+    count: Number.isFinite(Number(fitRow.count)) ? Number(fitRow.count) : 0,
+  };
+}
+
+function annotationFitTargetVector(spec) {
+  return spec.targetVector || spec.centerVector || spec.labelAnchorVector || spec.labelVector || null;
+}
+
+function attachAnnotationTarget(spec) {
+  if (!spec || spec.kind === "featureLabel") return spec;
+  const vector = annotationFitTargetVector(spec);
+  if (!vector) return spec;
+  spec.target = {
+    kind: "annotation",
+    id: spec.id,
+    label: spec.label || "Annotation component",
+    annotationFit: spec,
+    coordinates: coordinatesFromGalacticVector(vector),
+    activeCoordinates: null,
+    activeProjected: null,
+    projected: null,
+    currentDistance: vectorLength(vector),
+  };
+  return spec;
+}
+
+function annotationTargetsForFits(fits) {
+  return (Array.isArray(fits) ? fits : []).map((fit) => fit.target).filter(Boolean);
+}
+
+function featureAnnotationSpec(fitRow, population, populationIndex, cloud) {
+  return {
+    ...baseAnnotationSpec(fitRow, population, populationIndex, cloud),
+    color: fitRow.featureColor || fitRow.annotationColor || FEATURE_ANNOTATION_COLOR,
+  };
+}
+
+function precomputedAtlasAnnotationFits(annotationFits) {
+  const fitRows = annotationFits?.structures || annotationFits?.fits;
+  if (!Array.isArray(fitRows)) return null;
+  const fits = [];
+  for (const fitRow of fitRows) {
+    const populationIndex = ANNOTATION_FIT_POPULATIONS.findIndex((population) => population.id === fitRow?.populationId);
+    const population = ANNOTATION_FIT_POPULATIONS[populationIndex];
+    const cloud = ANNOTATION_FIT_CLOUDS.find((item) => item.id === fitRow?.cloudId);
+    if (!population || !cloud) continue;
+    if (fitRow?.type === "featureLabel") {
+      const labelVector = normalizedAnnotationFitVector(fitRow.labelVector);
+      if (!labelVector) continue;
+      fits.push({
+        ...featureAnnotationSpec(fitRow, population, populationIndex, cloud),
+        kind: "featureLabel",
+        labelVector,
+        fontSizePx: Number.isFinite(Number(fitRow.fontSizePx)) ? Number(fitRow.fontSizePx) : 11,
+        fontWeight: Number.isFinite(Number(fitRow.fontWeight)) ? Number(fitRow.fontWeight) : 700,
+      });
+      continue;
+    }
+    if (
+      fitRow?.type === "plane" ||
+      fitRow?.type === "segments" ||
+      fitRow?.type === "contours" ||
+      fitRow?.type === "isosurface"
+    ) {
+      const segments = normalizedAnnotationSegments(fitRow.segments);
+      const segmentGroups = normalizedAnnotationSegmentGroups(fitRow.segmentGroups);
+      const labelVector = normalizedAnnotationFitVector(fitRow.labelVector);
+      if (!segments || !labelVector) continue;
+      const labelAnchorVector = normalizedAnnotationFitVector(fitRow.labelAnchorVector);
+      const targetVector = normalizedAnnotationFitVector(fitRow.targetVector);
+      fits.push(attachAnnotationTarget({
+        ...baseAnnotationSpec(fitRow, population, populationIndex, cloud),
+        kind: "fitPlane",
+        segments,
+        segmentGroups,
+        labelVector,
+        labelAnchorVector,
+        targetVector,
+      }));
+      continue;
+    }
+    const centerVector = normalizedAnnotationFitVector(fitRow?.centerVector);
+    const axes = normalizedAnnotationFitAxes(fitRow?.axes);
+    const axesKpc = normalizedAnnotationFitRadii(fitRow?.axesKpc);
+    if (!centerVector || !axes || !axesKpc) continue;
+    const targetVector = normalizedAnnotationFitVector(fitRow.targetVector);
+    fits.push(attachAnnotationTarget({
+      ...baseAnnotationSpec(fitRow, population, populationIndex, cloud),
+      kind: "fitEllipsoid",
+      centerVector,
+      axes,
+      axesKpc,
+      targetVector: targetVector || centerVector,
+    }));
+  }
+  return fits.length ? fits : null;
+}
+
+function buildAtlasAnnotationFits() {
+  const fits = [];
+  for (let populationIndex = 0; populationIndex < ANNOTATION_FIT_POPULATIONS.length; populationIndex += 1) {
+    const population = ANNOTATION_FIT_POPULATIONS[populationIndex];
+    const datasetIndexes = new Set(population.datasetIndexes);
+    for (const cloud of ANNOTATION_FIT_CLOUDS) {
+      const samples = scene.catalog
+        .filter((point) => datasetIndexes.has(point.row?.[IDX.dataset]) && point.row?.[IDX.location] === cloud.locationIndex)
+        .map((point) => annotationFitSample(point, population))
+        .filter(Boolean);
+      const fit = robustErrorsInVariablesFit(samples);
+      if (!fit) continue;
+      fits.push(attachAnnotationTarget({
+        ...fit,
+        id: `${population.id}-${cloud.id}`,
+        kind: "fitEllipsoid",
+        populationId: population.id,
+        populationLabel: population.label,
+        populationIndex,
+        cloudId: cloud.id,
+        cloudLabel: cloud.label,
+        label: `${population.label} ${cloud.label}`,
+        color: population.color,
+        lineDash: cloud.lineDash,
+        count: samples.length,
+      }));
+    }
+  }
+  return fits;
+}
+
+function ellipsoidLoopVectors(centerVector, axes, radii, firstAxis, secondAxis) {
+  const vectors = [];
+  for (let index = 0; index <= ANNOTATION_ELLIPSE_SEGMENTS; index += 1) {
+    const angle = (index / ANNOTATION_ELLIPSE_SEGMENTS) * Math.PI * 2;
+    const firstOffset = scaleVector(axes[firstAxis], Math.cos(angle) * radii[firstAxis]);
+    const secondOffset = scaleVector(axes[secondAxis], Math.sin(angle) * radii[secondAxis]);
+    vectors.push(addVectors(centerVector, addVectors(firstOffset, secondOffset)));
+  }
+  return vectors;
+}
+
+function annotationFitLabelVector(spec) {
+  if (spec.labelVector) return spec.labelVector;
+  const major = spec.axes[0] || [1, 0, 0];
+  const minor = spec.axes[1] || [0, 1, 0];
+  const cloudOffset = spec.cloudId === "smc" ? -0.2 : 0.2;
+  const populationOffset = (spec.populationIndex - 1) * 0.28;
+  return addVectors(
+    spec.centerVector,
+    addVectors(
+      scaleVector(major, spec.axesKpc[0] * (0.68 + cloudOffset)),
+      scaleVector(minor, spec.axesKpc[1] * populationOffset),
+    ),
+  );
+}
+
+function activeAnnotationFit() {
+  const target = state.locked || state.hovered;
+  return target?.kind === "annotation" ? target.annotationFit : null;
+}
+
+function annotationFitIsActive(spec) {
+  return activeAnnotationFit() === spec;
+}
+
+function annotationFitAlpha(spec, fallback = 0.82) {
+  const active = annotationFitIsActive(spec);
+  const baseAlpha = Number.isFinite(Number(spec.alpha)) ? Number(spec.alpha) : fallback;
+  const hoverAlpha = Number.isFinite(Number(spec.hoverAlpha)) ? Number(spec.hoverAlpha) : Math.min(1, baseAlpha + 0.18);
+  return active ? hoverAlpha : baseAlpha;
+}
+
+function annotationFitLineWidth(spec, fallback = 1.15) {
+  const active = annotationFitIsActive(spec);
+  const baseWidth = Number.isFinite(Number(spec.lineWidth)) ? Number(spec.lineWidth) : fallback;
+  const hoverWidth = Number.isFinite(Number(spec.hoverLineWidth)) ? Number(spec.hoverLineWidth) : Math.max(baseWidth + 0.8, baseWidth * 1.9);
+  return active ? hoverWidth : baseWidth;
+}
+
+function drawAnnotationFitEllipsoid(spec, context, reference, project) {
+  const centerVector = spec.centerVector;
+  const axes = spec.axes;
+  const lineDash = spec.lineDash || [];
+  const active = annotationFitIsActive(spec);
+  const alpha = annotationFitAlpha(spec, 0.82);
+  context.lineWidth = annotationFitLineWidth(spec, 1.15);
+  for (const pair of [
+    [0, 1],
+    [0, 2],
+    [1, 2],
+  ]) {
+    drawAnnotationPath(
+      context,
+      ellipsoidLoopVectors(centerVector, axes, spec.axesKpc, pair[0], pair[1]),
+      reference,
+      project,
+      spec.color,
+      alpha,
+      lineDash,
+    );
+  }
+  context.lineWidth = active ? 1.25 : 0.85;
+  for (let index = 0; index < axes.length; index += 1) {
+    drawAnnotationPath(
+      context,
+      [
+        addScaledVector(centerVector, axes[index], -spec.axesKpc[index]),
+        addScaledVector(centerVector, axes[index], spec.axesKpc[index]),
+      ],
+      reference,
+      project,
+      spec.color,
+      active ? 0.68 : 0.42,
+      [2, 5],
+    );
+  }
+  if (spec.label) {
+    drawAnnotationLabel(context, spec.label, annotationFitLabelVector(spec), reference, project, spec.color, {
+      alpha: active ? 1 : undefined,
+    });
+  }
+}
+
+function drawAnnotationFitPlane(spec, context, reference, project) {
+  const lineDash = spec.lineDash || [];
+  const active = annotationFitIsActive(spec);
+  const alpha = annotationFitAlpha(spec, 0.76);
+  context.lineWidth = annotationFitLineWidth(spec, 1.05);
+  const midplaneSegments = spec.segmentGroups?.midplane || spec.segments;
+  for (const segment of midplaneSegments) {
+    drawAnnotationPath(context, segment, reference, project, spec.color, alpha, lineDash);
+  }
+  if (spec.segmentGroups?.thickness?.length) {
+    context.lineWidth = Math.max(0.65, annotationFitLineWidth(spec, 1.05) * (active ? 0.62 : 0.45));
+    for (const segment of spec.segmentGroups.thickness) {
+      drawAnnotationPath(context, segment, reference, project, spec.color, alpha * (active ? 0.72 : 0.38), [3, 7]);
+    }
+  }
+  if (spec.label) {
+    drawAnnotationLabel(context, spec.label, spec.labelVector, reference, project, spec.color, {
+      alpha: active ? 1 : undefined,
+      leaderVector: spec.labelAnchorVector,
+    });
+  }
+}
+
+function annotationPopulationVisible(populationId) {
+  if (populationId === "cepheids") return cepheidDatasetsVisible();
+  if (populationId === "rrlyrae" || populationId === "miras") return Boolean(state.datasets[populationId]);
+  return true;
+}
+
+function visibleAnnotationFits() {
+  const enabledFits = scene.annotationFits.filter(
+    (fit) => fit.kind !== "featureLabel" && annotationPopulationVisible(fit.populationId),
+  );
+  const preset = activeDatasetPreset();
+  if (!preset) return enabledFits;
+  if (PULSATOR_PRESETS.includes(preset)) {
+    return enabledFits.filter((fit) => fit.populationId === preset);
+  }
+  return [];
+}
+
+function visibleFeatureAnnotations() {
+  return scene.annotationFits.filter((fit) => fit.kind === "featureLabel");
+}
+
+function drawAtlasFitAnnotations() {
+  if (!state.annotationsVisible && !state.featureAnnotationsVisible) return;
+  const reference = activeCoordinateReference().context;
+  if (!reference) return;
+  const context = selectionCtx || ctx;
+  const project = makeProjector();
+  context.save();
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.font = "11px Inter, system-ui, sans-serif";
+  if (state.annotationsVisible) {
+    const fits = visibleAnnotationFits();
+    const activeFit = activeAnnotationFit();
+    const orderedFits = activeFit ? fits.filter((spec) => spec !== activeFit).concat(fits.filter((spec) => spec === activeFit)) : fits;
+    for (const spec of orderedFits) {
+      if (spec.kind === "fitPlane") {
+        drawAnnotationFitPlane(spec, context, reference, project);
+      } else {
+        drawAnnotationFitEllipsoid(spec, context, reference, project);
+      }
+    }
+  }
+  if (state.featureAnnotationsVisible) {
+    for (const spec of visibleFeatureAnnotations()) {
+      drawAnnotationLabel(context, spec.label, spec.labelVector, reference, project, spec.color, spec);
+    }
+  }
+  context.restore();
+}
+
 function drawSkyCoordinateGrid(config, placedLabels, context) {
   const reference = activeCoordinateReference().context;
   const bounds = scene.skyGridBounds?.[config.id];
@@ -7538,8 +9271,16 @@ function drawClusterGlows() {
         )
       : 0;
     const clusterStarLodAlpha = item.clusterStarLodAlpha || 0;
+    const resolvedLuminosityFraction =
+      scene.clusterStarResolvedLuminosityFractionByCluster[item.point.index] || 0;
+    const unresolvedRenderedLightScale = clamp(
+      1 - resolvedLuminosityFraction * CLUSTER_STAR_RESOLVED_GLOW_SUBTRACTION,
+      0.28,
+      1,
+    );
     const collapsedStarFraction =
-      CLUSTER_STAR_RESOLVED_GLOW_FLOOR + (1 - CLUSTER_STAR_RESOLVED_GLOW_FLOOR) * (1 - clusterStarLodAlpha);
+      (CLUSTER_STAR_RESOLVED_GLOW_FLOOR + (1 - CLUSTER_STAR_RESOLVED_GLOW_FLOOR) * (1 - clusterStarLodAlpha)) *
+      unresolvedRenderedLightScale;
     const collapsedStarAlpha = hasCollapsedStarGlow
       ? Math.min(
           CLUSTER_STAR_COLLAPSED_GLOW_ALPHA_MAX,
@@ -7587,25 +9328,36 @@ function drawRedClumpGpu() {
   const renderer = scene.redClumpRenderer;
   if (!renderer) return false;
 
-  renderer.drawRedClump(normalizedRgbFromCssColor(scene.spectralClasses[4].color));
-  return true;
+  return renderer.drawRedClump(normalizedRgbFromCssColor(scene.spectralClasses[4].color));
+}
+
+function redClumpRenderVolumeSource() {
+  return RED_CLUMP_VOLUME_ANALYSIS_ENABLED ? scene.redClumpVolume : [];
+}
+
+function redClumpRenderVolumeVertexCount() {
+  return redClumpRenderVolumeSource().length;
 }
 
 function redClumpStaticSignature() {
-  const surfaceCount = scene.redClumpRenderer?.projectsInShader
-    ? scene.redClumpSurface.length
-    : scene.redClumpSurfaceDrawList.length;
+  const renderCount = redClumpVolumeEnabled()
+    ? redClumpRenderVolumeVertexCount()
+    : scene.redClumpRenderer?.projectsInShader
+      ? scene.redClumpSurface.length
+      : scene.redClumpSurfaceDrawList.length;
   return [
     scene.width,
     scene.height,
     scene.dpr,
-    surfaceCount,
+    renderCount,
+    state.redClumpMode,
     state.density,
     redClumpRenderExposureValue().toFixed(6),
   ].join("|");
 }
 
 function redClumpSurfaceRenderCount() {
+  if (redClumpVolumeEnabled()) return redClumpRenderVolumeVertexCount();
   return scene.redClumpRenderer?.projectsInShader
     ? scene.redClumpSurface.length
     : scene.redClumpSurfaceDrawList.length;
@@ -7613,20 +9365,50 @@ function redClumpSurfaceRenderCount() {
 
 function drawRedClumpSurfaceToContext(context) {
   context.save();
-  context.globalCompositeOperation = "source-over";
   const color = hexToRgb(scene.spectralClasses[4].color);
 
-  for (const item of scene.redClumpSurfaceDrawList) {
-    const alpha = updateRedClumpSurfaceAlphaCache(item);
-    if (alpha <= 0.001) continue;
-    context.fillStyle = rgbaFromRgb(color, alpha);
-    context.beginPath();
-    context.moveTo(item.projected[0].x, item.projected[0].y);
-    for (let index = 1; index < item.projected.length; index += 1) {
-      context.lineTo(item.projected[index].x, item.projected[index].y);
+  if (redClumpVolumeEnabled()) {
+    context.globalCompositeOperation = "source-over";
+    const transform = makeProjectionTransform();
+    const exposure = Math.max(0.02, redClumpRenderExposureValue() * 0.72);
+    const voxelRadiusKpc = RED_CLUMP_VOLUME_GRID_SPACING_KPC * RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE * 0.5;
+
+    for (const voxel of redClumpRenderVolumeSource()) {
+      if (voxel.sample > state.density) continue;
+      const coordinates = voxel.activeCoordinates || coordinatesForPoint(voxel);
+      const projected = projectOffsetWithTransform(coordinates[0], coordinates[1], coordinates[2], transform);
+      projected.x += scene.centerX;
+      projected.y += scene.centerY;
+      const radius = clamp(voxelRadiusKpc * transform.scale * projected.perspective, 1.2, 30);
+      if (!withinViewport(projected, radius + 6)) continue;
+      const alpha = clamp(
+        exposure * RED_CLUMP_VOLUME_ALPHA_SCALE * voxel.edgeAlpha * voxel.densityAlpha * voxel.weight,
+        0,
+        RED_CLUMP_VOLUME_ALPHA_MAX,
+      );
+      if (alpha <= 0.001) continue;
+      const gradient = context.createRadialGradient(projected.x, projected.y, 0, projected.x, projected.y, radius);
+      gradient.addColorStop(0, rgbaFromRgb(color, alpha));
+      gradient.addColorStop(0.72, rgbaFromRgb(color, alpha * 0.42));
+      gradient.addColorStop(1, rgbaFromRgb(color, 0));
+      context.fillStyle = gradient;
+      drawDiscOnContext(context, projected.x, projected.y, radius);
     }
-    context.closePath();
-    context.fill();
+  } else {
+    context.globalCompositeOperation = "source-over";
+
+    for (const item of scene.redClumpSurfaceDrawList) {
+      const alpha = updateRedClumpSurfaceAlphaCache(item);
+      if (alpha <= 0.001) continue;
+      context.fillStyle = rgbaFromRgb(color, alpha);
+      context.beginPath();
+      context.moveTo(item.projected[0].x, item.projected[0].y);
+      for (let index = 1; index < item.projected.length; index += 1) {
+        context.lineTo(item.projected[index].x, item.projected[index].y);
+      }
+      context.closePath();
+      context.fill();
+    }
   }
 
   context.restore();
@@ -7636,8 +9418,7 @@ function rebuildRedClumpStaticLayerGpu() {
   const renderer = scene.redClumpRenderer;
   if (!renderer) return false;
 
-  renderer.drawRedClump(normalizedRgbFromCssColor(scene.spectralClasses[4].color));
-  return true;
+  return renderer.drawRedClump(normalizedRgbFromCssColor(scene.spectralClasses[4].color));
 }
 
 function rebuildRedClumpStaticLayer() {
@@ -7730,6 +9511,23 @@ function starRadiusFromBase(baseRadius, areaPulse = 1, radiusFactor = 1, maxRadi
   return starRadiusFromRawBase(rawStarRadiusBaseFromBase(baseRadius, radiusFactor), areaPulse, maxRadius);
 }
 
+function clusterStarRadiusCapForClusterIndex(clusterIndex) {
+  const clusterItem = scene.clusters[clusterIndex]?.drawItem;
+  const clusterCap = clusterItem
+    ? Math.max(CLUSTER_STAR_POINT_RADIUS_MIN, clusterItem.screenRadius * CLUSTER_STAR_POINT_RADIUS_CLUSTER_FRACTION)
+    : CLUSTER_STAR_POINT_RADIUS_MAX;
+  return clamp(clusterCap, CLUSTER_STAR_POINT_RADIUS_MIN, CLUSTER_STAR_POINT_RADIUS_MAX);
+}
+
+function clusterStarRadiusCapForItem(item) {
+  return clusterStarRadiusCapForClusterIndex(item.point.clusterIndex);
+}
+
+function clusterStarCappedRadius(item, radius) {
+  if (item.point.kind !== "clusterStar") return radius;
+  return clamp(radius, CLUSTER_STAR_POINT_RADIUS_MIN, clusterStarRadiusCapForItem(item));
+}
+
 function starRadius(point, projected, areaPulse = 1) {
   return starRadiusFromBase(
     starRadiusFromUnitAtPerspective(point.radiusUnit, projected.perspective),
@@ -7769,10 +9567,11 @@ function catalogDeepZoomVisualRadiusAtZoom(point, projected, zoom = state.zoom, 
 }
 
 function catalogRenderVisualRadius(item, areaPulse = 1) {
-  if (item.point === state.locked) {
-    return catalogDeepZoomVisualRadiusAtZoom(item.point, item.projected, state.zoom, areaPulse);
-  }
-  return starRadiusFromBase(item.baseRadius, areaPulse, starRadiusFactorForPoint(item.point));
+  const radius =
+    item.point === state.locked
+      ? catalogDeepZoomVisualRadiusAtZoom(item.point, item.projected, state.zoom, areaPulse)
+      : starRadiusFromBase(item.baseRadius, areaPulse, starRadiusFactorForPoint(item.point));
+  return clusterStarCappedRadius(item, radius);
 }
 
 function pulseSafeAlphaForPoint(point, lightCurve = null) {
@@ -7901,11 +9700,13 @@ function updateCatalogStaticStyle(item) {
   const radiusFactor = starRadiusFactorForPoint(item.point);
   const lodAlpha = catalogItemLodAlpha(item);
   const pulsatorPreset = currentPulsatorPreset();
+  const clusterRadiusCap = item.point.kind === "clusterStar" ? clusterStarRadiusCapForItem(item) : null;
   if (
     item.staticBaseRadius !== item.baseRadius ||
     item.staticAlphaUnit !== item.alphaUnit ||
     item.staticLodAlpha !== lodAlpha ||
     item.staticRadiusFactor !== radiusFactor ||
+    item.staticClusterRadiusCap !== clusterRadiusCap ||
     item.staticRadiusScale !== state.radiusScale ||
     item.staticExposure !== datasetExposureForPoint(item.point) ||
     item.staticLightCurve !== item.point.lightCurve ||
@@ -7916,13 +9717,14 @@ function updateCatalogStaticStyle(item) {
     item.staticAlphaUnit = item.alphaUnit;
     item.staticLodAlpha = lodAlpha;
     item.staticRadiusFactor = radiusFactor;
+    item.staticClusterRadiusCap = clusterRadiusCap;
     item.staticRadiusScale = state.radiusScale;
     item.staticExposure = datasetExposureForPoint(item.point);
     item.staticLightCurve = item.point.lightCurve;
     item.staticPulsationAmplitudeScale = state.pulsationAmplitudeScale;
     item.staticPulsatorPreset = pulsatorPreset;
     item.staticRadiusRawBase = rawStarRadiusBaseFromBase(item.baseRadius, radiusFactor);
-    item.staticRadius = starRadiusFromRawBase(item.staticRadiusRawBase);
+    item.staticRadius = clusterStarCappedRadius(item, starRadiusFromRawBase(item.staticRadiusRawBase));
     item.staticBaseAlphaWithPulseHeadroom = starBaseAlphaWithPulseHeadroomFromUnit(
       item.alphaUnit,
       item.point.lightCurve,
@@ -8001,6 +9803,7 @@ function catalogStaticVisualBaseMatches(item) {
     item.staticBaseRadius === item.baseRadius &&
     item.staticAlphaUnit === item.alphaUnit &&
     item.staticRadiusFactor === starRadiusFactorForPoint(item.point) &&
+    item.staticClusterRadiusCap === (item.point.kind === "clusterStar" ? clusterStarRadiusCapForItem(item) : null) &&
     item.staticRadiusScale === state.radiusScale &&
     item.staticExposure === datasetExposureForPoint(item.point) &&
     item.staticLightCurve === item.point.lightCurve &&
@@ -8051,7 +9854,7 @@ function updateAnimatedCatalogVisualStyle(item) {
     item.currentRadius =
       item.point === state.locked
         ? catalogRenderVisualRadius(item, item.currentAreaPulse)
-        : starRadiusFromRawBase(item.staticRadiusRawBase, item.currentAreaPulse);
+        : clusterStarCappedRadius(item, starRadiusFromRawBase(item.staticRadiusRawBase, item.currentAreaPulse));
   } else {
     item.currentAlpha = starAlphaFromUnit(
       item.alphaUnit,
@@ -8571,6 +10374,48 @@ function drawCatalog(useStaticCache = true) {
   return scene.cachedStats.catalog;
 }
 
+function drawEclipsingBinaryGlyph(item, simulationDay) {
+  const point = item.point;
+  const projected = item.projected;
+  const rgbValue = point.rgb || cssColorToRgb(point.color);
+  const flux = eclipsingBinaryFluxAtDay(point, simulationDay);
+  const radius = starRadiusFromBase(item.baseRadius, 1, PULSATOR_BASE_RADIUS_FACTOR, 26);
+  const alphaBase = pointAlphaFromUnit(item.alphaUnit, datasetExposureValue("eb"));
+  const fillAlpha = clamp(alphaBase * (0.16 + 0.84 * flux), 0.003, 0.95);
+  const glowRadius = radius * 2.8 + 4;
+  item.currentRadius = radius;
+  item.currentAlpha = fillAlpha;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const glow = ctx.createRadialGradient(projected.x, projected.y, 0, projected.x, projected.y, glowRadius);
+  glow.addColorStop(0, rgbaFromRgb(rgbValue, fillAlpha * 0.28));
+  glow.addColorStop(0.42, rgbaFromRgb(rgbValue, fillAlpha * 0.12));
+  glow.addColorStop(1, rgbaFromRgb(rgbValue, 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(projected.x, projected.y, glowRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = rgbaFromRgb(rgbValue, fillAlpha);
+  ctx.beginPath();
+  ctx.arc(projected.x, projected.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawEclipsingBinaries(simulationDay = currentSimulationDay()) {
+  if (!state.datasets.eb || !scene.eclipsingBinaryDrawList.length) {
+    return scene.cachedStats.eclipsingBinaries;
+  }
+  const sorted = [...scene.eclipsingBinaryDrawList].sort((left, right) => left.projected.z - right.projected.z);
+  for (const item of sorted) {
+    drawEclipsingBinaryGlyph(item, simulationDay);
+  }
+  return scene.cachedStats.eclipsingBinaries;
+}
+
 function targetProjectedAtZoom(target, zoom = state.zoom) {
   const coordinates = coordinatesForPoint(target);
   const transform = makeProjectionTransform(baseSceneScaleForZoom(zoom));
@@ -8601,12 +10446,19 @@ function redClumpTargetVisualRadiusAtZoom(projected, zoom = state.zoom) {
   return pointRadiusFromUnitAtPerspective(radiusUnit, projected.perspective, pointRadiusZoomSizeForZoom(zoom));
 }
 
+function eclipsingBinaryTargetVisualRadiusAtZoom(target, projected, zoom = state.zoom) {
+  const baseRadius = starRadiusFromUnitAtPerspectiveForZoom(target.radiusUnit, projected.perspective, zoom);
+  return starRadiusFromBase(baseRadius, 1, PULSATOR_BASE_RADIUS_FACTOR, 26);
+}
+
 function targetVisualRadiusAtZoom(target, zoom = state.zoom) {
   if (!target) return 0;
   const projected = targetProjectedAtZoom(target, zoom);
   if (target.kind === "catalog") return catalogTargetVisualRadiusAtZoom(target, projected, zoom);
   if (target.kind === "cluster") return clusterTargetVisualRadiusAtZoom(target, projected, zoom);
   if (target.kind === "redclump") return redClumpTargetVisualRadiusAtZoom(projected, zoom);
+  if (target.kind === "eb") return eclipsingBinaryTargetVisualRadiusAtZoom(target, projected, zoom);
+  if (target.kind === "annotation") return Math.max(12, Number(target.annotationFit?.pickRadiusPx) || 9);
   return TARGET_SELECTION_RING_MIN_RADIUS;
 }
 
@@ -8619,6 +10471,7 @@ function targetSelectionRadiusAtZoom(target, zoom = state.zoom) {
 
 function drawSelection(target) {
   if (!target) return;
+  if (target.kind === "annotation") return;
   const coordinates = coordinatesForPoint(target);
   const projected = projectPoint(coordinates[0], coordinates[1], coordinates[2]);
   const radius = targetSelectionRadiusAtZoom(target, state.zoom);
@@ -8736,14 +10589,16 @@ function render(timestamp) {
   const redStats = drawRedClump(rebuiltProjection);
   const catalogStats = drawCatalog(!rebuiltProjection);
   endGpuSceneLayer();
+  const ebStats = drawEclipsingBinaries(currentSimulationDay());
   clearSelectionOverlay();
   drawSkyCoordinateGrids();
+  drawAtlasFitAnnotations();
   drawSelection(state.locked || state.hovered);
   drawIntroCloudLabels(timestamp);
 
-  const visibleTotal = redStats.count + catalogStats.count;
-  const minDepth = Math.min(redStats.minDepth, catalogStats.minDepth);
-  const maxDepth = Math.max(redStats.maxDepth, catalogStats.maxDepth);
+  const visibleTotal = redStats.count + catalogStats.count + ebStats.count;
+  const minDepth = Math.min(redStats.minDepth, catalogStats.minDepth, ebStats.minDepth);
+  const maxDepth = Math.max(redStats.maxDepth, catalogStats.maxDepth, ebStats.maxDepth);
   outputs.visibleTotal.textContent = formatInteger(visibleTotal);
   outputs.depthSpan.textContent = Number.isFinite(minDepth) ? formatNumber(Math.abs(maxDepth - minDepth), 0) : "0";
   updateLightcurveInset();
@@ -8753,13 +10608,16 @@ function render(timestamp) {
 async function prewarmIntroFrame() {
   if (!scene.payload) return;
   updatePulsationClock();
+  await advanceLoadingStage("Projecting first frame", LOADING_PROGRESS.controlsDone);
   rebuildProjectionCache();
+  await advanceLoadingStage("Uploading scene buffers", LOADING_PROGRESS.projectionDone);
   drawClusterGlows();
   beginGpuSceneLayer();
   drawRedClump(true);
   drawCatalog(false);
   endGpuSceneLayer();
-  await nextFrame();
+  drawEclipsingBinaries(currentSimulationDay());
+  await advanceLoadingStage("Starting atlas", LOADING_PROGRESS.buffersDone);
 }
 
 function drawBackgroundStars() {
@@ -8799,6 +10657,26 @@ function syncOrientationPresetButtons() {
     elements.edgeView.classList.toggle("active", edgeActive);
     elements.edgeView.setAttribute("aria-pressed", String(edgeActive));
   }
+}
+
+function syncAnnotationToggle() {
+  if (!elements.annotationToggle) return;
+  const visible = Boolean(state.annotationsVisible);
+  const label = visible ? "Hide atlas-fit wireframes" : "Show atlas-fit wireframes";
+  elements.annotationToggle.classList.toggle("active", visible);
+  elements.annotationToggle.setAttribute("aria-pressed", String(visible));
+  elements.annotationToggle.setAttribute("aria-label", label);
+  elements.annotationToggle.title = label;
+}
+
+function syncFeatureAnnotationToggle() {
+  if (!elements.featureAnnotationToggle) return;
+  const visible = Boolean(state.featureAnnotationsVisible);
+  const label = visible ? "Hide literature feature labels" : "Show literature feature labels";
+  elements.featureAnnotationToggle.classList.toggle("active", visible);
+  elements.featureAnnotationToggle.setAttribute("aria-pressed", String(visible));
+  elements.featureAnnotationToggle.setAttribute("aria-label", label);
+  elements.featureAnnotationToggle.title = label;
 }
 
 function syncRangeOutputs() {
@@ -8847,8 +10725,11 @@ function syncRangeOutputs() {
   if (equatorialGrid) equatorialGrid.checked = state.equatorialGrid;
   if (galacticGrid) galacticGrid.checked = state.galacticGrid;
   syncOrientationPresetButtons();
+  syncAnnotationToggle();
+  syncFeatureAnnotationToggle();
   syncDatasetPresetButtons();
   syncDatasetPresetToggle();
+  syncRedClumpModeControls();
 }
 
 function syncDatasetCheckboxes() {
@@ -8863,6 +10744,22 @@ function syncDatasetCheckboxes() {
     input.checked = Boolean(state.datasets[datasetKey]);
     input.indeterminate = false;
   });
+}
+
+function syncRedClumpModeControls() {
+  document.querySelectorAll("[data-redclump-mode]").forEach((button) => {
+    const active = button.dataset.redclumpMode === state.redClumpMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function setRedClumpMode(mode) {
+  if (!RED_CLUMP_RENDER_MODES.has(mode) || state.redClumpMode === mode) return;
+  state.redClumpMode = mode;
+  syncRedClumpModeControls();
+  markRedClumpLayerDirty();
+  queueRender();
 }
 
 function defaultDatasetExposureValue(datasetKey) {
@@ -9183,7 +11080,12 @@ function buildCoordinateControls() {
 
 function targetDatasetIsVisible(target) {
   if (!target) return true;
+  if (target.kind === "annotation") {
+    const fit = target.annotationFit;
+    return state.annotationsVisible && fit?.kind !== "featureLabel" && annotationPopulationVisible(fit.populationId);
+  }
   if (target.kind === "redclump") return state.datasets.redclump;
+  if (target.kind === "eb") return state.datasets.eb;
   if (target.kind === "cluster" || target.kind === "clusterStar") return state.datasets.clusters;
   return state.datasets[DATASET_KEYS[target.row[IDX.dataset]]];
 }
@@ -9194,6 +11096,10 @@ function targetMatchesActiveDatasetPreset(target) {
 
   if (preset === "clusters") return target.kind === "cluster" || target.kind === "clusterStar";
   if (preset === "redclump") return target.kind === "redclump";
+  if (preset === "eb") return target.kind === "eb";
+  if (target.kind === "annotation") {
+    return PULSATOR_PRESETS.includes(preset) && target.annotationFit?.populationId === preset;
+  }
   if (target.kind !== "catalog") return false;
 
   return (PULSATOR_PRESET_DATASET_KEYS[preset] || []).includes(DATASET_KEYS[target.row[IDX.dataset]]);
@@ -9230,7 +11136,13 @@ function nextPulsatorPreset() {
   return PULSATOR_PRESET_SEQUENCE[(index + 1) % PULSATOR_PRESET_SEQUENCE.length];
 }
 
+function currentControlPreset() {
+  if (DATASET_PRESETS.includes(state.datasetPreset)) return state.datasetPreset;
+  return currentPulsatorPreset();
+}
+
 function defaultRadiusScaleForPreset(preset = currentPulsatorPreset()) {
+  if (preset === "eb") return clampRadiusScale(BINARY_PRESET_RADIUS_SCALE);
   return clampRadiusScale(PULSATOR_PRESET_RADIUS_SCALES[preset] || PULSATOR_PRESET_RADIUS_SCALES.default);
 }
 
@@ -9241,6 +11153,7 @@ function defaultPulsationAmplitudeScaleForPreset(preset = currentPulsatorPreset(
 }
 
 function defaultPulsationSpeedForPreset(preset = currentPulsatorPreset()) {
+  if (preset === "eb") return clampPulsationSpeed(BINARY_PRESET_SPEED);
   if (PULSATOR_PRESETS.includes(preset)) return pulsationSpeedForPreset(preset);
   return INITIAL_PULSATION_SPEED;
 }
@@ -9261,6 +11174,12 @@ function contextExposureForDatasetPreset(datasetKey, preset = null) {
   if (preset === "redclump") {
     return DATASET_EXPOSURE_MIN;
   }
+  if (preset === "eb") {
+    if (DATASET_KEYS.includes(datasetKey)) return contextExposureForPulsatorPreset("rrlyrae");
+    if (datasetKey === "clusters") return CLUSTER_PRESET_CONTEXT_EXPOSURE;
+    if (datasetKey === "redclump") return defaultDatasetExposureValue("redclump");
+    return DATASET_EXPOSURE_MIN;
+  }
   if (preset === "clusters" && datasetKey === "redclump") {
     return CLUSTERS_PRESET_RED_CLUMP_CONTEXT_EXPOSURE;
   }
@@ -9268,7 +11187,11 @@ function contextExposureForDatasetPreset(datasetKey, preset = null) {
     return clampDatasetExposure(CLUSTERS_PRESET_PULSATOR_CONTEXT_EXPOSURE);
   }
   return clampDatasetExposure(
-    datasetKey === "clusters" ? CLUSTER_PRESET_CONTEXT_EXPOSURE : PULSATOR_PRESET_CONTEXT_EXPOSURE,
+    datasetKey === "clusters"
+      ? CLUSTER_PRESET_CONTEXT_EXPOSURE
+      : datasetKey === "eb"
+        ? EB_PRESET_CONTEXT_EXPOSURE
+        : PULSATOR_PRESET_CONTEXT_EXPOSURE,
   );
 }
 
@@ -9279,9 +11202,13 @@ function highlightExposureForDatasetPreset(datasetKey, preset = null) {
   if (preset === "clusters" && datasetKey === "redclump") {
     return CLUSTERS_PRESET_RED_CLUMP_CONTEXT_EXPOSURE;
   }
-  return preset === "redclump" && datasetKey === "redclump"
-    ? RED_CLUMP_PRESET_HIGHLIGHT_EXPOSURE
-    : DATASET_EXPOSURE_DEFAULT;
+  if (preset === "redclump" && datasetKey === "redclump") {
+    return RED_CLUMP_PRESET_HIGHLIGHT_EXPOSURE;
+  }
+  if (preset === "eb" && datasetKey === "eb") {
+    return EB_PRESET_HIGHLIGHT_EXPOSURE;
+  }
+  return DATASET_EXPOSURE_DEFAULT;
 }
 
 function syncDatasetPresetStateChange() {
@@ -9328,6 +11255,9 @@ function applyPulsatorPreset(preset) {
   state.datasets.clusters = true;
   state.datasetExposure.clusters =
     preset === PULSATOR_DEFAULT_PRESET ? DATASET_EXPOSURE_DEFAULT : CLUSTER_PRESET_CONTEXT_EXPOSURE;
+  state.datasets.eb = true;
+  state.datasetExposure.eb =
+    preset === PULSATOR_DEFAULT_PRESET ? DATASET_EXPOSURE_DEFAULT : EB_PRESET_CONTEXT_EXPOSURE;
   state.radiusScale = defaultRadiusScaleForPreset(preset);
   state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(preset);
   setPulsationSpeed(defaultPulsationSpeedForPreset(preset));
@@ -9335,8 +11265,30 @@ function applyPulsatorPreset(preset) {
   syncDatasetPresetStateChange();
 }
 
+function applyBinaryDatasetPreset() {
+  state.datasetPreset = "eb";
+  state.pulsatorPreset = null;
+  DATASET_PRESET_EXPOSURE_KEYS.forEach((datasetKey) => {
+    state.datasets[datasetKey] = true;
+    state.datasetExposure[datasetKey] =
+      datasetKey === "eb"
+        ? highlightExposureForDatasetPreset(datasetKey, "eb")
+        : contextExposureForDatasetPreset(datasetKey, "eb");
+  });
+
+  state.radiusScale = defaultRadiusScaleForPreset("eb");
+  state.pulsationAmplitudeScale = defaultPulsationAmplitudeScaleForPreset(PULSATOR_DEFAULT_PRESET);
+  setPulsationSpeed(defaultPulsationSpeedForPreset("eb"));
+
+  syncDatasetPresetStateChange();
+}
+
 function applyAuxiliaryDatasetPreset(preset) {
   if (!AUXILIARY_DATASET_PRESETS.includes(preset)) return;
+  if (preset === "eb") {
+    applyBinaryDatasetPreset();
+    return;
+  }
 
   const highlightedKeys = new Set(AUXILIARY_DATASET_PRESET_KEYS[preset] || []);
   state.datasetPreset = preset;
@@ -9422,6 +11374,11 @@ function ogleObjectUrl(row) {
     return `${OGLE_III_CVS_OBJECT_URL}${encodeURIComponent(objectId)}`;
   }
   return `${OGLE_OCVS_OBJECT_URL}${encodeURIComponent(objectId)}`;
+}
+
+function ogleEclipsingBinaryObjectUrl(row) {
+  const objectId = row?.[EB.ocvsId] || row?.[EB.id];
+  return objectId ? `${OGLE_OCVS_OBJECT_URL}${encodeURIComponent(objectId)}` : null;
 }
 
 function pointerModeForEvent(event) {
@@ -9883,6 +11840,7 @@ function resetAppState() {
     miras: DATASET_EXPOSURE_DEFAULT,
     redclump: RED_CLUMP_EXPOSURE_DEFAULT,
     clusters: DATASET_EXPOSURE_DEFAULT,
+    eb: DATASET_EXPOSURE_DEFAULT,
   };
   state.depthScale = 1;
   state.density = 100;
@@ -9893,6 +11851,7 @@ function resetAppState() {
   state.uncertaintySeed = DEFAULT_UNCERTAINTY_SEED;
   state.datasetPreset = null;
   state.pulsatorPreset = null;
+  state.redClumpMode = RED_CLUMP_RENDER_MODE_SURFACE;
   state.datasets = {
     cepheids: true,
     rrlyrae: true,
@@ -10194,6 +12153,7 @@ function handleViewportKeydown(event) {
     case "3":
     case "4":
     case "5":
+    case "6":
       handled = activateKeyboardDatasetPreset(key);
       break;
     case "l":
@@ -10263,6 +12223,8 @@ function catalogSearchTextForRow(row) {
 function clusterSearchTextForRow(row) {
   return [
     row[CL.name],
+    row[CL.aliases],
+    row[CL.component],
     row[CL.galaxy],
     "cluster",
     "mist",
@@ -10274,6 +12236,26 @@ function clusterSearchTextForRow(row) {
     row[CL.galLonDeg],
     row[CL.galLatDeg],
     row[CL.qualityFlags],
+  ]
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .join(" ")
+    .toLowerCase();
+}
+
+function eclipsingBinarySearchTextForRow(row) {
+  return [
+    row[EB.id],
+    row[EB.ocvsId],
+    row[EB.cloud],
+    "eclipsing binary",
+    "eb",
+    row[EB.sourceId],
+    row[EB.quality],
+    row[EB.period],
+    row[EB.raDeg],
+    row[EB.decDeg],
+    row[EB.galLonDeg],
+    row[EB.galLatDeg],
   ]
     .filter((value) => value !== null && value !== undefined && value !== "")
     .join(" ")
@@ -10314,10 +12296,34 @@ function catalogSearchMatches(query = state.targetSearchQuery) {
     if (matches.length < TARGET_SEARCH_RESULT_LIMIT) matches.push(point);
   }
 
+  for (const point of scene.eclipsingBinaries) {
+    if (!targetIsPickable(point)) continue;
+    const searchText = point.searchText || eclipsingBinarySearchTextForRow(point.row);
+    if (!terms.every((term) => searchText.includes(term))) continue;
+    total += 1;
+    if (!exactMatch && String(point.row[EB.id]).toLowerCase() === normalizedQuery) {
+      exactMatch = point;
+    }
+    if (!exactMatch && point.row[EB.ocvsId] && String(point.row[EB.ocvsId]).toLowerCase() === normalizedQuery) {
+      exactMatch = point;
+    }
+    if (matches.length < TARGET_SEARCH_RESULT_LIMIT) matches.push(point);
+  }
+
   return { matches, total, exactMatch };
 }
 
 function catalogMatchMeta(point) {
+  if (point.kind === "eb") {
+    const row = point.row;
+    return [
+      `Eclipsing binary, ${row[EB.cloud]}`,
+      `${formatNumber(row[EB.distance], 2)} kpc`,
+      row[EB.sourceId],
+      Number.isFinite(row[EB.period]) ? `${formatNumberCompact(row[EB.period], 1)} d` : "no period",
+    ].join(" | ");
+  }
+
   if (point.kind === "cluster") {
     const row = point.row;
     return [
@@ -10385,7 +12391,8 @@ function renderTargetSearchMatches() {
 
     const id = document.createElement("span");
     id.className = "targetMatchId";
-    id.textContent = point.kind === "cluster" ? String(row[CL.name]) : String(row[IDX.id]);
+    id.textContent =
+      point.kind === "cluster" ? String(row[CL.name]) : point.kind === "eb" ? String(row[EB.id]) : String(row[IDX.id]);
 
     const meta = document.createElement("span");
     meta.className = "targetMatchMeta";
@@ -10420,6 +12427,8 @@ function renderNoTargetState() {
 function mobileTargetPreviewName(target) {
   if (target?.kind === "catalog") return String(target.row[IDX.id]);
   if (target?.kind === "cluster") return String(target.row[CL.name]);
+  if (target?.kind === "eb") return String(target.row[EB.id]);
+  if (target?.kind === "annotation") return target.label || target.annotationFit?.label || "Annotation component";
   if (target?.kind === "clusterStar") {
     const cluster = scene.clusters[target.clusterIndex] || scene.clusters[target.row?.[CS.cluster]];
     return cluster ? `${cluster.row[CL.name]} star` : "Synthetic cluster star";
@@ -10429,6 +12438,7 @@ function mobileTargetPreviewName(target) {
 
 function createMobileTargetPreviewPlot(target) {
   if (target?.kind === "cluster") return createClusterHrDiagram(target);
+  if (target?.kind === "eb" && target.lightCurve?.samples?.length) return createEclipsingBinaryLightCurveInset(target);
   if (target?.lightCurve?.waveform?.length) {
     const plot = createLightCurveInset(target);
     if (target.kind !== "catalog") return plot;
@@ -10618,6 +12628,20 @@ function setTarget(target, { markCatalogDirty = true } = {}) {
     strong.append(link);
   } else if (current.kind === "cluster") {
     strong.textContent = String(current.row[CL.name]);
+  } else if (current.kind === "eb") {
+    const url = ogleEclipsingBinaryObjectUrl(current.row);
+    if (url && current.row[EB.ocvsId]) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = String(current.row[EB.id]);
+      strong.append(link);
+    } else {
+      strong.textContent = String(current.row[EB.id]);
+    }
+  } else if (current.kind === "annotation") {
+    strong.textContent = current.label || current.annotationFit?.label || "Annotation component";
   } else {
     strong.textContent = "XMC surface cell";
   }
@@ -10656,7 +12680,11 @@ function setTarget(target, { markCatalogDirty = true } = {}) {
       ? targetRowsForCatalog(current)
       : current.kind === "cluster"
         ? targetRowsForCluster(current)
-        : targetRowsForRedClump(current);
+        : current.kind === "eb"
+          ? targetRowsForEclipsingBinary(current)
+          : current.kind === "annotation"
+            ? targetRowsForAnnotation(current)
+            : targetRowsForRedClump(current);
   for (const [label, value] of rows) {
     const dt = document.createElement("dt");
     const dd = document.createElement("dd");
@@ -10666,6 +12694,11 @@ function setTarget(target, { markCatalogDirty = true } = {}) {
       periodValue.textContent = value;
       dd.className = "withLightcurve";
       dd.append(periodValue, createLightCurveInset(current));
+    } else if (current.kind === "eb" && label === "Period" && current.lightCurve?.samples?.length) {
+      const periodValue = document.createElement("span");
+      periodValue.textContent = value;
+      dd.className = "withLightcurve";
+      dd.append(periodValue, createEclipsingBinaryLightCurveInset(current));
     } else {
       dd.textContent = value;
     }
@@ -10856,6 +12889,111 @@ function targetRowsForRedClump(target) {
   return details;
 }
 
+function formatAnnotationNumberList(values, digits = 2, suffix = "") {
+  if (!Array.isArray(values) || !values.length) return null;
+  const formatted = values
+    .map((value) => Number(value))
+    .filter(Number.isFinite)
+    .map((value) => `${formatNumber(value, digits)}${suffix}`);
+  return formatted.length ? formatted.join(" x ") : null;
+}
+
+function targetRowsForAnnotation(target) {
+  const spec = target.annotationFit || {};
+  const frame = activeCoordinateFrame();
+  const reference = activeCoordinateReference();
+  const activeCoordinates = displayCoordinatesForPoint(target);
+  const equatorial = equatorialFromGalacticVector(target.coordinates.galacticVector);
+  const selected = spec.selectedModel || {};
+  const rows = [
+    ["Type", `${spec.cloudLabel || ""} ${spec.populationLabel || ""} fitted ${spec.componentRole || "component"}`.trim()],
+    spec.displayModel ? ["Display", spec.displayModel] : null,
+    spec.structureModel ? ["Structure", spec.structureModel] : null,
+    selected.model ? ["Fit model", selected.model] : spec.sourceModel ? ["Fit model", spec.sourceModel] : null,
+  ];
+
+  if (Number.isFinite(Number(spec.softMembershipCount)) || Number.isFinite(Number(spec.hardMembershipCount)) || Number.isFinite(Number(spec.count))) {
+    const counts = [];
+    if (Number.isFinite(Number(spec.softMembershipCount))) counts.push(`soft ${formatNumber(Number(spec.softMembershipCount), 1)}`);
+    if (Number.isFinite(Number(spec.hardMembershipCount))) counts.push(`hard ${formatInteger(Number(spec.hardMembershipCount))}`);
+    else if (Number.isFinite(Number(spec.count))) counts.push(formatInteger(Number(spec.count)));
+    rows.push(["Stars", counts.join(", ")]);
+  }
+
+  const axes = formatAnnotationNumberList(spec.axisKpc68 || spec.axesKpc, 2, " kpc");
+  if (axes) rows.push(["Axes", axes]);
+  if (Number.isFinite(Number(spec.intrinsicScatterKpc))) rows.push(["Thickness", `${formatNumber(Number(spec.intrinsicScatterKpc), 2)} kpc intrinsic`]);
+  if (Array.isArray(spec.contourMassFractions)) rows.push(["Contours", spec.contourMassFractions.map((value) => `${formatNumber(Number(value) * 100, 0)}%`).join(", ")]);
+  if (Array.isArray(spec.inPlaneGaussianWeights)) rows.push(["In-plane weights", spec.inPlaneGaussianWeights.map((value) => formatNumber(Number(value), 2)).join(", ")]);
+  if (Number.isFinite(Number(spec.lineOfSightMajorAxisCosine))) rows.push(["LOS major-axis cos", formatNumber(Number(spec.lineOfSightMajorAxisCosine), 3)]);
+  if (Number.isFinite(Number(spec.projectedSkyAreaKpc2))) rows.push(["Sky area", `${formatNumber(Number(spec.projectedSkyAreaKpc2), 2)} kpc2`]);
+  if (Number.isFinite(Number(selected.bic))) {
+    const parameterCount = Number(selected.parameters);
+    const parameterLabel = Number.isFinite(parameterCount) ? ` (${formatInteger(parameterCount)} params)` : "";
+    rows.push(["BIC", `${formatNumber(Number(selected.bic), 1)}${parameterLabel}`]);
+  }
+  if (Number.isFinite(Number(selected.logLikelihood))) rows.push(["log L", formatNumber(Number(selected.logLikelihood), 1)]);
+  if (spec.distanceUncertaintyTreatment || spec.uncertaintyTreatment) rows.push(["Uncertainty", spec.distanceUncertaintyTreatment || spec.uncertaintyTreatment]);
+
+  rows.push(
+    [targetCoordinateLabel(frame, reference, { units: true }), formatCoordinateTriplet(activeCoordinates)],
+    ["RA, Dec [deg]", `${formatNumber(equatorial.ra, 4)}°, ${formatNumber(equatorial.dec, 4)}°`],
+    ["Gal l,b [deg]", `${formatNumber(target.coordinates.lonDeg, 4)}°, ${formatNumber(target.coordinates.latDeg, 4)}°`],
+  );
+  return rows.filter(Boolean);
+}
+
+function formatEclipsingBinaryPeriod(target) {
+  const period = Number(target?.row?.[EB.period]);
+  if (!Number.isFinite(period) || period <= 0) return "n/a";
+  const cycleSeconds = period * SECONDS_PER_DAY / Math.max(PULSATION_SPEED_MIN, state.pulsationSpeed);
+  return `${formatNumber(period, 4)} d   (cycle = ${formatPulsationDuration(cycleSeconds)})`;
+}
+
+function targetRowsForEclipsingBinary(target) {
+  const row = target.row;
+  const frame = activeCoordinateFrame();
+  const reference = activeCoordinateReference();
+  const activeCoordinates = displayCoordinatesForPoint(target);
+  const distanceError = Number.isFinite(row[EB.distanceError]) ? row[EB.distanceError] : null;
+  const sampledDistance =
+    state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED && Number.isFinite(target.currentDistance)
+      ? target.currentDistance
+      : null;
+  const distanceLabel =
+    sampledDistance !== null && distanceError !== null && Math.abs(sampledDistance - row[EB.distance]) > 0.005
+      ? `${formatNumber(sampledDistance, 2)} sampled (${formatNumber(row[EB.distance], 2)} +/- ${formatNumber(distanceError, 2)} kpc)`
+      : distanceError !== null
+        ? `${formatNumber(row[EB.distance], 2)} +/- ${formatNumber(distanceError, 2)} kpc`
+        : `${formatNumber(row[EB.distance], 2)} kpc`;
+  const muLabel =
+    Number.isFinite(row[EB.distanceModulusStatError]) || Number.isFinite(row[EB.distanceModulusSystematicError])
+      ? `${formatNumber(row[EB.distanceModulus], 3)} +/- ${formatNumber(row[EB.distanceModulusStatError], 3)} stat +/- ${formatNumber(row[EB.distanceModulusSystematicError], 3)} sys`
+      : formatNumber(row[EB.distanceModulus], 3);
+  const lightCurveLabel = target.lightCurve?.samples?.length
+    ? `${row[EB.lightCurveBand] || "I"} band ${row[EB.lightCurveQuality] || "binned"}`
+    : "no secure OGLE-IV curve";
+  const details = [
+    ["Type", `Late-type detached EB, ${row[EB.cloud]}`],
+    ["Period", formatEclipsingBinaryPeriod(target)],
+    ["Dist", distanceLabel],
+    ["mu0", muLabel],
+    ["Radii", `${formatNumber(row[EB.primaryRadius], 1)} / ${formatNumber(row[EB.secondaryRadius], 1)} Rsun`],
+    ["Glyph R", `${formatNumber(row[EB.equivalentRadius], 1)} Rsun equiv`],
+    ["Teff", `${formatNumber(row[EB.primaryTeff], 0)} / ${formatNumber(row[EB.secondaryTeff], 0)} K`],
+    ["Lum", `${formatNumber(row[EB.systemLum], 0)} Lsun system`],
+    ["Light curve", lightCurveLabel],
+    ["Source", row[EB.sourceId]],
+    [targetCoordinateLabel(frame, reference, { units: true }), formatCoordinateTriplet(activeCoordinates)],
+    ["RA, Dec [deg]", `${formatNumber(row[EB.raDeg], 4)}°, ${formatNumber(row[EB.decDeg], 4)}°`],
+    ["Gal l,b [deg]", `${formatNumber(row[EB.galLonDeg], 4)}°, ${formatNumber(row[EB.galLatDeg], 4)}°`],
+  ];
+  if (Number.isFinite(row[EB.centerCorrection])) {
+    details.splice(4, 0, ["LMC corr", `${formatNumber(row[EB.centerCorrection], 3)} mag to barycenter`]);
+  }
+  return details;
+}
+
 function targetRowsForCluster(target) {
   const row = target.row;
   const frame = activeCoordinateFrame();
@@ -10887,14 +13025,30 @@ function targetRowsForCluster(target) {
   const details = [
     ["Type", `MIST synthetic cluster, ${row[CL.galaxy]}`],
     ["Source", source],
+    row[CL.aliases] ? ["Aliases", String(row[CL.aliases]).replaceAll(";", ", ")] : null,
+    row[CL.component] ? ["Component", row[CL.component]] : null,
     ["Stars [N]", `${formatInteger(row[CL.renderedStars])} rendered, ${formatInteger(row[CL.unresolvedStars])} glow`],
     ["Mass [Msun]", `${formatInteger(row[CL.mass])} +/- ${formatInteger(row[CL.eMass])}`],
+    row[CL.massSource] ? ["Mass source", row[CL.massSource]] : null,
     ["Radius [pc]", formatNumber(row[CL.radiusPc], 1)],
+    row[CL.structureSource] ? ["Structure", row[CL.structureSource]] : null,
     ["[Fe/H] [dex]", `${formatNumber(row[CL.feh], 2)} +/- ${formatNumber(row[CL.eFeh], 2)}`],
+    Number.isFinite(row[CL.fehSpectroscopic])
+      ? ["[Fe/H] CaT [dex]", `${formatNumber(row[CL.fehSpectroscopic], 2)} +/- ${formatNumber(row[CL.eFehSpectroscopic], 2)}`]
+      : null,
     ["log age [dex]", `${formatNumber(row[CL.logAge], 2)} +/- ${formatNumber(row[CL.eLogAge], 2)}`],
     [`Age [${ageUnit}]`, ageLabel],
     ["E(B-V) [mag]", `${formatNumber(row[CL.ebv], 3)} +/- ${formatNumber(row[CL.eEbv], 3)}`],
     ["Dist [kpc]", distanceLabel],
+    Number.isFinite(row[CL.rvHelio])
+      ? ["RV hel [km/s]", `${formatNumber(row[CL.rvHelio], 1)} +/- ${formatNumber(row[CL.eRvHelio], 1)}`]
+      : null,
+    Number.isFinite(row[CL.pmRa])
+      ? ["PM RA* [mas/yr]", `${formatNumber(row[CL.pmRa], 2)} +/- ${formatNumber(row[CL.ePmRa], 2)}`]
+      : null,
+    Number.isFinite(row[CL.pmDec])
+      ? ["PM Dec [mas/yr]", `${formatNumber(row[CL.pmDec], 2)} +/- ${formatNumber(row[CL.ePmDec], 2)}`]
+      : null,
     ["Isochrones", row[CL.isochroneSummary]],
     [
       "Glow [Lsun]",
@@ -10914,7 +13068,7 @@ function targetRowsForCluster(target) {
     [targetCoordinateLabel(frame, reference, { units: true }), formatCoordinateTriplet(activeCoordinates)],
     ["RA, Dec [deg]", `${formatNumber(row[CL.raDeg], 4)}°, ${formatNumber(row[CL.decDeg], 4)}°`],
     ["Gal l,b [deg]", `${formatNumber(row[CL.galLonDeg], 4)}°, ${formatNumber(row[CL.galLatDeg], 4)}°`],
-  ];
+  ].filter(Boolean);
   if (row[CL.ageOutlier]) {
     details.splice(12, 0, ["ASteCA note", "large published age rerun delta"]);
   }
@@ -10935,7 +13089,9 @@ function targetNavigationIncludesRedClump() {
 
 function targetNavigationSortLabel(target) {
   if (target.kind === "catalog") return String(target.row[IDX.id]);
+  if (target.kind === "eb") return String(target.row[EB.id]);
   if (target.kind === "cluster") return String(target.row[CL.name]);
+  if (target.kind === "annotation") return target.label || target.annotationFit?.label || "";
   if (target.kind === "redclump") {
     const row = target.row;
     return `${formatNumber(row[RC.lon], 4)},${formatNumber(row[RC.lat], 4)},${formatNumber(row[RC.distance], 3)}`;
@@ -10970,15 +13126,17 @@ function targetNavigationHilbertIndex(x, y) {
 
 function targetNavigationKindWeight(target) {
   if (target?.kind === "catalog") return 0;
-  if (target?.kind === "cluster") return 1;
-  if (target?.kind === "redclump") return 2;
+  if (target?.kind === "eb") return 1;
+  if (target?.kind === "cluster") return 2;
+  if (target?.kind === "redclump") return 3;
+  if (target?.kind === "annotation") return 4;
   return Infinity;
 }
 
 function targetNavigationTargetIsAllowed(target, includeRedClump) {
   if (!target || !targetIsPickable(target)) return false;
   if (target.kind === "redclump") return includeRedClump;
-  return target.kind === "catalog" || target.kind === "cluster";
+  return target.kind === "catalog" || target.kind === "cluster" || target.kind === "eb" || target.kind === "annotation";
 }
 
 function buildTargetNavigationCandidates() {
@@ -11000,7 +13158,9 @@ function buildTargetNavigationCandidates() {
     const target = item?.point;
     if (!target || seen.has(target) || !targetIsPickable(target)) return;
     if (target.kind === "redclump" && !includeRedClump) return;
-    if (target.kind !== "catalog" && target.kind !== "cluster" && target.kind !== "redclump") return;
+    if (target.kind !== "catalog" && target.kind !== "cluster" && target.kind !== "redclump" && target.kind !== "eb" && target.kind !== "annotation") {
+      return;
+    }
 
     const projected = item.projected || target.activeProjected || target.projected;
     if (!projected || !Number.isFinite(projected.x) || !Number.isFinite(projected.y)) return;
@@ -11024,9 +13184,17 @@ function buildTargetNavigationCandidates() {
   for (const item of scene.catalogDrawList) {
     if (item.point?.kind === "catalog") append(item, 0);
   }
-  for (const item of scene.clusterTargetDrawList) append(item, 1);
+  for (const item of scene.eclipsingBinaryDrawList) append(item, 1);
+  for (const item of scene.clusterTargetDrawList) append(item, 2);
   if (includeRedClump) {
-    for (const item of scene.redClumpDrawList) append(item, 2);
+    for (const item of scene.redClumpDrawList) append(item, 3);
+  }
+  for (const target of scene.annotationTargets) {
+    if (!targetIsPickable(target)) continue;
+    const coordinates = coordinatesForPoint(target);
+    const projected = projectPoint(coordinates[0], coordinates[1], coordinates[2]);
+    target.activeProjected = projected;
+    append({ point: target, projected }, 4);
   }
 
   candidates.sort(
@@ -11080,10 +13248,12 @@ function buildFullTargetNavigationCandidates() {
   };
 
   for (const target of scene.activeCatalog) append(target);
+  for (const target of scene.activeEclipsingBinaries) append(target);
   for (const target of scene.activeClusters) append(target);
   if (includeRedClump) {
     for (const target of scene.activeRedClump) append(target);
   }
+  for (const target of scene.annotationTargets) append(target);
 
   if (!entries.length) return [];
 
@@ -11345,6 +13515,114 @@ function nearestCatalogPickTarget(clientX, clientY, radiusScale, useCachedVisual
   return best;
 }
 
+function nearestEclipsingBinaryPickTarget(clientX, clientY, radiusScale) {
+  let best = null;
+  let bestScore = Infinity;
+  for (const item of scene.eclipsingBinaryDrawList) {
+    const point = item.point;
+    if (!targetIsPickable(point)) continue;
+    const dx = item.projected.x - clientX;
+    const dy = item.projected.y - clientY;
+    const distance = dx * dx + dy * dy;
+    const radius =
+      Math.max(EB_TARGET_PICK_MIN_RADIUS, (item.currentRadius || 0) + EB_TARGET_PICK_PADDING_PX) * radiusScale;
+    const radius2 = radius * radius;
+    if (distance <= radius2) {
+      const score = distance / radius2;
+      if (score < bestScore) {
+        best = point;
+        bestScore = score;
+      }
+    }
+  }
+  return best;
+}
+
+function squaredDistanceToScreenSegment(x, y, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length2 = dx * dx + dy * dy;
+  if (length2 <= 0.000001) {
+    const pointDx = x - start.x;
+    const pointDy = y - start.y;
+    return pointDx * pointDx + pointDy * pointDy;
+  }
+  const fraction = clamp(((x - start.x) * dx + (y - start.y) * dy) / length2, 0, 1);
+  const projectedX = start.x + dx * fraction;
+  const projectedY = start.y + dy * fraction;
+  const pointDx = x - projectedX;
+  const pointDy = y - projectedY;
+  return pointDx * pointDx + pointDy * pointDy;
+}
+
+function annotationFitPickSegments(spec) {
+  if (spec.kind === "fitPlane") {
+    return [
+      ...(spec.segmentGroups?.midplane || spec.segments || []),
+      ...(spec.segmentGroups?.thickness || []),
+    ];
+  }
+  if (spec.kind !== "fitEllipsoid") return [];
+  const segments = [];
+  for (const pair of [
+    [0, 1],
+    [0, 2],
+    [1, 2],
+  ]) {
+    segments.push(ellipsoidLoopVectors(spec.centerVector, spec.axes, spec.axesKpc, pair[0], pair[1]));
+  }
+  for (let index = 0; index < spec.axes.length; index += 1) {
+    segments.push([
+      addScaledVector(spec.centerVector, spec.axes[index], -spec.axesKpc[index]),
+      addScaledVector(spec.centerVector, spec.axes[index], spec.axesKpc[index]),
+    ]);
+  }
+  return segments;
+}
+
+function nearestAnnotationPickTarget(clientX, clientY, radiusScale) {
+  if (!state.annotationsVisible) return null;
+  const reference = activeCoordinateReference().context;
+  if (!reference) return null;
+  const project = makeProjector();
+  let best = null;
+  let bestScore = Infinity;
+  for (const spec of visibleAnnotationFits()) {
+    const target = spec.target;
+    if (!target || !targetIsPickable(target)) continue;
+    const targetVector = annotationFitTargetVector(spec);
+    const targetProjected = targetVector ? projectAnnotationVector(targetVector, reference, project) : null;
+    if (targetProjected) {
+      target.projected = targetProjected;
+      target.activeProjected = targetProjected;
+    }
+    const radius = Math.max(Number(spec.pickRadiusPx) || 8, (Number(spec.lineWidth) || 1) + 6) * radiusScale;
+    const radius2 = radius * radius;
+    for (const segment of annotationFitPickSegments(spec)) {
+      let previous = null;
+      for (const vector of segment) {
+        const point = projectAnnotationVector(vector, reference, project);
+        if (!point) {
+          previous = null;
+          continue;
+        }
+        if (previous) {
+          const distance2 = squaredDistanceToScreenSegment(clientX, clientY, previous, point);
+          if (distance2 <= radius2) {
+            const score = distance2 / radius2;
+            if (score < bestScore) {
+              best = target;
+              bestScore = score;
+            }
+          }
+        }
+        previous = point;
+      }
+    }
+  }
+  return best;
+}
+
 function nearestTarget(clientX, clientY, { pickRadiusScale = 1, refreshProjection = true } = {}) {
   if (refreshProjection) {
     ensureProjectionCacheForInteraction();
@@ -11353,11 +13631,16 @@ function nearestTarget(clientX, clientY, { pickRadiusScale = 1, refreshProjectio
   }
 
   const radiusScale = Math.max(1, pickRadiusScale);
+  const annotationPick = nearestAnnotationPickTarget(clientX, clientY, radiusScale);
+  if (annotationPick) return annotationPick;
+
   const useCachedVisuals = !refreshProjection;
   const simulationDay = useCachedVisuals ? null : currentSimulationDay();
   const catalogPick = nearestCatalogPickTarget(clientX, clientY, radiusScale, useCachedVisuals, simulationDay);
 
   if (catalogPick.catalog) return catalogPick.catalog;
+  const ebPick = nearestEclipsingBinaryPickTarget(clientX, clientY, radiusScale);
+  if (ebPick) return ebPick;
 
   let best = null;
   let bestClusterScore = Infinity;
@@ -11416,7 +13699,7 @@ function selectTargetAt(clientX, clientY, { pickRadiusScale = 1, focusSelectedOn
 }
 
 function resetRangeControl(controlId) {
-  const preset = currentPulsatorPreset();
+  const preset = currentControlPreset();
   cancelIntroRotation();
   cancelAxisSpinAnimation();
   if (["yaw", "pitch", "roll", "zoom"].includes(controlId)) {
@@ -11717,6 +14000,10 @@ function bindControls() {
     button.addEventListener("click", () => commitDatasetPreset(preset));
   });
 
+  document.querySelectorAll("[data-redclump-mode]").forEach((button) => {
+    button.addEventListener("click", () => setRedClumpMode(button.dataset.redclumpMode));
+  });
+
   controls.targetSearch.addEventListener("input", handleTargetSearchInput);
   controls.targetSearch.addEventListener("keydown", handleTargetSearchKeydown);
 
@@ -11752,6 +14039,16 @@ function bindControls() {
   elements.edgeView?.setAttribute("aria-keyshortcuts", "V");
   elements.faceView?.addEventListener("click", () => applyViewOrientation(FACE_VIEW_ANGLES_DEGREES));
   elements.edgeView?.addEventListener("click", () => applyViewOrientation(EDGE_VIEW_ANGLES_DEGREES));
+  elements.annotationToggle?.addEventListener("click", () => {
+    state.annotationsVisible = !state.annotationsVisible;
+    syncAnnotationToggle();
+    queueRender();
+  });
+  elements.featureAnnotationToggle?.addEventListener("click", () => {
+    state.featureAnnotationsVisible = !state.featureAnnotationsVisible;
+    syncFeatureAnnotationToggle();
+    queueRender();
+  });
 
   canvas.addEventListener("pointerdown", (event) => {
     if (handleCanvasTouchPointerDown(event)) return;
@@ -11969,6 +14266,411 @@ function redClumpGridKey(x, y) {
   return `${x}:${y}`;
 }
 
+function redClumpSmcWingUnit(row, smcSeparationDeg) {
+  const lon = row[RC.lon];
+  const lat = row[RC.lat];
+  const smcToLmcLat = RED_CLUMP_LMC_CENTER.lat - RED_CLUMP_SMC_CENTER.lat;
+  const smcToLmcLon =
+    wrapDegrees(RED_CLUMP_LMC_CENTER.lon - RED_CLUMP_SMC_CENTER.lon) *
+    Math.cos(degreesToRadians((RED_CLUMP_LMC_CENTER.lat + RED_CLUMP_SMC_CENTER.lat) * 0.5));
+  const rowFromSmcLat = lat - RED_CLUMP_SMC_CENTER.lat;
+  const rowFromSmcLon =
+    wrapDegrees(lon - RED_CLUMP_SMC_CENTER.lon) *
+    Math.cos(degreesToRadians((lat + RED_CLUMP_SMC_CENTER.lat) * 0.5));
+  const smcToLmcLength = Math.hypot(smcToLmcLon, smcToLmcLat) || 1;
+  const projectionTowardLmc = (rowFromSmcLon * smcToLmcLon + rowFromSmcLat * smcToLmcLat) / smcToLmcLength;
+  const towardLmc = smoothStep((projectionTowardLmc - 1.2) / 5.5);
+  const insideSmc = 1 - smoothStep((smcSeparationDeg - 9) / 4);
+  return clamp(towardLmc * insideSmc, 0, 1);
+}
+
+function redClumpBridgeProjectionUnit(lon, lat) {
+  const lmcToSmcLat = RED_CLUMP_SMC_CENTER.lat - RED_CLUMP_LMC_CENTER.lat;
+  const lmcToSmcLon =
+    wrapDegrees(RED_CLUMP_SMC_CENTER.lon - RED_CLUMP_LMC_CENTER.lon) *
+    Math.cos(degreesToRadians((RED_CLUMP_LMC_CENTER.lat + RED_CLUMP_SMC_CENTER.lat) * 0.5));
+  const rowFromLmcLat = lat - RED_CLUMP_LMC_CENTER.lat;
+  const rowFromLmcLon =
+    wrapDegrees(lon - RED_CLUMP_LMC_CENTER.lon) *
+    Math.cos(degreesToRadians((lat + RED_CLUMP_LMC_CENTER.lat) * 0.5));
+  const lengthSquared = lmcToSmcLon * lmcToSmcLon + lmcToSmcLat * lmcToSmcLat || 1;
+  return clamp((rowFromLmcLon * lmcToSmcLon + rowFromLmcLat * lmcToSmcLat) / lengthSquared, 0, 1);
+}
+
+function redClumpVolumePriorDistance(row) {
+  const lon = row[RC.lon];
+  const lat = row[RC.lat];
+  const lmcSeparation = angularSeparationDeg(lon, lat, RED_CLUMP_LMC_CENTER.lon, RED_CLUMP_LMC_CENTER.lat);
+  const smcSeparation = angularSeparationDeg(lon, lat, RED_CLUMP_SMC_CENTER.lon, RED_CLUMP_SMC_CENTER.lat);
+  if (smcSeparation < 9 && smcSeparation <= lmcSeparation + 4) return RED_CLUMP_SMC_PRIOR_DISTANCE_KPC;
+  if (lmcSeparation < 16 && lmcSeparation <= smcSeparation + 4) return RED_CLUMP_LMC_PRIOR_DISTANCE_KPC;
+  const bridgeUnit = redClumpBridgeProjectionUnit(lon, lat);
+  return RED_CLUMP_LMC_PRIOR_DISTANCE_KPC +
+    (RED_CLUMP_SMC_PRIOR_DISTANCE_KPC - RED_CLUMP_LMC_PRIOR_DISTANCE_KPC) * bridgeUnit;
+}
+
+function redClumpVolumeComponents(row, distance = redClumpVolumePriorDistance(row)) {
+  const lon = row[RC.lon];
+  const lat = row[RC.lat];
+  const lmcSeparation = angularSeparationDeg(lon, lat, RED_CLUMP_LMC_CENTER.lon, RED_CLUMP_LMC_CENTER.lat);
+  const smcSeparation = angularSeparationDeg(lon, lat, RED_CLUMP_SMC_CENTER.lon, RED_CLUMP_SMC_CENTER.lat);
+  const smcLike = smcSeparation < 9 || (distance > 55 && smcSeparation < 14 && smcSeparation <= lmcSeparation + 4);
+
+  if (smcLike) {
+    const outerUnit = smoothStep((smcSeparation - 3) / 7);
+    const sigma =
+      RED_CLUMP_SMC_SIGMA_KPC +
+      (RED_CLUMP_SMC_OUTER_SIGMA_KPC - RED_CLUMP_SMC_SIGMA_KPC) * outerUnit;
+    const wingUnit = redClumpSmcWingUnit(row, smcSeparation);
+    if (wingUnit > 0.12) {
+      const nearWeight = 0.18 + (RED_CLUMP_SMC_WING_NEAR_WEIGHT - 0.18) * wingUnit;
+      const farWeight = 1 - nearWeight;
+      const separation = RED_CLUMP_SMC_WING_COMPONENT_SEPARATION_KPC * wingUnit;
+      return [
+        {
+          centerDistance: distance - farWeight * separation,
+          sigma: RED_CLUMP_SMC_WING_COMPONENT_SIGMA_KPC,
+          weight: nearWeight,
+        },
+        {
+          centerDistance: distance + nearWeight * separation,
+          sigma: RED_CLUMP_SMC_WING_COMPONENT_SIGMA_KPC + 0.6 * outerUnit,
+          weight: farWeight,
+        },
+      ];
+    }
+    return [{ centerDistance: distance, sigma, weight: 1 }];
+  }
+
+  if (lmcSeparation < 16 || distance < 55) {
+    const outerUnit = smoothStep((lmcSeparation - 6) / 8);
+    return [
+      {
+        centerDistance: distance,
+        sigma: RED_CLUMP_LMC_SIGMA_KPC + (RED_CLUMP_LMC_OUTER_SIGMA_KPC - RED_CLUMP_LMC_SIGMA_KPC) * outerUnit,
+        weight: 1,
+      },
+    ];
+  }
+
+  return [{ centerDistance: distance, sigma: RED_CLUMP_BRIDGE_SIGMA_KPC, weight: 1 }];
+}
+
+function indexFieldsByName(fields) {
+  if (!Array.isArray(fields)) return null;
+  return Object.fromEntries(fields.map((field, index) => [field, index]));
+}
+
+function redClumpVolumeField(row, fields, name, fallback = NaN) {
+  const index = fields?.[name];
+  if (!Number.isInteger(index)) return fallback;
+  const value = Number(row[index]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function redClumpVolumeDistanceBounds(centerDistance, sigma, nearDistance, farDistance) {
+  if (!Number.isFinite(centerDistance) || !Number.isFinite(sigma) || sigma <= 0) return null;
+  const fallbackNear = centerDistance - RED_CLUMP_VOLUME_MAX_SIGMA_OFFSET * sigma;
+  const fallbackFar = centerDistance + RED_CLUMP_VOLUME_MAX_SIGMA_OFFSET * sigma;
+  const near = Number.isFinite(nearDistance) ? nearDistance : fallbackNear;
+  const far = Number.isFinite(farDistance) ? farDistance : fallbackFar;
+  let minDistance = Math.max(1, Math.min(near, far));
+  let maxDistance = Math.max(minDistance, Math.max(near, far));
+  const minDepth = Math.max(RED_CLUMP_VOLUME_MIN_DEPTH_KPC, sigma * 0.18);
+  if (maxDistance - minDistance < minDepth) {
+    const midpoint = (minDistance + maxDistance) * 0.5;
+    minDistance = Math.max(1, midpoint - minDepth * 0.5);
+    maxDistance = Math.max(minDistance + minDepth, midpoint + minDepth * 0.5);
+  }
+  return { nearDistance: minDistance, farDistance: maxDistance };
+}
+
+function redClumpVolumeRealizedDepthProfile(options) {
+  const { centerDistance, sigma, nearDistance, farDistance, confidenceUnit, seed, realizationKey } = options;
+  if (seed === DEFAULT_UNCERTAINTY_SEED) {
+    return { centerDistance, sigma, nearDistance, farDistance };
+  }
+
+  const confidence = clamp(confidenceUnit, 0, 1);
+  const uncertainty = (1 - confidence) ** 1.15;
+  if (uncertainty <= 0.0001) {
+    return { centerDistance, sigma, nearDistance, farDistance };
+  }
+
+  const key = realizationKey || `${centerDistance}:${sigma}:${nearDistance}:${farDistance}`;
+  const safeSigma = Math.max(sigma, RED_CLUMP_VOLUME_MIN_DEPTH_KPC);
+  const centerShift =
+    truncatedSeededStandardNormal(seed, `${key}:center`) *
+    safeSigma *
+    RED_CLUMP_VOLUME_UNCERTAINTY_SHIFT_SIGMA *
+    uncertainty;
+  const sigmaFactor = clamp(
+    1 +
+      truncatedSeededStandardNormal(seed, `${key}:sigma`) *
+        RED_CLUMP_VOLUME_UNCERTAINTY_WIDTH_SCALE *
+        uncertainty,
+    RED_CLUMP_VOLUME_UNCERTAINTY_MIN_SIGMA_FACTOR,
+    RED_CLUMP_VOLUME_UNCERTAINTY_MAX_SIGMA_FACTOR,
+  );
+  const realizedCenter = Math.max(1, centerDistance + centerShift);
+  const realizedSigma = Math.max(RED_CLUMP_VOLUME_MIN_DEPTH_KPC, safeSigma * sigmaFactor);
+  const realizedNearDistance = realizedCenter + (nearDistance - centerDistance) * sigmaFactor;
+  const realizedFarDistance = realizedCenter + (farDistance - centerDistance) * sigmaFactor;
+  const bounds = redClumpVolumeDistanceBounds(realizedCenter, realizedSigma, realizedNearDistance, realizedFarDistance);
+  if (!bounds) return null;
+  return {
+    centerDistance: realizedCenter,
+    sigma: realizedSigma,
+    nearDistance: bounds.nearDistance,
+    farDistance: bounds.farDistance,
+  };
+}
+
+function vectorFromLocalCoordinates(local, context) {
+  const basis = context.basis;
+  const origin = context.galacticVector;
+  return [
+    origin[0] + basis.east[0] * local[0] + basis.north[0] * local[1] + basis.radial[0] * local[2],
+    origin[1] + basis.east[1] * local[0] + basis.north[1] * local[1] + basis.radial[1] * local[2],
+    origin[2] + basis.east[2] * local[0] + basis.north[2] * local[1] + basis.radial[2] * local[2],
+  ];
+}
+
+function redClumpVolumeGridContext() {
+  return scene.coordinateContext?.centers?.bridge || scene.coordinateContext?.centers?.lmc || null;
+}
+
+function redClumpVolumeGridKey(xIndex, yIndex, zIndex) {
+  return `${xIndex}:${yIndex}:${zIndex}`;
+}
+
+function redClumpVolumeLocalGridIndex(local) {
+  return {
+    x: Math.round(local[0] / RED_CLUMP_VOLUME_GRID_SPACING_KPC),
+    y: Math.round(local[1] / RED_CLUMP_VOLUME_GRID_SPACING_KPC),
+    z: Math.round(local[2] / RED_CLUMP_VOLUME_GRID_DEPTH_STEP_KPC),
+  };
+}
+
+function redClumpVolumeVoxelLocalCenter(indexes, key) {
+  return [
+    (indexes.x + (seededUnit(`${key}:x`) - 0.5) * RED_CLUMP_VOLUME_GRID_JITTER) *
+      RED_CLUMP_VOLUME_GRID_SPACING_KPC,
+    (indexes.y + (seededUnit(`${key}:y`) - 0.5) * RED_CLUMP_VOLUME_GRID_JITTER) *
+      RED_CLUMP_VOLUME_GRID_SPACING_KPC,
+    (indexes.z + (seededUnit(`${key}:z`) - 0.5) * RED_CLUMP_VOLUME_GRID_JITTER) *
+      RED_CLUMP_VOLUME_GRID_DEPTH_STEP_KPC,
+  ];
+}
+
+function addRedClumpVolumeGridContribution(grid, key, indexes, contribution, edgeAlpha) {
+  if (!Number.isFinite(contribution) || contribution <= 0) return;
+  let voxel = grid.get(key);
+  if (!voxel) {
+    voxel = {
+      indexes,
+      count: 0,
+      edgeAlphaWeighted: 0,
+    };
+    grid.set(key, voxel);
+  }
+  voxel.count += contribution;
+  voxel.edgeAlphaWeighted += contribution * clamp(edgeAlpha, 0, 1);
+}
+
+function redClumpVolumeComponentAngularSamples(lonDeg, latDeg) {
+  return RED_CLUMP_VOLUME_GRID_ANGULAR_OFFSETS.map(([lonOffset, latOffset]) => ({
+    lonDeg: normalizeDegrees360(lonDeg + lonOffset * RED_CLUMP_CELL_SIZE_DEG),
+    latDeg: clamp(latDeg + latOffset * RED_CLUMP_CELL_SIZE_DEG, -89.999, 89.999),
+  }));
+}
+
+function depositRedClumpVolumeGridComponent(grid, context, options) {
+  const {
+    lonDeg,
+    latDeg,
+    centerDistance,
+    sigma,
+    nearDistance,
+    farDistance,
+    parent,
+    cellDensityCount,
+    componentWeight,
+    confidenceUnit,
+    seed = DEFAULT_UNCERTAINTY_SEED,
+    realizationKey = null,
+  } = options;
+  const componentCount = Math.max(0, cellDensityCount) * clamp(componentWeight, 0, 1);
+  if (!Number.isFinite(componentCount) || componentCount <= 0) return;
+  const realizedProfile = redClumpVolumeRealizedDepthProfile({
+    centerDistance,
+    sigma,
+    nearDistance,
+    farDistance,
+    confidenceUnit,
+    seed,
+    realizationKey,
+  });
+  if (!realizedProfile) return;
+
+  const depthSpan = Math.max(RED_CLUMP_VOLUME_MIN_DEPTH_KPC, realizedProfile.farDistance - realizedProfile.nearDistance);
+  const depthSlices = clamp(
+    Math.ceil(depthSpan / RED_CLUMP_VOLUME_GRID_DEPTH_STEP_KPC),
+    RED_CLUMP_VOLUME_GRID_MIN_DEPTH_SLICES,
+    RED_CLUMP_VOLUME_GRID_MAX_DEPTH_SLICES,
+  );
+  const depthSamples = [];
+  let depthWeightSum = 0;
+  for (let index = 0; index < depthSlices; index += 1) {
+    const t = (index + 0.5) / depthSlices;
+    const distance = realizedProfile.nearDistance + depthSpan * t;
+    const sigmaOffset = (distance - realizedProfile.centerDistance) / Math.max(realizedProfile.sigma, 0.001);
+    const weight = Math.exp(-0.5 * sigmaOffset * sigmaOffset);
+    depthSamples.push({ distance, weight });
+    depthWeightSum += weight;
+  }
+  if (depthWeightSum <= 0) return;
+
+  const angularSamples = redClumpVolumeComponentAngularSamples(lonDeg, latDeg);
+  const angularWeight = 1 / angularSamples.length;
+  for (const angularSample of angularSamples) {
+    for (const depthSample of depthSamples) {
+      const contribution = componentCount * angularWeight * (depthSample.weight / depthWeightSum);
+      const galacticVector = vectorFromLonLat(angularSample.lonDeg, angularSample.latDeg, depthSample.distance);
+      const local = projectLocalVector(galacticVector, context.galacticVector, context.basis);
+      const indexes = redClumpVolumeLocalGridIndex(local);
+      const key = redClumpVolumeGridKey(indexes.x, indexes.y, indexes.z);
+      addRedClumpVolumeGridContribution(grid, key, indexes, contribution, parent.edgeAlpha);
+    }
+  }
+}
+
+function depositRedClumpVolumePayloadComponents(grid, context, points, payload, seed = DEFAULT_UNCERTAINTY_SEED) {
+  const components = payload?.components;
+  const fields = indexFieldsByName(payload?.fields?.components);
+  if (!Array.isArray(components) || !fields) return null;
+  const requiredFields = [
+    "lonBin",
+    "latBin",
+    "lonDeg",
+    "latDeg",
+    "centerDistanceKpc",
+    "sigmaKpc",
+    "weight",
+    "densityUnit",
+  ];
+  if (requiredFields.some((field) => !Number.isInteger(fields[field]))) return null;
+
+  const pointByGridKey = new Map(points.map((point) => [point.gridKey, point]));
+  const coveredGridKeys = new Set();
+  for (const row of components) {
+    const lonBin = redClumpVolumeField(row, fields, "lonBin");
+    const latBin = redClumpVolumeField(row, fields, "latBin");
+    const point = pointByGridKey.get(redClumpGridKey(lonBin, latBin));
+    if (!point) continue;
+    coveredGridKeys.add(point.gridKey);
+
+    const lonDeg = redClumpVolumeField(row, fields, "lonDeg", point.row[RC.lon]);
+    const latDeg = redClumpVolumeField(row, fields, "latDeg", point.row[RC.lat]);
+    const centerDistance = redClumpVolumeField(row, fields, "centerDistanceKpc", redClumpVolumePriorDistance(point.row));
+    const sigma = redClumpVolumeField(row, fields, "sigmaKpc", RED_CLUMP_LMC_SIGMA_KPC);
+    const componentWeight = clamp(redClumpVolumeField(row, fields, "weight", 1), 0, 1);
+    const nearDistance = redClumpVolumeField(row, fields, "q05DistanceKpc");
+    const farDistance = redClumpVolumeField(row, fields, "q95DistanceKpc");
+    const cellDensityCount = redClumpVolumeField(row, fields, "cellDensityCount", redClumpGaiaDensityCountForPoint(point));
+    const confidenceUnit = clamp(redClumpVolumeField(row, fields, "confidenceUnit", 1), 0, 1);
+    const componentIndex = redClumpVolumeField(row, fields, "componentIndex", 0);
+    const bounds = redClumpVolumeDistanceBounds(centerDistance, sigma, nearDistance, farDistance);
+    if (!bounds) continue;
+
+    depositRedClumpVolumeGridComponent(grid, context, {
+      lonDeg,
+      latDeg,
+      centerDistance,
+      sigma,
+      nearDistance: bounds.nearDistance,
+      farDistance: bounds.farDistance,
+      parent: point,
+      cellDensityCount,
+      confidenceUnit,
+      componentWeight,
+      seed,
+      realizationKey: `${point.gridKey}:payload:${componentIndex}`,
+    });
+  }
+  return coveredGridKeys;
+}
+
+function depositRedClumpVolumeAnalyticComponents(
+  grid,
+  context,
+  point,
+  seed = DEFAULT_UNCERTAINTY_SEED,
+  confidenceUnit = RED_CLUMP_VOLUME_FALLBACK_CONFIDENCE,
+) {
+  const components = redClumpVolumeComponents(point.row);
+  for (let componentIndex = 0; componentIndex < components.length; componentIndex += 1) {
+    const component = components[componentIndex];
+    const bounds = redClumpVolumeDistanceBounds(component.centerDistance, component.sigma, NaN, NaN);
+    if (!bounds) continue;
+    depositRedClumpVolumeGridComponent(grid, context, {
+      lonDeg: point.row[RC.lon],
+      latDeg: point.row[RC.lat],
+      centerDistance: component.centerDistance,
+      sigma: component.sigma,
+      nearDistance: bounds.nearDistance,
+      farDistance: bounds.farDistance,
+      parent: point,
+      cellDensityCount: redClumpGaiaDensityCountForPoint(point),
+      confidenceUnit,
+      componentWeight: component.weight,
+      seed,
+      realizationKey: `${point.gridKey}:fallback:${componentIndex}`,
+    });
+  }
+}
+
+function buildRedClumpVolume(points, volumePayload = null, seed = DEFAULT_UNCERTAINTY_SEED) {
+  const context = redClumpVolumeGridContext();
+  if (!context) return [];
+
+  const grid = new Map();
+  const realizationSeed = clampUncertaintySeed(seed);
+  const coveredGridKeys = depositRedClumpVolumePayloadComponents(grid, context, points, volumePayload, realizationSeed);
+
+  for (const point of points) {
+    if (coveredGridKeys?.has(point.gridKey)) continue;
+    depositRedClumpVolumeAnalyticComponents(grid, context, point, realizationSeed);
+  }
+
+  let maxCount = 0;
+  for (const voxel of grid.values()) {
+    maxCount = Math.max(maxCount, voxel.count);
+  }
+  if (maxCount <= 0) return [];
+
+  const volume = [];
+  for (const [key, voxel] of grid.entries()) {
+    const local = redClumpVolumeVoxelLocalCenter(voxel.indexes, key);
+    const galacticVector = vectorFromLocalCoordinates(local, context);
+    const densityUnit = clamp(Math.log1p(voxel.count) / Math.log1p(maxCount), 0, 1);
+    const weight =
+      RED_CLUMP_VOLUME_DENSITY_FLOOR +
+      (1 - RED_CLUMP_VOLUME_DENSITY_FLOOR) * densityUnit ** RED_CLUMP_VOLUME_DENSITY_POWER;
+    volume.push({
+      kind: "redclumpVolumeVoxel",
+      coordinates: coordinatesFromGalacticVector(galacticVector),
+      activeCoordinates: null,
+      edgeAlpha: voxel.edgeAlphaWeighted / Math.max(voxel.count, 0.000001),
+      densityAlpha: 1,
+      weight,
+      sample: hashString(`rcv-grid-${key}`) % 100,
+      densityCount: voxel.count,
+    });
+  }
+  return volume;
+}
+
 function hasOpenRedClumpNeighbor(cellSet, x, y, radius) {
   for (let dx = -radius; dx <= radius; dx += 1) {
     if (!cellSet.has(redClumpGridKey(x + dx, y - radius))) return true;
@@ -12051,8 +14753,9 @@ function buildRedClumpSurface(points) {
   return cells;
 }
 
-function preparePoints(payload) {
-  scene.payload = payload;
+async function preparePoints(payload, redClumpVolumePayload = null) {
+  await advanceLoadingStage("Preparing scene assets", LOADING_PROGRESS.sceneStart);
+  scene.redClumpVolumePayload = RED_CLUMP_VOLUME_ANALYSIS_ENABLED ? redClumpVolumePayload : null;
   scene.spectralClasses = payload.spectralClasses;
   scene.temperatureAnchors = normalizedTemperatureAnchors(payload.meta?.viTemperatureCalibration?.anchors);
   scene.temperatureGrid = normalizedTemperatureGrid(payload.meta?.viLuminosityTemperatureCalibration);
@@ -12065,7 +14768,7 @@ function preparePoints(payload) {
   scene.bounds = payload.bounds;
   scene.coordinateContext = coordinateContextFromPayload(payload);
   scene.skyGridBounds = skyGridBoundsFromPayload(payload);
-  scene.catalog = payload.datasets.catalog.map((row) => {
+  scene.catalog = await mapWithLoadingProgress(payload.datasets.catalog, (row) => {
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const intrinsicVMinusI = intrinsicVMinusIForRow(row);
     const baseCoordinates = catalogCoordinates(row);
@@ -12115,7 +14818,15 @@ function preparePoints(payload) {
       staticAlpha: 0,
     };
     return point;
+  }, {
+    start: LOADING_PROGRESS.sceneStart,
+    end: LOADING_PROGRESS.catalogDone,
+    message: "Building catalog stars",
   });
+  await advanceLoadingStage("Fitting atlas wireframes", LOADING_PROGRESS.catalogDone);
+  scene.annotationFits = precomputedAtlasAnnotationFits(payload.meta?.annotationFits) || buildAtlasAnnotationFits();
+  scene.annotationTargets = annotationTargetsForFits(scene.annotationFits);
+  await advanceLoadingStage("Preparing cluster metadata", LOADING_PROGRESS.annotationDone);
   const clusterGlowBinsByIndex = new Map();
   for (const row of payload.datasets.clusterGlowBins || []) {
     const clusterIndex = row[CG.cluster];
@@ -12167,8 +14878,9 @@ function preparePoints(payload) {
       clusterPulsatorStripModel.strips.map((strip) => [strip.datasetKey, strip.samples.length]),
     ),
   };
+  await advanceLoadingStage("Building synthetic cluster stars", LOADING_PROGRESS.clusterMetadataDone);
   scene.clusterStarsByCluster = new Map();
-  scene.clusterStars = (payload.datasets.clusterStars || []).map((row, index) => {
+  scene.clusterStars = await mapWithLoadingProgress(payload.datasets.clusterStars || [], (row, index) => {
     const clusterIndex = row[CS.cluster];
     const clusterRow = clusterRows[clusterIndex];
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
@@ -12183,6 +14895,8 @@ function preparePoints(payload) {
       : [0, 0, 0];
     const pulsatorMatch = clusterStarInstabilityStripMatch(row, clusterPulsatorStripModel);
     const lightCurve = makeClusterStarWaveform(row, index, clusterRow, pulsatorMatch);
+    const sample = hashString(`cs-${row[CS.cluster]}-${index}`) % 100;
+    const renderPriority = clusterStarRenderPriorityForRow(row, sample);
     if (lightCurve) {
       clusterPulsatorStats.total += 1;
       clusterPulsatorStats.byDataset[lightCurve.referenceDatasetKey] =
@@ -12207,13 +14921,16 @@ function preparePoints(payload) {
       currentDistance: row[CS.distance],
       currentLum: row[CS.lum],
       currentLogLum: row[CS.logLum],
-      radiusUnit: pointRadiusUnitFromStellarRadius(row[CS.radius]),
+      radiusUnit: clusterStarRadiusUnitFromLuminosityAndRadius(row[CS.lum], row[CS.radius]),
       alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CS.lum]) * BASE_LUMINOSITY_FACTOR,
+      brightLodAlpha: clusterStarBrightLodAlphaFromLuminosity(row[CS.lum]),
+      renderPriority,
       vMinusI0: Number.isFinite(row[CS.vMinusI0]) ? row[CS.vMinusI0] : null,
       color: Number.isFinite(row[CS.temperature])
         ? colorForTemperature(row[CS.temperature])
         : colorForVMinusI(row[CS.vMinusI0], row[CS.spectral]),
-      sample: hashString(`cs-${row[CS.cluster]}-${index}`) % 100,
+      sample,
+      clusterVisibilitySample: clusterStarDensitySampleFromPriority(sample, renderPriority),
       lightCurve,
     };
     const starLuminosity = Number.isFinite(row[CS.lum]) ? Math.max(0, row[CS.lum]) : 0;
@@ -12257,7 +14974,20 @@ function preparePoints(payload) {
       staticAlpha: 0,
     };
     return point;
+  }, {
+    start: LOADING_PROGRESS.clusterMetadataDone,
+    end: LOADING_PROGRESS.clusterStarsDone,
+    message: "Building synthetic cluster stars",
   });
+  for (const clusterStars of scene.clusterStarsByCluster.values()) {
+    clusterStars.sort(
+      (left, right) =>
+        (right.renderPriority || 0) - (left.renderPriority || 0) ||
+        (right.row?.[CS.lum] || 0) - (left.row?.[CS.lum] || 0) ||
+        (left.sample || 0) - (right.sample || 0),
+    );
+  }
+  await advanceLoadingStage("Preparing cluster targets", LOADING_PROGRESS.clusterStarsDone);
   scene.clusterPulsatorStats = clusterPulsatorStats;
   scene.clusters = clusterRows.map((row, index) => {
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
@@ -12282,6 +15012,7 @@ function preparePoints(payload) {
       currentDistance: row[CL.distance],
       radiusPc: row[CL.radiusPc],
       glowAlphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[CL.unresolvedLum] || 0),
+      renderedStarLuminosity: renderedLuminosity,
       renderedStarGlowAlphaBaseUnit: pointAlphaUnitBaseFromLuminosity(renderedLuminosity) * BASE_LUMINOSITY_FACTOR,
       renderedStarGlowRgb,
       glowOuterRadiusFraction,
@@ -12300,8 +15031,46 @@ function preparePoints(payload) {
     };
     return point;
   });
-  const redClumpEdgeFactors = redClumpEdgeWeights(payload.datasets.redClump);
-  scene.redClump = payload.datasets.redClump.map((row, index) => {
+  await advanceLoadingStage("Preparing binary systems", LOADING_PROGRESS.clustersDone);
+  scene.eclipsingBinaries = (payload.datasets.eclipsingBinaryDistances || []).map((row, index) => {
+    const projected = { x: 0, y: 0, z: 0, perspective: 1 };
+    const baseCoordinates = eclipsingBinaryCoordinates(row);
+    const color = colorForEclipsingBinaryRow(row);
+    const rgbValue = cssColorToRgb(color);
+    const point = {
+      kind: "eb",
+      index,
+      row,
+      baseCoordinates,
+      coordinates: baseCoordinates,
+      activeCoordinates: null,
+      projected,
+      activeProjected: null,
+      currentDistance: row[EB.distance],
+      currentRadius: row[EB.equivalentRadius],
+      currentLum: row[EB.systemLum],
+      radiusUnit: pointRadiusUnitFromStellarRadius(row[EB.equivalentRadius]),
+      alphaBaseUnit: pointAlphaUnitBaseFromLuminosity(row[EB.systemLum]) * BASE_LUMINOSITY_FACTOR,
+      color,
+      rgb: rgbValue,
+      sample: hashString(`eb-${row[EB.id]}-${index}`) % 100,
+      searchText: eclipsingBinarySearchTextForRow(row),
+      lightCurve: makeEclipsingBinaryLightCurve(row),
+    };
+    point.drawItem = {
+      point,
+      projected,
+      baseRadius: 0,
+      alphaUnit: 0,
+      currentRadius: 0,
+      currentAlpha: 0,
+    };
+    return point;
+  });
+  await advanceLoadingStage("Building red-clump cells", LOADING_PROGRESS.binariesDone);
+  const redClumpRows = payload.datasets.redClump || [];
+  const redClumpEdgeFactors = redClumpEdgeWeights(redClumpRows);
+  scene.redClump = await mapWithLoadingProgress(redClumpRows, (row, index) => {
     const grid = redClumpGridPosition(row);
     const projected = { x: 0, y: 0, z: 0, perspective: 1 };
     const point = {
@@ -12325,12 +15094,24 @@ function preparePoints(payload) {
       edgeAlpha: point.edgeAlpha,
     };
     return point;
+  }, {
+    start: LOADING_PROGRESS.binariesDone,
+    end: LOADING_PROGRESS.redClumpCellsDone,
+    message: "Building red-clump cells",
   });
+  await advanceLoadingStage("Building red-clump surface", LOADING_PROGRESS.redClumpCellsDone);
   smoothRedClumpDensities(scene.redClump);
   scene.redClumpSurface = buildRedClumpSurface(scene.redClump);
+  scene.redClumpVolumeSeed = clampUncertaintySeed(state.uncertaintySeed);
+  scene.redClumpVolume = [];
+  if (RED_CLUMP_VOLUME_ANALYSIS_ENABLED) {
+    await advanceLoadingStage("Building red-clump volume", LOADING_PROGRESS.redClumpSurfaceDone);
+    scene.redClumpVolume = buildRedClumpVolume(scene.redClump, redClumpVolumePayload, scene.redClumpVolumeSeed);
+  }
   if (state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED) {
     applyUncertaintyRealization({ updateTarget: false });
   }
+  await advanceLoadingStage("Finalizing scene assets", LOADING_PROGRESS.redClumpVolumeDone);
   invalidateCoordinateCache();
   invalidateActivePointLists();
 
@@ -12347,7 +15128,12 @@ function preparePoints(payload) {
   if (outputs.clusterCount) {
     outputs.clusterCount.textContent = formatInteger(payload.counts.clusters || 0);
   }
-  markProjectionDirty();
+  if (outputs.ebCount) {
+    outputs.ebCount.textContent = formatInteger(payload.counts.eclipsingBinaryDistances || 0);
+  }
+  scene.payload = payload;
+  updateCoordinateReadout();
+  projectionDirty = true;
 }
 
 async function init() {
@@ -12356,17 +15142,20 @@ async function init() {
     buildCoordinateControls();
     syncRangeOutputs();
     resizeCanvas();
-    const payload = await fetchAtlasPayload();
+    const [payload, redClumpVolumePayload] = await Promise.all([
+      fetchAtlasPayload(),
+      RED_CLUMP_VOLUME_ANALYSIS_ENABLED ? fetchRedClumpVolumePayload() : Promise.resolve(null),
+    ]);
     primeIntroRotation();
-    setLoadingProgress(0.94);
-    await nextFrame();
-    preparePoints(payload);
-    setLoadingProgress(0.98);
+    await preparePoints(payload, redClumpVolumePayload);
+    await advanceLoadingStage("Building atlas controls", LOADING_PROGRESS.redClumpVolumeDone);
     buildLegend();
     buildSources();
     setTarget(null);
-    setLoadingProgress(1);
+    await advanceLoadingStage("Prewarming first frame", LOADING_PROGRESS.controlsDone);
     await prewarmIntroFrame();
+    setLoadingStage("Atlas ready", LOADING_PROGRESS.complete);
+    await nextFrame();
     elements.loading.classList.add("hidden");
     startIntroRotation();
     queueRender();

@@ -310,7 +310,7 @@ h2 {
   top: 14px;
   right: 14px;
   bottom: 14px;
-  z-index: 3;
+  z-index: 5;
   width: min(360px, calc(100vw - 28px));
   overflow-y: auto;
   border: 1px solid var(--line);
@@ -398,6 +398,28 @@ h2 {
 
 .check + .check {
   margin-top: 4px;
+}
+
+.redClumpModeRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 7px 0 0 29px;
+}
+
+.redClumpModeButton {
+  min-height: 25px;
+  border-radius: 7px;
+  padding: 3px 6px;
+  color: var(--alabaster-grey);
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.redClumpModeButton.active {
+  border-color: rgba(252, 163, 17, 0.72);
+  background: rgba(252, 163, 17, 0.15);
+  color: var(--cream);
 }
 
 .check > input[type="checkbox"] {
@@ -1100,6 +1122,18 @@ h2 {
   color: var(--cream);
 }
 
+#annotationToggle.active {
+  border-color: rgba(114, 227, 255, 0.72);
+  background: rgba(114, 227, 255, 0.14);
+  color: var(--cream);
+}
+
+#featureAnnotationToggle.active {
+  border-color: rgba(152, 255, 170, 0.72);
+  background: rgba(152, 255, 170, 0.14);
+  color: var(--cream);
+}
+
 .panLockOption {
   display: inline-flex;
   align-items: center;
@@ -1345,9 +1379,12 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(8, 14, 27, 0.88);
+  width: min(280px, calc(100vw - 40px));
   padding: 11px 14px 14px;
   color: var(--cream);
   font-size: 0.86rem;
+  text-align: center;
+  white-space: nowrap;
   overflow: hidden;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.54);
 }

@@ -1,0 +1,15 @@
+# VISCACHA III Table 1: Magellanic Bridge and Counter-Bridge star clusters.
+# Source: A&A 647, L9 (2021), arXiv:2103.02600.
+# Age, [Fe/H]_CMD, E(B-V), distance, RVhel, and proper motions come from Dias et al. 2021.
+# Structure supplements come from Santos et al. 2020 VISCACHA II (CDS J/MNRAS/498/205)
+# where available, otherwise Bica et al. 2020 (CDS J/AJ/159/82) catalog angular sizes.
+# Empty Vint or structural fields mean the build must keep an existing matched value or
+# fall back to a clearly flagged estimate.
+name	aliases	galaxy	component	ra_hms	dec_dms	age_gyr	e_age_gyr_plus	e_age_gyr_minus	feh_cmd	e_feh_cmd_plus	e_feh_cmd_minus	feh_cat	e_feh_cat	ebv	e_ebv_plus	e_ebv_minus	distance_kpc	e_distance_kpc_plus	e_distance_kpc_minus	smc_axis_deg	rv_helio_kms	e_rv_helio_kms	pmra_masyr	e_pmra_masyr	pmdec_masyr	e_pmdec_masyr	rdp_core_arcsec	rdp_tidal_arcsec	eff_scale_arcsec	eff_gamma	v_int	e_v_int	bica_major_arcmin	bica_minor_arcmin	quality_flags	structure_source
+BS196	OGLB36	Bridge	Magellanic Bridge	01:48:01.8	-70:00:13	3.89	0.68	0.50	-0.75	0.22	0.19	-0.89	0.04	0.05	0.04	0.04	50.1	1.6	2.2	5.978	135.5	1.4	1.12	0.07	-1.14	0.06							0.75	0.75	viscacha3:bica2020-size-only	Bica+2020
+BS188	OGLS302	Bridge	Magellanic Bridge	01:35:10.9	-71:44:11	1.82	0.22	0.20	-0.58	0.13	0.13	-0.94	0.06	0.00	0.03	0.00	52.7	3.0	3.1	4.441	120.3	3.5	1.25	0.08	-1.35	0.07							1.10	1.10	viscacha3:bs188-shallow-cmd,viscacha3:bica2020-size-only	Bica+2020
+HW56	RZ169;OGLS336	Bridge	Magellanic Bridge	01:07:41.1	-70:56:06	3.09	0.22	0.14	-0.54	0.07	0.12	-0.97	0.12	0.03	0.02	0.02	53.5	1.2	1.2	2.397	157.7	5.4	0.99	0.11	-1.27	0.10	14	49	7	2.3	15.95	0.22			viscacha3:hw56-dense-field	VISCACHA II RDP/SBP
+HW85	OGLB37;OGLS304	Bridge	Magellanic Bridge	01:42:28.0	-71:16:44	1.74	0.08	0.12	-0.83	0.07	0.05	-0.82	0.06	0.04	0.02	0.02	54.0	1.2	2.0	5.219	143.2	3.0	1.26	0.09	-1.41	0.09	12	63	20	5.9	14.68	0.21			none	VISCACHA II RDP/SBP
+L100	Lindsay100;ESO51SC27	Bridge	Magellanic Bridge	01:18:16.9	-72:00:06	3.16	0.15	0.14	-0.73	0.03	0.03	-0.89	0.06	0.01	0.01	0.01	58.6	0.8	0.5	2.556	145.8	1.4	0.98	0.05	-1.10	0.05	11	91	19	4.4	13.96	0.10			none	VISCACHA II RDP/SBP
+B168	Bruck168;OGLS343	Bridge	Transition	01:26:42.7	-70:47:01	6.60	0.80	0.90	-1.22	0.20	0.15	-1.08	0.06	0.00	0.02	0.01	61.9	2.3	2.0	3.584	141.7	4.6	0.94	0.09	-1.15	0.09	8	99	13	3.6	14.94	0.23			none	VISCACHA II RDP/SBP
+IC1708	L102;ESO52SC2;OGLS342	Counter-Bridge	Counter-Bridge	01:24:55.9	-71:11:04	0.93	0.16	0.04	-1.02	0.05	0.10	-1.11	0.06	0.06	0.02	0.02	65.2	1.2	1.8	3.286	214.9	2.7	0.39	0.10	-1.26	0.07	14	97	15	3.6	14.14	0.05			none	VISCACHA II RDP/SBP

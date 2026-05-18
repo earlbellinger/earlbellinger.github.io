@@ -42,6 +42,9 @@ test-results/
 /data/
 /diagnostics/
 
+# Unreleased/internal red-clump volume sidecars
+/public/data/xmc-red-clump-volume*.json*
+
 # Bulky scientific/archive formats
 *.fits
 *.tar
