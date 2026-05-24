@@ -17,12 +17,19 @@ function setupCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const size = Math.min(rect.width, rect.height);
+  const compact = size < 440;
+  const diagramScale = size < 360 ? 0.35 : compact ? 0.372 : size < 560 ? 0.41 : 0.43;
   frame = {
     width: rect.width,
     height: rect.height,
+    size,
+    compact,
     cx: rect.width / 2,
     cy: rect.height / 2,
-    scale: size * 0.43,
+    scale: size * diagramScale,
+    textScale: Math.min(1, Math.max(0.52, size / 660)),
+    strokeScale: Math.min(1, Math.max(0.72, size / 700)),
+    markerScale: Math.min(1, Math.max(0.62, size / 680)),
   };
 }
 
@@ -31,6 +38,23 @@ function toScreen(point) {
     x: frame.cx + point.x * frame.scale,
     y: frame.cy - point.y * frame.scale,
   };
+}
+
+function scaleFont(fontSize) {
+  const minimum = fontSize >= 30 ? 18 : fontSize >= 20 ? 12 : 6.5;
+  return Math.max(minimum, fontSize * frame.textScale);
+}
+
+function scaleStroke(width) {
+  return Math.max(0.75, width * frame.strokeScale);
+}
+
+function scaleHalo(width) {
+  return Math.max(1.2, width * frame.textScale);
+}
+
+function scaleMarker(size) {
+  return Math.max(3.2, size * frame.markerScale);
 }
 
 function prepareRay(ray) {
@@ -91,7 +115,7 @@ function drawPath(ray, color, lineWidth, alpha = 1, limitIndex = ray.points.leng
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
+  ctx.lineWidth = scaleStroke(lineWidth);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.beginPath();
@@ -121,7 +145,7 @@ function drawCurrentPoint(marker, color, size) {
   ctx.save();
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.arc(point.x, point.y, size, 0, Math.PI * 2);
+  ctx.arc(point.x, point.y, scaleMarker(size), 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -130,7 +154,7 @@ function drawCircle(radius, color, width, alpha = 1) {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = color;
-  ctx.lineWidth = width;
+  ctx.lineWidth = scaleStroke(width);
   ctx.beginPath();
   ctx.arc(frame.cx, frame.cy, radius * frame.scale, 0, Math.PI * 2);
   ctx.stroke();
@@ -162,7 +186,7 @@ function drawCircumferenceTrace(
 
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = width;
+  ctx.lineWidth = scaleStroke(width);
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.arc(frame.cx, frame.cy, radius * frame.scale, start, end);
@@ -178,7 +202,7 @@ function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56) 
   const chunks = Math.min(84, Math.max(3, ray.points.length - 1));
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
+  ctx.lineWidth = scaleStroke(lineWidth);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
@@ -208,7 +232,7 @@ function drawRadialLabel(text, radius, theta, color, fontSize, weight = 700) {
   const y = frame.cy - radius * Math.sin(theta) * frame.scale;
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `${weight} ${fontSize}px Inter, sans-serif`;
+  ctx.font = `${weight} ${scaleFont(fontSize)}px Inter, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, x, y);
@@ -228,11 +252,11 @@ function drawRadialLabelWithHalo(
   const x = frame.cx + radius * Math.cos(theta) * frame.scale;
   const y = frame.cy - radius * Math.sin(theta) * frame.scale;
   ctx.save();
-  ctx.font = `${weight} ${fontSize}px Inter, sans-serif`;
+  ctx.font = `${weight} ${scaleFont(fontSize)}px Inter, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  ctx.lineWidth = haloWidth;
+  ctx.lineWidth = scaleHalo(haloWidth);
   ctx.strokeStyle = haloColor;
   ctx.strokeText(text, x, y);
   ctx.fillStyle = color;
@@ -251,11 +275,11 @@ function drawCenteredHaloText(
   haloColor = SUN_INSIDE_COLOR,
 ) {
   ctx.save();
-  ctx.font = `${weight} ${fontSize}px Inter, sans-serif`;
+  ctx.font = `${weight} ${scaleFont(fontSize)}px Inter, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  ctx.lineWidth = haloWidth;
+  ctx.lineWidth = scaleHalo(haloWidth);
   ctx.strokeStyle = haloColor;
   ctx.strokeText(text, x, y);
   ctx.fillStyle = color;
@@ -274,7 +298,7 @@ function drawTick(radius0, radius1, theta, color, width) {
   };
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = width;
+  ctx.lineWidth = scaleStroke(width);
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
@@ -304,7 +328,7 @@ function drawClockNumbers(activeLabels) {
     if (active) {
       drawRadialLabelWithHalo(
         String(hour),
-        1.085,
+        frame.compact ? 1.062 : 1.085,
         theta,
         hourRay?.markerColor || "#e76f51",
         29,
@@ -313,7 +337,7 @@ function drawClockNumbers(activeLabels) {
         "#111111",
       );
     } else {
-      drawRadialLabel(String(hour), 1.065, theta, SUN_INSIDE_COLOR, 25, 780);
+      drawRadialLabel(String(hour), frame.compact ? 1.045 : 1.065, theta, SUN_INSIDE_COLOR, 25, 780);
     }
   }
 
@@ -326,7 +350,7 @@ function drawClockNumbers(activeLabels) {
       if (major && !activeExact) {
         drawRadialLabelWithHalo(
           String(minute).padStart(2, "0"),
-          minuteRay.outerRadius + 0.03,
+          minuteRay.outerRadius + (frame.compact ? 0.018 : 0.03),
           theta,
           minuteRay.color,
           11,
@@ -345,7 +369,7 @@ function drawMovingMinuteSecondLabels(activeLabels) {
   if (minuteRay) {
     drawRadialLabelWithHalo(
       String(activeLabels.minute).padStart(2, "0"),
-      minuteRay.outerRadius + 0.042,
+      minuteRay.outerRadius + (frame.compact ? 0.03 : 0.042),
       angleForClockIndex(activeLabels.minute, 60),
       minuteRay.markerColor || minuteRay.color,
       14,
@@ -389,7 +413,7 @@ function drawDialDateTime(now) {
   drawCenteredHaloText(
     formatDateText(now),
     frame.cx,
-    frame.cy - frame.scale * 0.69,
+    frame.cy - frame.scale * (frame.compact ? 0.66 : 0.69),
     "#264653",
     36,
     840,
@@ -399,7 +423,7 @@ function drawDialDateTime(now) {
   drawCenteredHaloText(
     formatTimeText(now),
     frame.cx,
-    frame.cy + frame.scale * 0.69,
+    frame.cy + frame.scale * (frame.compact ? 0.66 : 0.69),
     "#264653",
     38,
     850,
@@ -451,7 +475,7 @@ function draw(now) {
   const secondRay = preparedRays.find((ray) => ray.id === "seconds");
   drawCircle(1, "rgba(38, 70, 83, 0.24)", 1.45);
   if (hourRay) {
-    drawCircumferenceTrace(hourRay, progress.hours, 2.25, SUN_INSIDE_COLOR, 1.014);
+    drawCircumferenceTrace(hourRay, progress.hours, 2.25, SUN_INSIDE_COLOR, frame.compact ? 1.008 : 1.014);
   }
   if (minuteRay) {
     drawCircumferenceTrace(minuteRay, progress.minutes, 1.55);
@@ -531,7 +555,24 @@ async function loadClock() {
   animate();
 }
 
-window.addEventListener("resize", () => {
+let resizeFrame = null;
+function scheduleResize() {
+  if (resizeFrame !== null) {
+    cancelAnimationFrame(resizeFrame);
+  }
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null;
+    setupCanvas();
+    draw(new Date());
+  });
+}
+
+window.addEventListener("resize", scheduleResize);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", scheduleResize);
+}
+
+window.addEventListener("orientationchange", () => {
   setupCanvas();
   draw(new Date());
 });
