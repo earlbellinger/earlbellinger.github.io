@@ -18,12 +18,14 @@ function setupCanvas() {
 
   const size = Math.min(rect.width, rect.height);
   const compact = size < 440;
-  const diagramScale = size < 360 ? 0.35 : compact ? 0.372 : size < 560 ? 0.41 : 0.43;
+  const narrow = size < 560;
+  const diagramScale = size < 360 ? 0.34 : compact ? 0.36 : narrow ? 0.392 : 0.43;
   frame = {
     width: rect.width,
     height: rect.height,
     size,
     compact,
+    narrow,
     cx: rect.width / 2,
     cy: rect.height / 2,
     scale: size * diagramScale,
@@ -50,6 +52,9 @@ function scaleStroke(width) {
 }
 
 function scaleHalo(width) {
+  if (width <= 0) {
+    return 0;
+  }
   return Math.max(1.2, width * frame.textScale);
 }
 
@@ -256,9 +261,12 @@ function drawRadialLabelWithHalo(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  ctx.lineWidth = scaleHalo(haloWidth);
-  ctx.strokeStyle = haloColor;
-  ctx.strokeText(text, x, y);
+  const scaledHalo = scaleHalo(haloWidth);
+  if (scaledHalo > 0) {
+    ctx.lineWidth = scaledHalo;
+    ctx.strokeStyle = haloColor;
+    ctx.strokeText(text, x, y);
+  }
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
   ctx.restore();
@@ -279,9 +287,12 @@ function drawCenteredHaloText(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  ctx.lineWidth = scaleHalo(haloWidth);
-  ctx.strokeStyle = haloColor;
-  ctx.strokeText(text, x, y);
+  const scaledHalo = scaleHalo(haloWidth);
+  if (scaledHalo > 0) {
+    ctx.lineWidth = scaledHalo;
+    ctx.strokeStyle = haloColor;
+    ctx.strokeText(text, x, y);
+  }
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
   ctx.restore();
@@ -318,6 +329,13 @@ function activeLabelBuckets(now) {
   return { hour, minute, second };
 }
 
+function hourLabelRadius(active) {
+  if (active) {
+    return frame.compact ? 1.125 : frame.narrow ? 1.115 : 1.095;
+  }
+  return frame.compact ? 1.095 : frame.narrow ? 1.085 : 1.075;
+}
+
 function drawClockNumbers(activeLabels) {
   const hourRay = preparedRays.find((ray) => ray.id === "hours");
 
@@ -328,16 +346,16 @@ function drawClockNumbers(activeLabels) {
     if (active) {
       drawRadialLabelWithHalo(
         String(hour),
-        frame.compact ? 1.062 : 1.085,
+        hourLabelRadius(true),
         theta,
         hourRay?.markerColor || "#e76f51",
         29,
         850,
-        2.4,
+        frame.narrow ? 1.2 : 2.1,
         "#111111",
       );
     } else {
-      drawRadialLabel(String(hour), frame.compact ? 1.045 : 1.065, theta, SUN_INSIDE_COLOR, 25, 780);
+      drawRadialLabel(String(hour), hourLabelRadius(false), theta, SUN_INSIDE_COLOR, 25, 780);
     }
   }
 
@@ -350,12 +368,12 @@ function drawClockNumbers(activeLabels) {
       if (major && !activeExact) {
         drawRadialLabelWithHalo(
           String(minute).padStart(2, "0"),
-          minuteRay.outerRadius + (frame.compact ? 0.018 : 0.03),
+          minuteRay.outerRadius + (frame.narrow ? 0.062 : 0.03),
           theta,
           minuteRay.color,
           11,
           720,
-          5,
+          frame.narrow ? 0 : 5,
           SUN_INSIDE_COLOR,
         );
       }
@@ -369,12 +387,12 @@ function drawMovingMinuteSecondLabels(activeLabels) {
   if (minuteRay) {
     drawRadialLabelWithHalo(
       String(activeLabels.minute).padStart(2, "0"),
-      minuteRay.outerRadius + (frame.compact ? 0.03 : 0.042),
+      minuteRay.outerRadius + (frame.narrow ? 0.078 : 0.042),
       angleForClockIndex(activeLabels.minute, 60),
       minuteRay.markerColor || minuteRay.color,
       14,
       840,
-      4.2,
+      frame.narrow ? 1.6 : 4.2,
       SUN_INSIDE_COLOR,
     );
   }
@@ -388,7 +406,7 @@ function drawMovingMinuteSecondLabels(activeLabels) {
       secondRay.markerColor || secondRay.color,
       13,
       840,
-      3.4,
+      frame.narrow ? 1.4 : 3.4,
       SUN_INSIDE_COLOR,
     );
   }
