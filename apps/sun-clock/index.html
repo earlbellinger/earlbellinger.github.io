@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bellringer Sun Clock</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="clock.css">
+  </head>
+  <body>
+    <main class="clock-shell">
+      <section class="clock-stage" aria-label="Live asteroseismology clock">
+        <canvas id="clockCanvas" aria-label="Asteroseismology ray clock"></canvas>
+      </section>
+    </main>
+
+    <script src="clock-data.js?v=standalone-clock"></script>
+    <script src="clock.js?v=exterior-hour-trace"></script>
+  </body>
+</html>
