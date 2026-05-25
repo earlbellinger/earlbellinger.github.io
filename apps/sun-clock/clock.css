@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #264653;
-  color: #e9c46a;
+  background: #540b0e;
+  color: #fff3b0;
   --page-pad: clamp(4px, 1.4vmin, 10px);
   --clock-size: min(
     calc(100vw - var(--page-pad) - var(--page-pad)),
@@ -17,14 +17,14 @@
 html {
   width: 100%;
   min-height: 100%;
-  background: #264653;
+  background: #540b0e;
 }
 
 body {
   margin: 0;
   width: 100%;
   min-height: 100svh;
-  background: #264653;
+  background: #540b0e;
   overflow: hidden;
 }
 

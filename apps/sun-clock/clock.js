@@ -2,8 +2,8 @@ const canvas = document.querySelector("#clockCanvas");
 const ctx = canvas.getContext("2d");
 const digitalTime = document.querySelector("#digitalTime");
 const statusEl = document.querySelector("#clockStatus");
-const SUN_OUTSIDE_COLOR = "#264653";
-const SUN_INSIDE_COLOR = "#e9c46a";
+const SUN_OUTSIDE_COLOR = "#540b0e";
+const SUN_INSIDE_COLOR = "#fff3b0";
 
 let clockData = null;
 let preparedRays = [];
@@ -112,7 +112,7 @@ function pointAt(ray, progress) {
   };
 }
 
-function drawPath(ray, color, lineWidth, alpha = 1, limitIndex = ray.points.length - 1) {
+function drawPath(ray, color, lineWidth, alpha = 1, limitIndex = ray.points.length - 1, options = {}) {
   if (ray.points.length < 2) {
     return;
   }
@@ -121,8 +121,8 @@ function drawPath(ray, color, lineWidth, alpha = 1, limitIndex = ray.points.leng
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = color;
   ctx.lineWidth = scaleStroke(lineWidth);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  ctx.lineCap = options.lineCap || "round";
+  ctx.lineJoin = options.lineJoin || "round";
   ctx.beginPath();
   const first = toScreen(ray.points[0]);
   ctx.moveTo(first.x, first.y);
@@ -131,6 +131,23 @@ function drawPath(ray, color, lineWidth, alpha = 1, limitIndex = ray.points.leng
     ctx.lineTo(point.x, point.y);
   }
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawPathInsideRadius(
+  ray,
+  color,
+  lineWidth,
+  alpha,
+  limitIndex,
+  clipRadius,
+  options = {},
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(frame.cx, frame.cy, clipRadius * frame.scale, 0, Math.PI * 2);
+  ctx.clip();
+  drawPath(ray, color, lineWidth, alpha, limitIndex, options);
   ctx.restore();
 }
 
@@ -329,6 +346,30 @@ function activeLabelBuckets(now) {
   return { hour, minute, second };
 }
 
+function isLeapYear(year) {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function yearProgressInfo(now) {
+  const year = now.getFullYear();
+  const start = new Date(year, 0, 1);
+  const end = new Date(year + 1, 0, 1);
+  const days = isLeapYear(year) ? 366 : 365;
+  const dayStart = Date.UTC(year, now.getMonth(), now.getDate());
+  const yearStart = Date.UTC(year, 0, 1);
+  const day = Math.min(days, Math.floor((dayStart - yearStart) / 86400000) + 1);
+
+  return {
+    day,
+    days,
+    fraction: Math.min(1, Math.max(0, (now - start) / (end - start))),
+  };
+}
+
+function activeRaysForYear(yearDays) {
+  return preparedRays.filter((ray) => !ray.yearDays || ray.yearDays === yearDays);
+}
+
 function hourLabelRadius(active) {
   if (active) {
     return frame.compact ? 1.125 : frame.narrow ? 1.115 : 1.095;
@@ -336,8 +377,8 @@ function hourLabelRadius(active) {
   return frame.compact ? 1.095 : frame.narrow ? 1.085 : 1.075;
 }
 
-function drawClockNumbers(activeLabels) {
-  const hourRay = preparedRays.find((ray) => ray.id === "hours");
+function drawClockNumbers(activeLabels, activeRays) {
+  const hourRay = activeRays.find((ray) => ray.id === "hours");
 
   for (let hour = 1; hour <= 12; hour += 1) {
     const index = hour % 12;
@@ -348,18 +389,27 @@ function drawClockNumbers(activeLabels) {
         String(hour),
         hourLabelRadius(true),
         theta,
-        hourRay?.markerColor || "#e76f51",
+        SUN_INSIDE_COLOR,
         29,
         850,
-        frame.narrow ? 1.2 : 2.1,
-        "#111111",
+        frame.narrow ? 1.2 : 3,
+        hourRay?.markerColor || SUN_OUTSIDE_COLOR,
       );
     } else {
-      drawRadialLabel(String(hour), hourLabelRadius(false), theta, SUN_INSIDE_COLOR, 25, 780);
+      drawRadialLabelWithHalo(
+        String(hour),
+        hourLabelRadius(false),
+        theta,
+        SUN_OUTSIDE_COLOR,
+        25,
+        780,
+        frame.narrow ? 1.2 : 2.6,
+        SUN_INSIDE_COLOR,
+      );
     }
   }
 
-  const minuteRay = preparedRays.find((ray) => ray.id === "minutes");
+  const minuteRay = activeRays.find((ray) => ray.id === "minutes");
   if (minuteRay) {
     for (let minute = 0; minute < 60; minute += 1) {
       const theta = angleForClockIndex(minute, 60);
@@ -382,8 +432,8 @@ function drawClockNumbers(activeLabels) {
 
 }
 
-function drawMovingMinuteSecondLabels(activeLabels) {
-  const minuteRay = preparedRays.find((ray) => ray.id === "minutes");
+function drawMovingMinuteSecondLabels(activeLabels, activeRays) {
+  const minuteRay = activeRays.find((ray) => ray.id === "minutes");
   if (minuteRay) {
     drawRadialLabelWithHalo(
       String(activeLabels.minute).padStart(2, "0"),
@@ -397,7 +447,7 @@ function drawMovingMinuteSecondLabels(activeLabels) {
     );
   }
 
-  const secondRay = preparedRays.find((ray) => ray.id === "seconds");
+  const secondRay = activeRays.find((ray) => ray.id === "seconds");
   if (secondRay) {
     drawRadialLabelWithHalo(
       String(activeLabels.second).padStart(2, "0"),
@@ -432,7 +482,7 @@ function drawDialDateTime(now) {
     formatDateText(now),
     frame.cx,
     frame.cy - frame.scale * (frame.compact ? 0.66 : 0.69),
-    "#264653",
+    "#540b0e",
     36,
     840,
     5.8,
@@ -442,7 +492,7 @@ function drawDialDateTime(now) {
     formatTimeText(now),
     frame.cx,
     frame.cy + frame.scale * (frame.compact ? 0.66 : 0.69),
-    "#264653",
+    "#540b0e",
     38,
     850,
     6,
@@ -450,7 +500,7 @@ function drawDialDateTime(now) {
   );
 }
 
-function timeFractions(now) {
+function timeFractions(now, yearInfo) {
   const hours = now.getHours() % 12;
   const minutes = now.getMinutes();
   const seconds = now.getSeconds();
@@ -459,6 +509,7 @@ function timeFractions(now) {
     hours: (hours + minutes / 60 + seconds / 3600 + milliseconds / 3600000) / 12,
     minutes: (minutes + seconds / 60 + milliseconds / 60000) / 60,
     seconds: (seconds + milliseconds / 1000) / 60,
+    year: yearInfo.fraction,
   };
 }
 
@@ -480,7 +531,10 @@ function draw(now) {
     return;
   }
 
-  const progress = timeFractions(now);
+  const yearInfo = yearProgressInfo(now);
+  const activeRays = activeRaysForYear(yearInfo.days);
+  const visibleRays = activeRays;
+  const progress = timeFractions(now, yearInfo);
   const activeLabels = activeLabelBuckets(now);
   updateDigitalTime(now);
   ctx.clearRect(0, 0, frame.width, frame.height);
@@ -488,10 +542,10 @@ function draw(now) {
   ctx.fillRect(0, 0, frame.width, frame.height);
 
   fillCircle(1, SUN_INSIDE_COLOR);
-  const hourRay = preparedRays.find((ray) => ray.id === "hours");
-  const minuteRay = preparedRays.find((ray) => ray.id === "minutes");
-  const secondRay = preparedRays.find((ray) => ray.id === "seconds");
-  drawCircle(1, "rgba(38, 70, 83, 0.24)", 1.45);
+  const hourRay = activeRays.find((ray) => ray.id === "hours");
+  const minuteRay = activeRays.find((ray) => ray.id === "minutes");
+  const secondRay = activeRays.find((ray) => ray.id === "seconds");
+  drawCircle(1, "rgba(84, 11, 14, 0.24)", 1.45);
   if (hourRay) {
     drawCircumferenceTrace(hourRay, progress.hours, 2.25, SUN_INSIDE_COLOR, frame.compact ? 1.008 : 1.014);
   }
@@ -502,16 +556,19 @@ function draw(now) {
     drawCircumferenceTrace(secondRay, progress.seconds, 1.35);
   }
 
-  drawClockNumbers(activeLabels);
+  drawClockNumbers(activeLabels, activeRays);
 
-  preparedRays.forEach((ray) => {
+  visibleRays.forEach((ray) => {
+    if (ray.id === "year") {
+      return;
+    }
     const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? 0.15 : 0.11;
     drawPath(ray, ray.color, ray.lineWidth, baseAlpha);
   });
 
   ctx.save();
   ctx.fillStyle = SUN_INSIDE_COLOR;
-  ctx.strokeStyle = "rgba(15, 23, 42, 0.12)";
+  ctx.strokeStyle = "rgba(84, 11, 14, 0.15)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(frame.cx, frame.cy, frame.scale * 0.038, 0, Math.PI * 2);
@@ -519,14 +576,24 @@ function draw(now) {
   ctx.stroke();
   ctx.restore();
 
-  const markers = preparedRays.map((ray) => ({
+  const markers = visibleRays.map((ray) => ({
     ray,
     marker: pointAt(ray, progress[ray.id]),
   }));
 
   markers.forEach(({ ray, marker }) => {
     const activeRay = pathToMarker(ray, marker);
-    if (ray.id === "minutes" || ray.id === "seconds") {
+    if (ray.id === "year") {
+      drawPathInsideRadius(
+        activeRay,
+        ray.color,
+        ray.lineWidth + 0.12,
+        0.24,
+        activeRay.points.length - 1,
+        0.984,
+        { lineCap: "butt", lineJoin: "bevel" },
+      );
+    } else if (ray.id === "minutes" || ray.id === "seconds") {
       drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.55);
     } else {
       drawPath(activeRay, ray.color, ray.lineWidth + 0.55, 0.7);
@@ -534,16 +601,22 @@ function draw(now) {
   });
 
   markers.forEach(({ ray, marker }) => {
+    if (ray.id === "year") {
+      return;
+    }
     const trailStart = Math.max(0, marker.index - Math.floor(ray.points.length * 0.04));
     const trailRay = pathToMarker(ray, marker, trailStart);
     drawPath(trailRay, ray.color, ray.lineWidth + 1.4, 0.28);
   });
 
   markers.forEach(({ ray, marker }) => {
+    if (ray.id === "year") {
+      return;
+    }
     drawCurrentPoint(marker, ray.markerColor || ray.color, ray.markerSize || 8);
   });
 
-  drawMovingMinuteSecondLabels(activeLabels);
+  drawMovingMinuteSecondLabels(activeLabels, activeRays);
   drawDialDateTime(now);
 }
 
