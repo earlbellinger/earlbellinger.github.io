@@ -72,6 +72,12 @@ function overlayAlphaForTarget(targetAlpha, baseAlpha) {
   return (clampedTarget - baseAlpha) / (1 - baseAlpha);
 }
 
+function smoothStep(edge0, edge1, value) {
+  const span = edge1 - edge0 || 1;
+  const t = Math.min(1, Math.max(0, (value - edge0) / span));
+  return t * t * (3 - 2 * t);
+}
+
 function prepareRay(ray) {
   const points = ray.x.map((x, index) => ({ x, y: ray.y[index] }));
   let coordinate = ray.tau;
@@ -283,7 +289,7 @@ function drawMinuteAgeFadedPath(ray, marker, progress) {
     return;
   }
 
-  const chunks = Math.min(96, Math.max(1, segmentCount));
+  const chunks = Math.min(180, Math.max(1, segmentCount));
   const currentMinutes = currentProgress * 60;
 
   ctx.save();
@@ -299,16 +305,15 @@ function drawMinuteAgeFadedPath(ray, marker, progress) {
     const midProgress = (coordinates[startIndex] + coordinates[endChunkIndex]) * 0.5;
     const ageMinutes = Math.max(0, (currentProgress - midProgress) * 60);
     let opacity = 0;
-    if (ageMinutes < 1) {
+    if (ageMinutes <= 1.5) {
       opacity = 1;
-    } else if (ageMinutes < 2) {
-      opacity = 0.75;
-    } else if (ageMinutes < 3) {
-      opacity = 0.5;
+    } else if (ageMinutes <= 3) {
+      const transition = smoothStep(1.5, 3, ageMinutes);
+      opacity = 1 - transition * 0.25;
     } else {
       const tailMinutes = Math.max(1, currentMinutes - 3);
-      const tailProgress = Math.min(1, (ageMinutes - 3) / tailMinutes);
-      opacity = MINUTE_INACTIVE_ALPHA + (0.25 - MINUTE_INACTIVE_ALPHA) * Math.pow(1 - tailProgress, 1.35);
+      const tailProgress = smoothStep(0, 1, Math.min(1, (ageMinutes - 3) / tailMinutes));
+      opacity = MINUTE_INACTIVE_ALPHA + (0.75 - MINUTE_INACTIVE_ALPHA) * (1 - tailProgress);
     }
 
     ctx.globalAlpha = overlayAlphaForTarget(opacity, MINUTE_INACTIVE_ALPHA);
