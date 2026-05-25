@@ -334,40 +334,6 @@ function angleForClockIndex(index, total) {
   return Math.PI / 2 - (index / total) * Math.PI * 2;
 }
 
-function projectRayToBand(ray, innerRadius, outerRadius) {
-  const sourceInner = ray.innerRadius ?? 0;
-  const sourceOuter = ray.outerRadius ?? 1;
-  const sourceSpan = sourceOuter - sourceInner || 1;
-  const points = ray.points.map((point) => {
-    const radius = Math.hypot(point.x, point.y);
-    if (radius <= 0) {
-      return point;
-    }
-    const radialFraction = Math.min(1, Math.max(0, (radius - sourceInner) / sourceSpan));
-    const targetRadius = innerRadius + radialFraction * (outerRadius - innerRadius);
-    const scale = targetRadius / radius;
-    return {
-      x: point.x * scale,
-      y: point.y * scale,
-    };
-  });
-
-  return {
-    ...ray,
-    points,
-  };
-}
-
-function yearRayRenderBand() {
-  if (frame.compact) {
-    return { inner: 0.91, outer: 0.985 };
-  }
-  if (frame.narrow) {
-    return { inner: 0.925, outer: 0.989 };
-  }
-  return { inner: 0.94, outer: 0.992 };
-}
-
 function activeLabelBuckets(now) {
   const hour = now.getHours() % 12 || 12;
   const minute = now.getMinutes();
@@ -718,9 +684,7 @@ function draw(now) {
 
   visibleRays.forEach((ray) => {
     if (ray.id === "year") {
-      const band = yearRayRenderBand();
-      const yearRay = projectRayToBand(ray, band.inner, band.outer);
-      drawPath(yearRay, ray.color, ray.lineWidth + 0.05, frame.compact ? 0.115 : 0.085, yearRay.points.length - 1, {
+      drawPath(ray, ray.color, ray.lineWidth + 0.05, frame.compact ? 0.115 : 0.085, ray.points.length - 1, {
         lineCap: "butt",
         lineJoin: "round",
       });
@@ -741,16 +705,6 @@ function draw(now) {
   ctx.restore();
 
   const markers = visibleRays.map((ray) => {
-    if (ray.id === "year") {
-      const band = yearRayRenderBand();
-      const renderRay = projectRayToBand(ray, band.inner, band.outer);
-      return {
-        ray,
-        renderRay,
-        marker: pointAt(renderRay, progress[ray.id]),
-      };
-    }
-
     return {
       ray,
       renderRay: ray,
