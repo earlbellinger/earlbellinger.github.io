@@ -53,6 +53,13 @@ body {
   max-height: 100%;
 }
 
+@media (max-width: 720px), (max-height: 520px) {
+  #clockCanvas {
+    width: calc(100vw - var(--page-pad) - var(--page-pad));
+    height: calc(100svh - var(--page-pad) - var(--page-pad));
+  }
+}
+
 @supports (height: 100dvh) {
   :root {
     --clock-size: min(
@@ -65,5 +72,11 @@ body {
   .clock-shell {
     min-height: 100dvh;
     height: 100dvh;
+  }
+
+  @media (max-width: 720px), (max-height: 520px) {
+    #clockCanvas {
+      height: calc(100dvh - var(--page-pad) - var(--page-pad));
+    }
   }
 }
