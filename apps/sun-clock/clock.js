@@ -5,6 +5,7 @@ const statusEl = document.querySelector("#clockStatus");
 const SUN_OUTSIDE_COLOR = "#540b0e";
 const SUN_INSIDE_COLOR = "#fff3b0";
 const MINUTE_INACTIVE_ALPHA = 0.15;
+const SECOND_INACTIVE_ALPHA = 0.11;
 
 let clockData = null;
 let preparedRays = [];
@@ -322,6 +323,68 @@ function drawMinuteAgeFadedPath(ray, marker, progress) {
     }
 
     ctx.globalAlpha = overlayAlphaForTarget(opacity, MINUTE_INACTIVE_ALPHA);
+    ctx.beginPath();
+    const start = toScreen(points[startIndex]);
+    ctx.moveTo(start.x, start.y);
+    for (let index = startIndex + 1; index <= endChunkIndex; index += 1) {
+      const point = toScreen(points[index]);
+      ctx.lineTo(point.x, point.y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawSecondAgeFadedPath(ray, marker, progress) {
+  if (ray.points.length < 2) {
+    return;
+  }
+
+  const currentProgress = ((progress % 1) + 1) % 1;
+  const endIndex = Math.max(1, marker.index);
+  const points = ray.points.slice(0, endIndex);
+  const coordinates = ray.coordinate.slice(0, endIndex);
+  points.push(marker.point);
+  coordinates.push(currentProgress);
+
+  const segmentCount = points.length - 1;
+  if (segmentCount < 1) {
+    return;
+  }
+
+  const chunks = Math.min(120, Math.max(1, segmentCount));
+  const midOpacity = 0.6;
+
+  ctx.save();
+  ctx.strokeStyle = ray.color;
+  ctx.lineWidth = scaleStroke(ray.lineWidth + 0.55);
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "round";
+
+  for (let chunk = 0; chunk < chunks; chunk += 1) {
+    const startIndex = Math.floor((chunk / chunks) * segmentCount);
+    const end = Math.floor(((chunk + 1) / chunks) * segmentCount);
+    const endChunkIndex = chunk === chunks - 1 ? segmentCount : Math.max(startIndex + 1, end);
+    const midProgress = (coordinates[startIndex] + coordinates[endChunkIndex]) * 0.5;
+    const ageSeconds = Math.max(0, (currentProgress - midProgress) * 60);
+    let opacity = SECOND_INACTIVE_ALPHA;
+    if (ageSeconds <= 2) {
+      opacity = 1;
+    } else if (ageSeconds <= 6) {
+      const transition = smoothStep(2, 6, ageSeconds);
+      opacity = 1 - transition * (1 - midOpacity);
+    } else if (ageSeconds <= 15) {
+      const tailProgress = smoothStep(6, 15, ageSeconds);
+      opacity = SECOND_INACTIVE_ALPHA + (midOpacity - SECOND_INACTIVE_ALPHA) * (1 - tailProgress);
+    }
+
+    const overlayAlpha = overlayAlphaForTarget(opacity, SECOND_INACTIVE_ALPHA);
+    if (overlayAlpha <= 0.001) {
+      continue;
+    }
+
+    ctx.globalAlpha = overlayAlpha;
     ctx.beginPath();
     const start = toScreen(points[startIndex]);
     ctx.moveTo(start.x, start.y);
@@ -848,7 +911,7 @@ function draw(now) {
   drawClockNumbers(activeLabels, activeRays);
 
   nonYearRays.forEach((ray) => {
-    const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? MINUTE_INACTIVE_ALPHA : 0.11;
+    const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? MINUTE_INACTIVE_ALPHA : SECOND_INACTIVE_ALPHA;
     drawPath(ray, ray.color, ray.lineWidth, baseAlpha);
   });
 
@@ -875,7 +938,7 @@ function draw(now) {
     if (ray.id === "minutes") {
       drawMinuteAgeFadedPath(ray, marker, progress.minutes);
     } else if (ray.id === "seconds") {
-      drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.55);
+      drawSecondAgeFadedPath(ray, marker, progress.seconds);
     } else {
       drawPath(activeRay, ray.color, ray.lineWidth + 0.55, 0.7);
     }
