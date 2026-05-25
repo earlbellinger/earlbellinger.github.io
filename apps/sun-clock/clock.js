@@ -406,6 +406,18 @@ function hourLabelRadius(active) {
   return frame.compact ? 1.095 : frame.narrow ? 1.085 : 1.075;
 }
 
+function activeHourLabelSize() {
+  return frame.compact ? 32 : frame.narrow ? 31 : 31;
+}
+
+function activeMinuteLabelSize() {
+  return frame.compact ? 17 : frame.narrow ? 16 : 16;
+}
+
+function activeSecondLabelSize() {
+  return frame.compact ? 16 : frame.narrow ? 15 : 15;
+}
+
 function drawClockNumbers(activeLabels, activeRays) {
   const hourRay = activeRays.find((ray) => ray.id === "hours");
 
@@ -419,9 +431,9 @@ function drawClockNumbers(activeLabels, activeRays) {
         hourLabelRadius(true),
         theta,
         SUN_INSIDE_COLOR,
-        29,
+        activeHourLabelSize(),
         850,
-        frame.narrow ? 1.2 : 3,
+        frame.compact ? 1.7 : frame.narrow ? 1.5 : 3.2,
         hourRay?.markerColor || SUN_OUTSIDE_COLOR,
       );
     } else {
@@ -466,12 +478,12 @@ function drawMovingMinuteSecondLabels(activeLabels, activeRays) {
   if (minuteRay) {
     drawRadialLabelWithHalo(
       String(activeLabels.minute).padStart(2, "0"),
-      minuteRay.outerRadius + (frame.narrow ? 0.078 : 0.042),
+      minuteRay.outerRadius + (frame.compact ? 0.086 : frame.narrow ? 0.082 : 0.048),
       angleForClockIndex(activeLabels.minute, 60),
       minuteRay.markerColor || minuteRay.color,
-      14,
+      activeMinuteLabelSize(),
       840,
-      frame.narrow ? 1.6 : 4.2,
+      frame.compact ? 2.1 : frame.narrow ? 1.8 : 4.6,
       SUN_INSIDE_COLOR,
     );
   }
@@ -483,9 +495,9 @@ function drawMovingMinuteSecondLabels(activeLabels, activeRays) {
       secondRay.outerRadius - 0.048,
       angleForClockIndex(activeLabels.second, 60),
       secondRay.markerColor || secondRay.color,
-      13,
+      activeSecondLabelSize(),
       840,
-      frame.narrow ? 1.4 : 3.4,
+      frame.compact ? 1.9 : frame.narrow ? 1.6 : 3.8,
       SUN_INSIDE_COLOR,
     );
   }
