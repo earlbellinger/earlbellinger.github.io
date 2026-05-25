@@ -227,7 +227,7 @@ function drawCircumferenceTrace(
   ctx.restore();
 }
 
-function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56) {
+function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56, fadePower = 1.65) {
   if (ray.points.length < 2) {
     return;
   }
@@ -245,7 +245,7 @@ function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56) 
       startIndex + 1,
       Math.floor(((chunk + 1) / chunks) * (ray.points.length - 1)),
     );
-    const fade = Math.pow((chunk + 1) / chunks, 1.65);
+    const fade = Math.pow((chunk + 1) / chunks, fadePower);
     ctx.globalAlpha = minAlpha + (maxAlpha - minAlpha) * fade;
     ctx.beginPath();
     const start = toScreen(ray.points[startIndex]);
@@ -797,7 +797,9 @@ function draw(now) {
 
   markers.forEach(({ ray, renderRay, marker }) => {
     const activeRay = pathToMarker(renderRay, marker);
-    if (ray.id === "minutes" || ray.id === "seconds") {
+    if (ray.id === "minutes") {
+      drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.7, 0.015, 0.82, 4.2);
+    } else if (ray.id === "seconds") {
       drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.55);
     } else {
       drawPath(activeRay, ray.color, ray.lineWidth + 0.55, 0.7);
