@@ -750,10 +750,16 @@ function draw(now) {
   ctx.fillRect(0, 0, frame.width, frame.height);
 
   fillCircle(1, SUN_INSIDE_COLOR);
+  const yearRay = activeRays.find((ray) => ray.id === "year");
   const hourRay = activeRays.find((ray) => ray.id === "hours");
   const minuteRay = activeRays.find((ray) => ray.id === "minutes");
   const secondRay = activeRays.find((ray) => ray.id === "seconds");
+  const nonYearRays = visibleRays.filter((ray) => ray.id !== "year");
   drawCircle(1, "rgba(84, 11, 14, 0.24)", 1.45);
+  if (yearRay) {
+    drawYearSegments(yearRay, frame.compact ? 0.07 : 0.052, yearRay.lineWidth + 0.05);
+    drawYearActivePath(yearRay, progress.year);
+  }
   if (hourRay) {
     drawCircumferenceTrace(hourRay, progress.hours, 2.25, SUN_INSIDE_COLOR, frame.compact ? 1.008 : 1.014);
   }
@@ -766,11 +772,7 @@ function draw(now) {
 
   drawClockNumbers(activeLabels, activeRays);
 
-  visibleRays.forEach((ray) => {
-    if (ray.id === "year") {
-      drawYearSegments(ray, frame.compact ? 0.07 : 0.052, ray.lineWidth + 0.05);
-      return;
-    }
+  nonYearRays.forEach((ray) => {
     const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? 0.15 : 0.11;
     drawPath(ray, ray.color, ray.lineWidth, baseAlpha);
   });
@@ -785,7 +787,7 @@ function draw(now) {
   ctx.stroke();
   ctx.restore();
 
-  const markers = visibleRays.map((ray) => {
+  const markers = nonYearRays.map((ray) => {
     return {
       ray,
       renderRay: ray,
@@ -795,9 +797,7 @@ function draw(now) {
 
   markers.forEach(({ ray, renderRay, marker }) => {
     const activeRay = pathToMarker(renderRay, marker);
-    if (ray.id === "year") {
-      drawYearActivePath(ray, progress.year);
-    } else if (ray.id === "minutes" || ray.id === "seconds") {
+    if (ray.id === "minutes" || ray.id === "seconds") {
       drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.55);
     } else {
       drawPath(activeRay, ray.color, ray.lineWidth + 0.55, 0.7);
@@ -805,18 +805,12 @@ function draw(now) {
   });
 
   markers.forEach(({ ray, marker }) => {
-    if (ray.id === "year") {
-      return;
-    }
     const trailStart = Math.max(0, marker.index - Math.floor(ray.points.length * 0.04));
     const trailRay = pathToMarker(ray, marker, trailStart);
     drawPath(trailRay, ray.color, ray.lineWidth + 1.4, 0.28);
   });
 
   markers.forEach(({ ray, marker }) => {
-    if (ray.id === "year") {
-      return;
-    }
     drawCurrentPoint(marker, ray.markerColor || ray.color, ray.markerSize || 8);
   });
 
