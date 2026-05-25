@@ -500,10 +500,10 @@ function formatDateText(now) {
 
 function drawDialDateTime(now) {
   if (frame.mobileLayout) {
-    const dateSize = frame.compact ? 34 : 32;
-    const timeSize = frame.compact ? 36 : 34;
-    const dateHalo = frame.compact ? 3.6 : 3.4;
-    const timeHalo = frame.compact ? 4.2 : 4;
+    const dateSize = frame.compact ? 42 : 38;
+    const timeSize = frame.compact ? 46 : 42;
+    const dateHalo = frame.compact ? 5.2 : 4.8;
+    const timeHalo = frame.compact ? 5.8 : 5.4;
     const clockRadius = frame.scale * (frame.compact ? 1.17 : 1.145);
 
     if (frame.mobilePortrait) {
@@ -516,21 +516,21 @@ function drawDialDateTime(now) {
         formatDateText(now),
         frame.cx,
         labelY,
-        "#540b0e",
+        SUN_INSIDE_COLOR,
         dateSize,
         840,
         dateHalo,
-        SUN_INSIDE_COLOR,
+        SUN_OUTSIDE_COLOR,
       );
       drawCenteredHaloText(
         formatTimeText(now),
         frame.cx,
         frame.height - labelY,
-        "#540b0e",
+        SUN_INSIDE_COLOR,
         timeSize,
         850,
         timeHalo,
-        SUN_INSIDE_COLOR,
+        SUN_OUTSIDE_COLOR,
       );
       return;
     }
@@ -544,51 +544,51 @@ function drawDialDateTime(now) {
       formatDateText(now),
       labelX,
       frame.cy,
-      "#540b0e",
+      SUN_INSIDE_COLOR,
       dateSize,
       840,
       dateHalo,
-      SUN_INSIDE_COLOR,
+      SUN_OUTSIDE_COLOR,
     );
     drawCenteredHaloText(
       formatTimeText(now),
       frame.width - labelX,
       frame.cy,
-      "#540b0e",
+      SUN_INSIDE_COLOR,
       timeSize,
       850,
       timeHalo,
-      SUN_INSIDE_COLOR,
+      SUN_OUTSIDE_COLOR,
     );
     return;
   }
 
   const dateOffset = frame.compact ? 0.78 : frame.narrow ? 0.73 : 0.69;
   const timeOffset = frame.compact ? 0.66 : frame.narrow ? 0.675 : 0.69;
-  const dateSize = frame.compact ? 28 : frame.narrow ? 31 : 32;
-  const timeSize = frame.compact ? 32 : frame.narrow ? 34 : 34;
-  const dateHalo = frame.compact ? 3.4 : frame.narrow ? 4.6 : 5.2;
-  const timeHalo = frame.compact ? 4.2 : frame.narrow ? 5.2 : 5.6;
+  const dateSize = frame.compact ? 34 : frame.narrow ? 35 : 36;
+  const timeSize = frame.compact ? 38 : frame.narrow ? 39 : 40;
+  const dateHalo = frame.compact ? 4.4 : frame.narrow ? 5 : 5.6;
+  const timeHalo = frame.compact ? 5 : frame.narrow ? 5.6 : 6.2;
 
   drawCenteredHaloText(
     formatDateText(now),
     frame.cx,
     frame.cy - frame.scale * dateOffset,
-    "#540b0e",
+    SUN_INSIDE_COLOR,
     dateSize,
     840,
     dateHalo,
-    SUN_INSIDE_COLOR,
+    SUN_OUTSIDE_COLOR,
   );
   drawCenteredHaloText(
     formatTimeText(now),
     frame.cx,
     frame.cy + frame.scale * timeOffset,
-    "#540b0e",
+    SUN_INSIDE_COLOR,
     timeSize,
     850,
     timeHalo,
-    SUN_INSIDE_COLOR,
+    SUN_OUTSIDE_COLOR,
   );
 }
 
