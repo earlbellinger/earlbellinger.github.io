@@ -4,8 +4,6 @@ const digitalTime = document.querySelector("#digitalTime");
 const statusEl = document.querySelector("#clockStatus");
 const SUN_OUTSIDE_COLOR = "#540b0e";
 const SUN_INSIDE_COLOR = "#fff3b0";
-const YEAR_PROGRESS_START_COLOR = "#f4a261";
-const YEAR_PROGRESS_END_COLOR = "#540b0e";
 
 let clockData = null;
 let preparedRays = [];
@@ -66,29 +64,6 @@ function scaleHalo(width) {
 
 function scaleMarker(size) {
   return Math.max(3.2, size * frame.markerScale);
-}
-
-function hexToRgb(hex) {
-  const clean = hex.replace("#", "");
-  return {
-    r: parseInt(clean.slice(0, 2), 16),
-    g: parseInt(clean.slice(2, 4), 16),
-    b: parseInt(clean.slice(4, 6), 16),
-  };
-}
-
-function mixColor(startHex, endHex, amount) {
-  const start = hexToRgb(startHex);
-  const end = hexToRgb(endHex);
-  const t = Math.min(1, Math.max(0, amount));
-  const r = Math.round(start.r + (end.r - start.r) * t);
-  const g = Math.round(start.g + (end.g - start.g) * t);
-  const b = Math.round(start.b + (end.b - start.b) * t);
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function yearColorAt(progress) {
-  return mixColor(YEAR_PROGRESS_START_COLOR, YEAR_PROGRESS_END_COLOR, Math.pow(progress, 0.9));
 }
 
 function prepareRay(ray) {
@@ -286,39 +261,10 @@ function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56) 
 }
 
 function drawYearProgressRange(ray, startIndex, endIndex, lineWidth, alpha = 1) {
-  const start = Math.max(0, startIndex);
-  const end = Math.min(ray.points.length - 1, endIndex);
-  if (ray.points.length < 2 || end <= start) {
-    return;
-  }
-
-  const chunks = Math.min(72, Math.max(1, end - start));
-  ctx.save();
-  ctx.lineWidth = scaleStroke(lineWidth);
-  ctx.lineCap = "butt";
-  ctx.lineJoin = "round";
-
-  for (let chunk = 0; chunk < chunks; chunk += 1) {
-    const chunkStart = Math.floor(start + ((end - start) * chunk) / chunks);
-    const chunkEnd = Math.max(
-      chunkStart + 1,
-      Math.floor(start + ((end - start) * (chunk + 1)) / chunks),
-    );
-    const midIndex = Math.min(ray.coordinate.length - 1, Math.floor((chunkStart + chunkEnd) / 2));
-    const progress = ray.coordinate[midIndex] ?? 0;
-    ctx.strokeStyle = yearColorAt(progress);
-    ctx.globalAlpha = alpha * (0.78 + progress * 0.22);
-    ctx.beginPath();
-    const first = toScreen(ray.points[chunkStart]);
-    ctx.moveTo(first.x, first.y);
-    for (let index = chunkStart + 1; index <= chunkEnd; index += 1) {
-      const point = toScreen(ray.points[index]);
-      ctx.lineTo(point.x, point.y);
-    }
-    ctx.stroke();
-  }
-
-  ctx.restore();
+  drawPathRange(ray, startIndex, endIndex, ray.color, lineWidth, alpha, {
+    lineCap: "butt",
+    lineJoin: "round",
+  });
 }
 
 function drawYearSegments(ray, alpha, lineWidth) {
@@ -346,7 +292,11 @@ function drawYearSegments(ray, alpha, lineWidth) {
 function drawYearActivePath(ray, progress) {
   if (!ray.segments?.length) {
     const marker = pointAt(ray, progress);
-    drawYearProgressRange(ray, 0, marker.index, ray.lineWidth + 0.2, 0.34);
+    const activeRay = pathToMarker(ray, marker);
+    drawPath(activeRay, ray.color, ray.lineWidth + 0.2, 0.38, activeRay.points.length - 1, {
+      lineCap: "butt",
+      lineJoin: "round",
+    });
     return;
   }
 
@@ -357,12 +307,16 @@ function drawYearActivePath(ray, progress) {
     }
 
     if (target >= segment.endTau) {
-      drawYearProgressRange(ray, segment.start, segment.end, ray.lineWidth + 0.2, 0.32);
+      drawYearProgressRange(ray, segment.start, segment.end, ray.lineWidth + 0.2, 0.38);
       return;
     }
 
     const marker = pointAt(ray, target);
-    drawYearProgressRange(ray, segment.start, marker.index, ray.lineWidth + 0.2, 0.34);
+    const activeRay = pathToMarker(ray, marker, segment.start);
+    drawPath(activeRay, ray.color, ray.lineWidth + 0.2, 0.38, activeRay.points.length - 1, {
+      lineCap: "butt",
+      lineJoin: "round",
+    });
   });
 }
 
@@ -814,7 +768,7 @@ function draw(now) {
 
   visibleRays.forEach((ray) => {
     if (ray.id === "year") {
-      drawYearSegments(ray, frame.compact ? 0.12 : 0.09, ray.lineWidth + 0.05);
+      drawYearSegments(ray, frame.compact ? 0.07 : 0.052, ray.lineWidth + 0.05);
       return;
     }
     const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? 0.15 : 0.11;
