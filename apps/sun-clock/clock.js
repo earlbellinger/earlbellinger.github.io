@@ -302,6 +302,14 @@ function drawCenteredHaloText(
   ctx.restore();
 }
 
+function centeredTextWidth(text, fontSize, weight = 760, haloWidth = 0) {
+  ctx.save();
+  ctx.font = `${weight} ${scaleFont(fontSize)}px Inter, sans-serif`;
+  const width = ctx.measureText(text).width + scaleHalo(haloWidth);
+  ctx.restore();
+  return width;
+}
+
 function drawTick(radius0, radius1, theta, color, width) {
   const a = {
     x: frame.cx + radius0 * Math.cos(theta) * frame.scale,
@@ -499,6 +507,9 @@ function formatDateText(now) {
 }
 
 function drawDialDateTime(now) {
+  const dateText = formatDateText(now);
+  const timeText = formatTimeText(now);
+
   if (frame.mobileLayout) {
     const dateSize = frame.compact ? 42 : 38;
     const timeSize = frame.compact ? 46 : 42;
@@ -513,7 +524,7 @@ function drawDialDateTime(now) {
         Math.min(frame.height * 0.095, topSpace * 0.4),
       );
       drawCenteredHaloText(
-        formatDateText(now),
+        dateText,
         frame.cx,
         labelY,
         SUN_INSIDE_COLOR,
@@ -523,7 +534,7 @@ function drawDialDateTime(now) {
         SUN_OUTSIDE_COLOR,
       );
       drawCenteredHaloText(
-        formatTimeText(now),
+        timeText,
         frame.cx,
         frame.height - labelY,
         SUN_INSIDE_COLOR,
@@ -541,7 +552,7 @@ function drawDialDateTime(now) {
       Math.min(frame.width * 0.13, sideSpace * 0.48),
     );
     drawCenteredHaloText(
-      formatDateText(now),
+      dateText,
       labelX,
       frame.cy,
       SUN_INSIDE_COLOR,
@@ -551,13 +562,56 @@ function drawDialDateTime(now) {
       SUN_OUTSIDE_COLOR,
     );
     drawCenteredHaloText(
-      formatTimeText(now),
+      timeText,
       frame.width - labelX,
       frame.cy,
       SUN_INSIDE_COLOR,
       timeSize,
       850,
       timeHalo,
+      SUN_OUTSIDE_COLOR,
+    );
+    return;
+  }
+
+  const sideDateSize = frame.narrow ? 35 : 38;
+  const sideTimeSize = frame.narrow ? 38 : 42;
+  const sideDateHalo = 5.6;
+  const sideTimeHalo = 6.2;
+  const sideClockRadius = frame.scale * 1.15;
+  const sideSpace = Math.max(0, frame.cx - sideClockRadius);
+  const labelGap = Math.max(24, frame.scale * 0.08);
+  const dateWidth = centeredTextWidth(dateText, sideDateSize, 840, sideDateHalo);
+  const timeWidth = centeredTextWidth(timeText, sideTimeSize, 850, sideTimeHalo);
+
+  if (
+    sideSpace >= dateWidth / 2 + labelGap
+    && sideSpace >= timeWidth / 2 + labelGap
+  ) {
+    const leftLabelX = Math.max(dateWidth / 2 + 6, (frame.cx - sideClockRadius) / 2);
+    const rightLabelX = Math.min(
+      frame.width - timeWidth / 2 - 6,
+      frame.width - (frame.cx - sideClockRadius) / 2,
+    );
+
+    drawCenteredHaloText(
+      dateText,
+      leftLabelX,
+      frame.cy,
+      SUN_INSIDE_COLOR,
+      sideDateSize,
+      840,
+      sideDateHalo,
+      SUN_OUTSIDE_COLOR,
+    );
+    drawCenteredHaloText(
+      timeText,
+      rightLabelX,
+      frame.cy,
+      SUN_INSIDE_COLOR,
+      sideTimeSize,
+      850,
+      sideTimeHalo,
       SUN_OUTSIDE_COLOR,
     );
     return;
@@ -571,24 +625,24 @@ function drawDialDateTime(now) {
   const timeHalo = frame.compact ? 5 : frame.narrow ? 5.6 : 6.2;
 
   drawCenteredHaloText(
-    formatDateText(now),
+    dateText,
     frame.cx,
     frame.cy - frame.scale * dateOffset,
-    SUN_INSIDE_COLOR,
+    SUN_OUTSIDE_COLOR,
     dateSize,
     840,
     dateHalo,
-    SUN_OUTSIDE_COLOR,
+    SUN_INSIDE_COLOR,
   );
   drawCenteredHaloText(
-    formatTimeText(now),
+    timeText,
     frame.cx,
     frame.cy + frame.scale * timeOffset,
-    SUN_INSIDE_COLOR,
+    SUN_OUTSIDE_COLOR,
     timeSize,
     850,
     timeHalo,
-    SUN_OUTSIDE_COLOR,
+    SUN_INSIDE_COLOR,
   );
 }
 

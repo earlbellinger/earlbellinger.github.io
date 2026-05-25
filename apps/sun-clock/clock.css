@@ -4,10 +4,8 @@
   background: #540b0e;
   color: #fff3b0;
   --page-pad: clamp(4px, 1.4vmin, 10px);
-  --clock-size: min(
-    calc(100vw - var(--page-pad) - var(--page-pad)),
-    calc(100svh - var(--page-pad) - var(--page-pad))
-  );
+  --canvas-width: calc(100vw - var(--page-pad) - var(--page-pad));
+  --canvas-height: calc(100svh - var(--page-pad) - var(--page-pad));
 }
 
 * {
@@ -45,38 +43,60 @@ body {
 
 #clockCanvas {
   display: block;
-  width: var(--clock-size);
-  height: var(--clock-size);
+  width: var(--canvas-width);
+  height: var(--canvas-height);
   min-width: 0;
   min-height: 0;
   max-width: 100%;
   max-height: 100%;
 }
 
-@media (max-width: 720px), (max-height: 520px) {
-  #clockCanvas {
-    width: calc(100vw - var(--page-pad) - var(--page-pad));
-    height: calc(100svh - var(--page-pad) - var(--page-pad));
-  }
+.brand-credit {
+  position: fixed;
+  right: clamp(10px, 1.8vw, 22px);
+  bottom: clamp(8px, 1.5vw, 18px);
+  z-index: 2;
+  font-size: clamp(11px, 1.2vw, 14px);
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.brand-credit a,
+.brand-credit span {
+  color: #fff3b0;
+}
+
+.brand-credit a {
+  text-decoration: none;
+  text-shadow:
+    0 1px 0 #540b0e,
+    1px 0 0 #540b0e,
+    0 -1px 0 #540b0e,
+    -1px 0 0 #540b0e;
+}
+
+.brand-credit span {
+  text-shadow:
+    0 1px 0 #540b0e,
+    1px 0 0 #540b0e,
+    0 -1px 0 #540b0e,
+    -1px 0 0 #540b0e;
+}
+
+.brand-credit a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 
 @supports (height: 100dvh) {
   :root {
-    --clock-size: min(
-      calc(100vw - var(--page-pad) - var(--page-pad)),
-      calc(100dvh - var(--page-pad) - var(--page-pad))
-    );
+    --canvas-height: calc(100dvh - var(--page-pad) - var(--page-pad));
   }
 
   body,
   .clock-shell {
     min-height: 100dvh;
     height: 100dvh;
-  }
-
-  @media (max-width: 720px), (max-height: 520px) {
-    #clockCanvas {
-      height: calc(100dvh - var(--page-pad) - var(--page-pad));
-    }
   }
 }
