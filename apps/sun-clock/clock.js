@@ -208,7 +208,7 @@ function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56) 
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = scaleStroke(lineWidth);
-  ctx.lineCap = "round";
+  ctx.lineCap = "butt";
   ctx.lineJoin = "round";
 
   for (let chunk = 0; chunk < chunks; chunk += 1) {
