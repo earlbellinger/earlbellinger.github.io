@@ -260,6 +260,65 @@ function drawFadedPath(ray, color, lineWidth, minAlpha = 0.08, maxAlpha = 0.56, 
   ctx.restore();
 }
 
+function drawMinuteAgeFadedPath(ray, marker, progress) {
+  if (ray.points.length < 2) {
+    return;
+  }
+
+  const currentProgress = ((progress % 1) + 1) % 1;
+  const endIndex = Math.max(1, marker.index);
+  const points = ray.points.slice(0, endIndex);
+  const coordinates = ray.coordinate.slice(0, endIndex);
+  points.push(marker.point);
+  coordinates.push(currentProgress);
+
+  const segmentCount = points.length - 1;
+  if (segmentCount < 1) {
+    return;
+  }
+
+  const chunks = Math.min(96, Math.max(1, segmentCount));
+  const currentMinutes = currentProgress * 60;
+
+  ctx.save();
+  ctx.strokeStyle = ray.color;
+  ctx.lineWidth = scaleStroke(ray.lineWidth + 0.7);
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "round";
+
+  for (let chunk = 0; chunk < chunks; chunk += 1) {
+    const startIndex = Math.floor((chunk / chunks) * segmentCount);
+    const end = Math.floor(((chunk + 1) / chunks) * segmentCount);
+    const endChunkIndex = chunk === chunks - 1 ? segmentCount : Math.max(startIndex + 1, end);
+    const midProgress = (coordinates[startIndex] + coordinates[endChunkIndex]) * 0.5;
+    const ageMinutes = Math.max(0, (currentProgress - midProgress) * 60);
+    let opacity = 0;
+    if (ageMinutes < 1) {
+      opacity = 1;
+    } else if (ageMinutes < 2) {
+      opacity = 0.8;
+    } else if (ageMinutes < 3) {
+      opacity = 0.6;
+    } else {
+      const tailMinutes = Math.max(1, currentMinutes - 3);
+      const tailProgress = Math.min(1, (ageMinutes - 3) / tailMinutes);
+      opacity = 0.6 * Math.pow(1 - tailProgress, 1.35);
+    }
+
+    ctx.globalAlpha = opacity;
+    ctx.beginPath();
+    const start = toScreen(points[startIndex]);
+    ctx.moveTo(start.x, start.y);
+    for (let index = startIndex + 1; index <= endChunkIndex; index += 1) {
+      const point = toScreen(points[index]);
+      ctx.lineTo(point.x, point.y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 function drawYearProgressRange(ray, startIndex, endIndex, lineWidth, alpha = 1) {
   drawPathRange(ray, startIndex, endIndex, ray.color, lineWidth, alpha, {
     lineCap: "butt",
@@ -798,7 +857,7 @@ function draw(now) {
   markers.forEach(({ ray, renderRay, marker }) => {
     const activeRay = pathToMarker(renderRay, marker);
     if (ray.id === "minutes") {
-      drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.7, 0.015, 0.82, 4.2);
+      drawMinuteAgeFadedPath(ray, marker, progress.minutes);
     } else if (ray.id === "seconds") {
       drawFadedPath(activeRay, ray.color, ray.lineWidth + 0.55);
     } else {
