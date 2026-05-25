@@ -4,6 +4,7 @@ const digitalTime = document.querySelector("#digitalTime");
 const statusEl = document.querySelector("#clockStatus");
 const SUN_OUTSIDE_COLOR = "#540b0e";
 const SUN_INSIDE_COLOR = "#fff3b0";
+const MINUTE_INACTIVE_ALPHA = 0.15;
 
 let clockData = null;
 let preparedRays = [];
@@ -64,6 +65,11 @@ function scaleHalo(width) {
 
 function scaleMarker(size) {
   return Math.max(3.2, size * frame.markerScale);
+}
+
+function overlayAlphaForTarget(targetAlpha, baseAlpha) {
+  const clampedTarget = Math.min(1, Math.max(baseAlpha, targetAlpha));
+  return (clampedTarget - baseAlpha) / (1 - baseAlpha);
 }
 
 function prepareRay(ray) {
@@ -296,16 +302,16 @@ function drawMinuteAgeFadedPath(ray, marker, progress) {
     if (ageMinutes < 1) {
       opacity = 1;
     } else if (ageMinutes < 2) {
-      opacity = 0.8;
+      opacity = 0.75;
     } else if (ageMinutes < 3) {
-      opacity = 0.6;
+      opacity = 0.5;
     } else {
       const tailMinutes = Math.max(1, currentMinutes - 3);
       const tailProgress = Math.min(1, (ageMinutes - 3) / tailMinutes);
-      opacity = 0.6 * Math.pow(1 - tailProgress, 1.35);
+      opacity = MINUTE_INACTIVE_ALPHA + (0.25 - MINUTE_INACTIVE_ALPHA) * Math.pow(1 - tailProgress, 1.35);
     }
 
-    ctx.globalAlpha = opacity;
+    ctx.globalAlpha = overlayAlphaForTarget(opacity, MINUTE_INACTIVE_ALPHA);
     ctx.beginPath();
     const start = toScreen(points[startIndex]);
     ctx.moveTo(start.x, start.y);
@@ -832,7 +838,7 @@ function draw(now) {
   drawClockNumbers(activeLabels, activeRays);
 
   nonYearRays.forEach((ray) => {
-    const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? 0.15 : 0.11;
+    const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? MINUTE_INACTIVE_ALPHA : 0.11;
     drawPath(ray, ray.color, ray.lineWidth, baseAlpha);
   });
 
