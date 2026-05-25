@@ -291,6 +291,7 @@ function drawMinuteAgeFadedPath(ray, marker, progress) {
 
   const chunks = Math.min(180, Math.max(1, segmentCount));
   const currentMinutes = currentProgress * 60;
+  const transitionFloor = 0.5;
 
   ctx.save();
   ctx.strokeStyle = ray.color;
@@ -309,11 +310,11 @@ function drawMinuteAgeFadedPath(ray, marker, progress) {
       opacity = 1;
     } else if (ageMinutes <= 3) {
       const transition = smoothStep(1.5, 3, ageMinutes);
-      opacity = 1 - transition * 0.25;
+      opacity = 1 - transition * (1 - transitionFloor);
     } else {
       const tailMinutes = Math.max(1, currentMinutes - 3);
       const tailProgress = smoothStep(0, 1, Math.min(1, (ageMinutes - 3) / tailMinutes));
-      opacity = MINUTE_INACTIVE_ALPHA + (0.75 - MINUTE_INACTIVE_ALPHA) * (1 - tailProgress);
+      opacity = MINUTE_INACTIVE_ALPHA + (transitionFloor - MINUTE_INACTIVE_ALPHA) * (1 - tailProgress);
     }
 
     ctx.globalAlpha = overlayAlphaForTarget(opacity, MINUTE_INACTIVE_ALPHA);
