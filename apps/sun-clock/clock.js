@@ -134,23 +134,6 @@ function drawPath(ray, color, lineWidth, alpha = 1, limitIndex = ray.points.leng
   ctx.restore();
 }
 
-function drawPathInsideRadius(
-  ray,
-  color,
-  lineWidth,
-  alpha,
-  limitIndex,
-  clipRadius,
-  options = {},
-) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(frame.cx, frame.cy, clipRadius * frame.scale, 0, Math.PI * 2);
-  ctx.clip();
-  drawPath(ray, color, lineWidth, alpha, limitIndex, options);
-  ctx.restore();
-}
-
 function pathToMarker(ray, marker, startIndex = 0) {
   const endIndex = Math.max(1, marker.index);
   const clampedStart = Math.min(Math.max(0, startIndex), endIndex - 1);
@@ -339,6 +322,40 @@ function angleForClockIndex(index, total) {
   return Math.PI / 2 - (index / total) * Math.PI * 2;
 }
 
+function projectRayToBand(ray, innerRadius, outerRadius) {
+  const sourceInner = ray.innerRadius ?? 0;
+  const sourceOuter = ray.outerRadius ?? 1;
+  const sourceSpan = sourceOuter - sourceInner || 1;
+  const points = ray.points.map((point) => {
+    const radius = Math.hypot(point.x, point.y);
+    if (radius <= 0) {
+      return point;
+    }
+    const radialFraction = Math.min(1, Math.max(0, (radius - sourceInner) / sourceSpan));
+    const targetRadius = innerRadius + radialFraction * (outerRadius - innerRadius);
+    const scale = targetRadius / radius;
+    return {
+      x: point.x * scale,
+      y: point.y * scale,
+    };
+  });
+
+  return {
+    ...ray,
+    points,
+  };
+}
+
+function yearRayRenderBand() {
+  if (frame.compact) {
+    return { inner: 0.91, outer: 0.985 };
+  }
+  if (frame.narrow) {
+    return { inner: 0.925, outer: 0.989 };
+  }
+  return { inner: 0.94, outer: 0.992 };
+}
+
 function activeLabelBuckets(now) {
   const hour = now.getHours() % 12 || 12;
   const minute = now.getMinutes();
@@ -478,24 +495,31 @@ function formatDateText(now) {
 }
 
 function drawDialDateTime(now) {
+  const dateOffset = frame.compact ? 0.78 : frame.narrow ? 0.73 : 0.69;
+  const timeOffset = frame.compact ? 0.66 : frame.narrow ? 0.675 : 0.69;
+  const dateSize = frame.compact ? 28 : frame.narrow ? 31 : 32;
+  const timeSize = frame.compact ? 32 : frame.narrow ? 34 : 34;
+  const dateHalo = frame.compact ? 3.4 : frame.narrow ? 4.6 : 5.2;
+  const timeHalo = frame.compact ? 4.2 : frame.narrow ? 5.2 : 5.6;
+
   drawCenteredHaloText(
     formatDateText(now),
     frame.cx,
-    frame.cy - frame.scale * (frame.compact ? 0.66 : 0.69),
+    frame.cy - frame.scale * dateOffset,
     "#540b0e",
-    36,
+    dateSize,
     840,
-    5.8,
+    dateHalo,
     SUN_INSIDE_COLOR,
   );
   drawCenteredHaloText(
     formatTimeText(now),
     frame.cx,
-    frame.cy + frame.scale * (frame.compact ? 0.66 : 0.69),
+    frame.cy + frame.scale * timeOffset,
     "#540b0e",
-    38,
+    timeSize,
     850,
-    6,
+    timeHalo,
     SUN_INSIDE_COLOR,
   );
 }
@@ -560,6 +584,12 @@ function draw(now) {
 
   visibleRays.forEach((ray) => {
     if (ray.id === "year") {
+      const band = yearRayRenderBand();
+      const yearRay = projectRayToBand(ray, band.inner, band.outer);
+      drawPath(yearRay, ray.color, ray.lineWidth + 0.05, frame.compact ? 0.115 : 0.085, yearRay.points.length - 1, {
+        lineCap: "butt",
+        lineJoin: "round",
+      });
       return;
     }
     const baseAlpha = ray.id === "hours" ? 0.2 : ray.id === "minutes" ? 0.15 : 0.11;
@@ -576,21 +606,33 @@ function draw(now) {
   ctx.stroke();
   ctx.restore();
 
-  const markers = visibleRays.map((ray) => ({
-    ray,
-    marker: pointAt(ray, progress[ray.id]),
-  }));
-
-  markers.forEach(({ ray, marker }) => {
-    const activeRay = pathToMarker(ray, marker);
+  const markers = visibleRays.map((ray) => {
     if (ray.id === "year") {
-      drawPathInsideRadius(
+      const band = yearRayRenderBand();
+      const renderRay = projectRayToBand(ray, band.inner, band.outer);
+      return {
+        ray,
+        renderRay,
+        marker: pointAt(renderRay, progress[ray.id]),
+      };
+    }
+
+    return {
+      ray,
+      renderRay: ray,
+      marker: pointAt(ray, progress[ray.id]),
+    };
+  });
+
+  markers.forEach(({ ray, renderRay, marker }) => {
+    const activeRay = pathToMarker(renderRay, marker);
+    if (ray.id === "year") {
+      drawPath(
         activeRay,
         ray.color,
-        ray.lineWidth + 0.12,
-        0.24,
+        ray.lineWidth + 0.2,
+        0.32,
         activeRay.points.length - 1,
-        0.984,
         { lineCap: "butt", lineJoin: "bevel" },
       );
     } else if (ray.id === "minutes" || ray.id === "seconds") {
