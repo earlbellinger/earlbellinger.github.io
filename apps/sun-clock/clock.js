@@ -2,14 +2,120 @@ const canvas = document.querySelector("#clockCanvas");
 const ctx = canvas.getContext("2d");
 const digitalTime = document.querySelector("#digitalTime");
 const statusEl = document.querySelector("#clockStatus");
-const SUN_OUTSIDE_COLOR = "#540b0e";
-const SUN_INSIDE_COLOR = "#fff3b0";
+const paletteButton = document.querySelector("#paletteButton");
+const infoButton = document.querySelector("#infoButton");
+const infoPanel = document.querySelector("#infoPanel");
+let SUN_OUTSIDE_COLOR = "#540b0e";
+let SUN_INSIDE_COLOR = "#fff3b0";
 const MINUTE_INACTIVE_ALPHA = 0.15;
 const SECOND_INACTIVE_ALPHA = 0.11;
+const PALETTES = [
+  {
+    name: "Bellringer",
+    outside: "#540b0e",
+    inside: "#fff3b0",
+    rays: {
+      year: { color: "#540b0e", markerColor: "#540b0e" },
+      hours: { color: "#9e2a2b", markerColor: "#6f1d1b" },
+      minutes: { color: "#335c67", markerColor: "#264650" },
+      seconds: { color: "#e09f3e", markerColor: "#a76828" },
+    },
+  },
+  {
+    name: "Solar Garden",
+    outside: "#3d405b",
+    inside: "#f4f1de",
+    rays: {
+      year: { color: "#f2cc8f", markerColor: "#b57a34" },
+      hours: { color: "#e07a5f", markerColor: "#a94f3d" },
+      minutes: { color: "#3d405b", markerColor: "#24263b" },
+      seconds: { color: "#81b29a", markerColor: "#4f7a69" },
+    },
+  },
+  {
+    name: "Blue Bellringer",
+    outside: "#335c67",
+    inside: "#fff3b0",
+    rays: {
+      year: { color: "#335c67", markerColor: "#264650" },
+      hours: { color: "#e09f3e", markerColor: "#a76828" },
+      minutes: { color: "#9e2a2b", markerColor: "#6f1d1b" },
+      seconds: { color: "#540b0e", markerColor: "#350709" },
+    },
+  },
+  {
+    name: "Aqua Coral",
+    outside: "#0081a7",
+    inside: "#fdfcdc",
+    rays: {
+      year: { color: "#fed9b7", markerColor: "#b88753" },
+      hours: { color: "#f07167", markerColor: "#b94740" },
+      minutes: { color: "#00afb9", markerColor: "#007b83" },
+      seconds: { color: "#0081a7", markerColor: "#005d78" },
+    },
+  },
+  {
+    name: "Night Ember",
+    outside: "#02040f",
+    inside: "#e5dada",
+    rays: {
+      year: { color: "#002642", markerColor: "#002642" },
+      hours: { color: "#840032", markerColor: "#560021" },
+      minutes: { color: "#002642", markerColor: "#02040f" },
+      seconds: { color: "#e59500", markerColor: "#9f6700" },
+    },
+  },
+  {
+    name: "Forest Ember",
+    outside: "#001427",
+    inside: "#f4d58d",
+    rays: {
+      year: { color: "#001427", markerColor: "#001427" },
+      hours: { color: "#bf0603", markerColor: "#8d0801" },
+      minutes: { color: "#708d81", markerColor: "#3f5d55" },
+      seconds: { color: "#8d0801", markerColor: "#5f0400" },
+    },
+  },
+  {
+    name: "Solar Classic",
+    outside: "#003049",
+    inside: "#eae2b7",
+    rays: {
+      year: { color: "#fcbf49", markerColor: "#a36f11" },
+      hours: { color: "#d62828", markerColor: "#941b1b" },
+      minutes: { color: "#003049", markerColor: "#001d2c" },
+      seconds: { color: "#f77f00", markerColor: "#a95500" },
+    },
+  },
+  {
+    name: "Sky Furnace",
+    outside: "#023047",
+    inside: "#ffb703",
+    rays: {
+      year: { color: "#8ecae6", markerColor: "#2f84aa" },
+      hours: { color: "#fb8500", markerColor: "#a95900" },
+      minutes: { color: "#023047", markerColor: "#011d2b" },
+      seconds: { color: "#219ebc", markerColor: "#12677b" },
+    },
+  },
+];
 
 let clockData = null;
 let preparedRays = [];
 let frame = null;
+let activePaletteIndex = 0;
+let activePalette = PALETTES[activePaletteIndex];
+
+try {
+  const storedPalette = Number.parseInt(window.localStorage?.getItem("sunClockPaletteIndex") || "", 10);
+  if (Number.isInteger(storedPalette) && storedPalette >= 0 && storedPalette < PALETTES.length) {
+    activePaletteIndex = storedPalette;
+    activePalette = PALETTES[activePaletteIndex];
+  }
+} catch {
+  activePaletteIndex = 0;
+  activePalette = PALETTES[activePaletteIndex];
+}
 
 function setupCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -77,6 +183,104 @@ function smoothStep(edge0, edge1, value) {
   const span = edge1 - edge0 || 1;
   const t = Math.min(1, Math.max(0, (value - edge0) / span));
   return t * t * (3 - 2 * t);
+}
+
+function colorWithAlpha(hex, alpha) {
+  const value = hex.replace("#", "");
+  const full = value.length === 3
+    ? value.split("").map((character) => character + character).join("")
+    : value;
+  const numeric = Number.parseInt(full, 16);
+  const red = (numeric >> 16) & 255;
+  const green = (numeric >> 8) & 255;
+  const blue = numeric & 255;
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function applyRayPalette(ray) {
+  const colors = activePalette.rays[ray.id];
+  if (!colors) {
+    return;
+  }
+
+  ray.color = colors.color;
+  ray.markerColor = colors.markerColor || colors.color;
+  ray.mutedColor = colorWithAlpha(colors.color, 0.12);
+}
+
+function updatePaletteButton() {
+  if (!paletteButton) {
+    return;
+  }
+
+  paletteButton.setAttribute("aria-label", `Change color palette. Current palette: ${activePalette.name}`);
+  paletteButton.title = activePalette.name;
+  const swatches = [
+    activePalette.outside,
+    activePalette.rays.hours.color,
+    activePalette.rays.minutes.color,
+    activePalette.rays.seconds.color,
+    activePalette.inside,
+  ];
+  paletteButton.querySelectorAll("[data-swatch]").forEach((swatch, index) => {
+    swatch.style.backgroundColor = swatches[index] || activePalette.inside;
+  });
+}
+
+function applyPalette(index, persist = true) {
+  activePaletteIndex = ((index % PALETTES.length) + PALETTES.length) % PALETTES.length;
+  activePalette = PALETTES[activePaletteIndex];
+  SUN_OUTSIDE_COLOR = activePalette.outside;
+  SUN_INSIDE_COLOR = activePalette.inside;
+  document.documentElement.style.setProperty("--sun-outside", SUN_OUTSIDE_COLOR);
+  document.documentElement.style.setProperty("--sun-inside", SUN_INSIDE_COLOR);
+  document.documentElement.style.setProperty("--control-border", colorWithAlpha(SUN_INSIDE_COLOR, 0.58));
+  document.documentElement.style.setProperty("--control-shadow", colorWithAlpha(SUN_OUTSIDE_COLOR, 0.28));
+  preparedRays.forEach(applyRayPalette);
+  updatePaletteButton();
+  if (persist) {
+    try {
+      window.localStorage?.setItem("sunClockPaletteIndex", String(activePaletteIndex));
+    } catch {
+      // Palette persistence is optional.
+    }
+  }
+}
+
+function toggleInfoPanel(forceOpen = null) {
+  if (!infoButton || !infoPanel) {
+    return;
+  }
+
+  const shouldOpen = forceOpen === null ? infoPanel.hidden : forceOpen;
+  infoPanel.hidden = !shouldOpen;
+  infoButton.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function setupControls() {
+  updatePaletteButton();
+  paletteButton?.addEventListener("click", () => {
+    applyPalette(activePaletteIndex + 1);
+  });
+  paletteButton?.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    applyPalette(activePaletteIndex - 1);
+  });
+  infoButton?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleInfoPanel();
+  });
+  infoPanel?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  document.addEventListener("click", () => {
+    toggleInfoPanel(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      toggleInfoPanel(false);
+    }
+  });
 }
 
 function prepareRay(ray) {
@@ -893,7 +1097,7 @@ function draw(now) {
   const minuteRay = activeRays.find((ray) => ray.id === "minutes");
   const secondRay = activeRays.find((ray) => ray.id === "seconds");
   const nonYearRays = visibleRays.filter((ray) => ray.id !== "year");
-  drawCircle(1, "rgba(84, 11, 14, 0.24)", 1.45);
+  drawCircle(1, colorWithAlpha(SUN_OUTSIDE_COLOR, 0.24), 1.45);
   if (yearRay) {
     drawYearSegments(yearRay, frame.compact ? 0.07 : 0.052, yearRay.lineWidth + 0.05);
     drawYearActivePath(yearRay, progress.year);
@@ -917,7 +1121,7 @@ function draw(now) {
 
   ctx.save();
   ctx.fillStyle = SUN_INSIDE_COLOR;
-  ctx.strokeStyle = "rgba(84, 11, 14, 0.15)";
+  ctx.strokeStyle = colorWithAlpha(SUN_OUTSIDE_COLOR, 0.15);
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(frame.cx, frame.cy, frame.scale * 0.038, 0, Math.PI * 2);
@@ -977,6 +1181,7 @@ async function loadClock() {
     clockData = await response.json();
   }
   preparedRays = clockData.rays.map(prepareRay);
+  applyPalette(activePaletteIndex, false);
   canvas.dataset.clockDataSource = dataSource;
   if (statusEl) {
     statusEl.textContent = "Live local time";
@@ -1006,6 +1211,7 @@ window.addEventListener("orientationchange", () => {
   draw(new Date());
 });
 
+setupControls();
 loadClock().catch((error) => {
   if (statusEl) {
     statusEl.textContent = error.message;

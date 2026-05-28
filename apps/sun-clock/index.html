@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Bellringer Sun Clock</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="clock.css?v=desktop-side-labels">
+    <link rel="stylesheet" href="clock.css?v=no-violet">
   </head>
   <body>
     <main class="clock-shell">
@@ -13,11 +13,29 @@
         <canvas id="clockCanvas" aria-label="Asteroseismology ray clock"></canvas>
       </section>
     </main>
+    <nav class="clock-controls" aria-label="Clock display controls">
+      <button class="icon-button palette-button" id="paletteButton" type="button" aria-label="Change color palette" title="Change color palette">
+        <span class="palette-swatch" data-swatch="0"></span>
+        <span class="palette-swatch" data-swatch="1"></span>
+        <span class="palette-swatch" data-swatch="2"></span>
+        <span class="palette-swatch" data-swatch="3"></span>
+        <span class="palette-swatch" data-swatch="4"></span>
+      </button>
+      <div class="info-control">
+        <button class="icon-button info-button" id="infoButton" type="button" aria-label="About this visualization" aria-controls="infoPanel" aria-expanded="false" title="About this visualization">i</button>
+        <div class="info-panel" id="infoPanel" role="tooltip" hidden>
+          Solar oscillation ray paths are arranged as a live clock: hours, minutes, seconds, and the year trace time through the Sun. Created by
+          <a href="https://earlbellinger.com/" target="_blank" rel="noopener noreferrer">Earl Bellinger</a>
+          and
+          <a href="https://keaton.commons.gc.cuny.edu/" target="_blank" rel="noopener noreferrer">Keaton Bell</a>.
+        </div>
+      </div>
+    </nav>
     <aside class="brand-credit" aria-label="Bellringer credit">
       <a href="https://keaton.commons.gc.cuny.edu/" target="_blank" rel="noopener noreferrer">Bell</a><span>r</span><a href="https://earlbellinger.com/" target="_blank" rel="noopener noreferrer">inger</a>
     </aside>
 
-    <script src="clock-data.js?v=seconds-age-tail"></script>
-    <script src="clock.js?v=seconds-age-tail"></script>
+    <script src="clock-data.js?v=no-violet"></script>
+    <script src="clock.js?v=no-violet"></script>
   </body>
 </html>
