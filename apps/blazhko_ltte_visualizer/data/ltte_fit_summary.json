@@ -1,0 +1,70 @@
+{
+  "star_id": "OGLE-BLG-RRLYR-06498",
+  "method": "OGLE-III and OGLE-IV I-band photometry; Fourier RRab template; seasonal template phase shifts; Keplerian LTTE plus quadratic period trend.",
+  "reference_ephemeris": {
+    "pulsation_period_d": 0.58949188,
+    "t0_hjd_minus_2450000": 7000.57627
+  },
+  "published_initial_orbit": {
+    "porb_d": 2789.0,
+    "tperi_bjd_minus_2440000": 8137.0,
+    "e": 0.12,
+    "omega_deg": -82.0,
+    "asini_au": 2.35
+  },
+  "catalog_lines": {
+    "OGLE-III RRab.dat": "OGLE-BLG-RRLYR-06498  16.216 18.114  0.58948959 0.00000010  5000.43849  0.617  0.562 4.503  0.355 2.831",
+    "OGLE-III ident.dat": "OGLE-BLG-RRLYR-06498  BLG101.3 159944 RRab  17:53:53.31 -29:44:23.8 BUL_SC3_744922                              ",
+    "OGLE-IV RRab.dat": "OGLE-BLG-RRLYR-06498  16.223 18.105  0.58949188 0.00000009  7000.57627  0.594  0.538 4.490  0.338 2.805",
+    "OGLE-IV ident.dat": "OGLE-BLG-RRLYR-06498  RRab  17:53:53.31 -29:44:23.8  BLG501.18.190161 BLG101.3.159944 BUL_SC3_744922  "
+  },
+  "photometry_paths": {
+    "OGLE-III": "C:\\Users\\earlb\\Downloads\\blazhko\\data\\OGLE-BLG-RRLYR-06498_ogle3_I.dat",
+    "OGLE-IV": "C:\\Users\\earlb\\Downloads\\blazhko\\data\\OGLE-BLG-RRLYR-06498_ogle4_I.dat"
+  },
+  "template": {
+    "n_input": 16821,
+    "n_used": 16783,
+    "n_clipped": 38,
+    "robust_sigma_mag": 0.010342813274464699,
+    "clipped_rms_mag": 0.010998119453502127,
+    "survey_offset_ogle_iv_minus_ogle_iii_mag": 0.007775084888564909
+  },
+  "template_harmonics": 30,
+  "fit": {
+    "porb_d": 2791.7263066947535,
+    "porb_sigma_d": 20.516056967026504,
+    "tperi_hjd_minus_2450000": 3772.0481525373457,
+    "tperi_bjd_minus_2440000_reduced": 8188.595539147838,
+    "e": 0.10933331479841708,
+    "e_sigma": 0.06293416542307859,
+    "omega_deg": -72.66612269068057,
+    "omega_sigma_deg": 32.90622997224502,
+    "ltte_amp_d": 0.014119345235266366,
+    "ltte_amp_sigma_d": 0.0004462679174885938,
+    "asini_au": 2.4446888443609756,
+    "asini_sigma_au": 0.07726889464786062,
+    "trend_c0_d": 0.007205755689025285,
+    "trend_c1_d": -0.012453487630951955,
+    "trend_c2_d": -0.0009882512240228087,
+    "chi2": 4.579573210491913,
+    "dof": 27,
+    "red_chi2": 0.1696138226108116,
+    "quadratic_only_chi2": 1027.2227658307402,
+    "delta_chi2_vs_quadratic": 1022.6431926202482,
+    "k_km_s": 9.584151227879504,
+    "k_sigma_km_s": 0.32439725801919056,
+    "mass_function_msun": 0.25009530766952487,
+    "ltte_peak_to_peak_d": 0.028223698331626416,
+    "ltte_peak_to_peak_min": 40.64212559754204
+  },
+  "n_oc_points": 35,
+  "oc_error_floor_d": 0.0018,
+  "output_files": {
+    "oc_measurements": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-06498_ltte\\oc_measurements.csv",
+    "oc_plot": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-06498_ltte\\OGLE-BLG-RRLYR-06498_ltte_oc_fit.png",
+    "phase_correction_plot": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-06498_ltte\\OGLE-BLG-RRLYR-06498_ltte_phase_correction.png",
+    "ltte_gif": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-06498_ltte\\OGLE-BLG-RRLYR-06498_ltte_window.gif",
+    "ltte_gif_frame0": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-06498_ltte\\OGLE-BLG-RRLYR-06498_ltte_window.frame0.png"
+  }
+}

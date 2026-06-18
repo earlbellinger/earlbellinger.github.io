@@ -1,0 +1,135 @@
+{
+  "metadata": {
+    "star_id": "OGLE-BLG-RRLYR-07497",
+    "ra": "17:55:32.93",
+    "dec": "-30:35:56.7",
+    "ogle_iv_id": "BLG506.15.20949",
+    "ogle_iii_id": "BLG181.3.61873",
+    "mean_i_mag": 17.03,
+    "mean_v_mag": 19.133,
+    "catalog_period": 0.45617394,
+    "catalog_period_err": 1.3e-07,
+    "catalog_t0": 7000.01265,
+    "catalog_amplitude": 0.656,
+    "catalog_r21": 0.47,
+    "catalog_phi21": 4.069,
+    "catalog_r31": 0.274,
+    "catalog_phi31": 2.034
+  },
+  "single_modulation_reference": {
+    "summary_path": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497\\fit_summary.json",
+    "best_model_after_refined_neighborhood": {
+      "n": 9,
+      "r": 1,
+      "q": 7,
+      "bic": -19630.5043756487,
+      "loglike": 10032.997064264793,
+      "chi2": 6006.850043177605,
+      "jitter": 0.04490731786901079,
+      "parameter_count": 50
+    },
+    "refined_model": {
+      "f0": 2.1921443428599066,
+      "fm": 0.03341081679179983,
+      "p0": 0.45617434055249484,
+      "pb": 29.9304266109841,
+      "jitter": 0.04490707753257395,
+      "t_phase_zero": 6492.292252946462,
+      "t_blazhko_zero": 6492.083402043559
+    }
+  },
+  "best_model_after_initial_grid": {
+    "n": 9,
+    "r1": 1,
+    "q1": 7,
+    "s2": 2,
+    "q2": 8,
+    "bic": -25319.614557198212,
+    "loglike": 13034.32846607667,
+    "chi2": 6007.919927597046,
+    "jitter": 0.025745539455998293,
+    "parameter_count": 86
+  },
+  "best_model_after_refined_neighborhood": {
+    "n": 9,
+    "r1": 1,
+    "q1": 7,
+    "s2": 1,
+    "q2": 8,
+    "bic": -25331.143280979828,
+    "loglike": 13031.38303290986,
+    "chi2": 6007.982682228088,
+    "jitter": 0.02576044343588099,
+    "parameter_count": 84
+  },
+  "refined_model": {
+    "f0": 2.19214426952688,
+    "fm1": 0.03341148473644069,
+    "fm2": 0.020808144413207143,
+    "p0": 0.4561743558127337,
+    "pb1": 29.929828257806705,
+    "pb2": 48.05810552551191,
+    "jitter": 0.02576044343588099,
+    "t_phase_zero": 6479.963350074837
+  },
+  "period_summary": {
+    "period_q16": 0.45617430947154464,
+    "period_q50": 0.45617435616519236,
+    "period_q84": 0.4561743979516584,
+    "blazhko1_period_q16": 29.928232506800626,
+    "blazhko1_period_q50": 29.929936935226955,
+    "blazhko1_period_q84": 29.931409336159227,
+    "blazhko2_period_q16": 48.0533995772251,
+    "blazhko2_period_q50": 48.05779754903172,
+    "blazhko2_period_q84": 48.06205598694875,
+    "jitter_q16": 0.025725286914926773,
+    "jitter_q50": 0.025984655841000313,
+    "jitter_q84": 0.026257085892289384
+  },
+  "low_order_summary": {
+    "R21_q16": 0.47146601203606164,
+    "R21_q50": 0.4738375252278889,
+    "R21_q84": 0.47611261951656797,
+    "R31_q16": 0.2806715036649738,
+    "R31_q50": 0.2828833995357133,
+    "R31_q84": 0.2854000059534663,
+    "phi21_q16_rad": 2.5071599170947483,
+    "phi21_q50_rad": 2.5129536711407714,
+    "phi21_q84_rad": 2.518931896446315,
+    "phi31_q16_rad": 5.186915604983449,
+    "phi31_q50_rad": 5.198113620859909,
+    "phi31_q84_rad": 5.207174705247455
+  },
+  "mcmc_diagnostics": {
+    "iterations": 2200.0,
+    "burnin": 192.0,
+    "thin": 19.0,
+    "acceptance_fraction_mean": 0.5903835227272727,
+    "autocorr_f0": 37.942414353918906,
+    "autocorr_fm1": 33.80909031843609,
+    "autocorr_fm2": 38.56835452688688,
+    "autocorr_logj": 38.25155322445311,
+    "posterior_samples": 3360.0,
+    "n_data": 6062.0
+  },
+  "comparison_to_single_modulation": {
+    "fm2_initial": 0.020815027167572255,
+    "single_model_bic": -19630.5043756487,
+    "two_model_bic": -25331.143280979828,
+    "delta_bic_single_minus_two": 5700.638905331129,
+    "single_model_wrms": 0.046220049957738575,
+    "two_model_wrms": 0.028137500166225626
+  },
+  "output_files": {
+    "photometry_path": "C:\\Users\\earlb\\Downloads\\blazhko\\data\\OGLE-BLG-RRLYR-07497_I.dat",
+    "power_spectrum": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_two_modulation_power_spectrum.png",
+    "residual_power_spectrum": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_two_modulation_residual_power_spectrum.png",
+    "three_panel_lightcurves": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_three_panel_phased_lightcurves.png",
+    "phase_folded_phi0": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_phase_folded_phi0.png",
+    "phase_folded_phi1": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_phase_folded_phi1.png",
+    "phase_folded_phi0_phi1": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_phase_folded_phi0_phi1.png",
+    "blazhko2_window_animation": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_blazhko2_window_phase_folded.gif",
+    "blazhko1_window_animation": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_blazhko1_window_phase_folded.gif",
+    "combined_blazhko_animation_2x1": "C:\\Users\\earlb\\Downloads\\blazhko\\results\\OGLE-BLG-RRLYR-07497_two_modulation\\OGLE-BLG-RRLYR-07497_blazhko_windows_2x1.gif"
+  }
+}
