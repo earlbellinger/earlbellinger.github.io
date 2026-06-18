@@ -5,11 +5,22 @@ const statusEl = document.querySelector("#clockStatus");
 const paletteButton = document.querySelector("#paletteButton");
 const infoButton = document.querySelector("#infoButton");
 const infoPanel = document.querySelector("#infoPanel");
-let SUN_OUTSIDE_COLOR = "#540b0e";
-let SUN_INSIDE_COLOR = "#fff3b0";
+let SUN_OUTSIDE_COLOR = "#003049";
+let SUN_INSIDE_COLOR = "#eae2b7";
 const MINUTE_INACTIVE_ALPHA = 0.15;
 const SECOND_INACTIVE_ALPHA = 0.11;
 const PALETTES = [
+  {
+    name: "Solar Classic",
+    outside: "#003049",
+    inside: "#eae2b7",
+    rays: {
+      year: { color: "#fcbf49", markerColor: "#a36f11" },
+      hours: { color: "#d62828", markerColor: "#941b1b" },
+      minutes: { color: "#003049", markerColor: "#001d2c" },
+      seconds: { color: "#f77f00", markerColor: "#a95500" },
+    },
+  },
   {
     name: "Bellringer",
     outside: "#540b0e",
@@ -74,28 +85,6 @@ const PALETTES = [
       hours: { color: "#bf0603", markerColor: "#8d0801" },
       minutes: { color: "#708d81", markerColor: "#3f5d55" },
       seconds: { color: "#8d0801", markerColor: "#5f0400" },
-    },
-  },
-  {
-    name: "Solar Classic",
-    outside: "#003049",
-    inside: "#eae2b7",
-    rays: {
-      year: { color: "#fcbf49", markerColor: "#a36f11" },
-      hours: { color: "#d62828", markerColor: "#941b1b" },
-      minutes: { color: "#003049", markerColor: "#001d2c" },
-      seconds: { color: "#f77f00", markerColor: "#a95500" },
-    },
-  },
-  {
-    name: "Sky Furnace",
-    outside: "#023047",
-    inside: "#ffb703",
-    rays: {
-      year: { color: "#8ecae6", markerColor: "#2f84aa" },
-      hours: { color: "#fb8500", markerColor: "#a95900" },
-      minutes: { color: "#023047", markerColor: "#011d2b" },
-      seconds: { color: "#219ebc", markerColor: "#12677b" },
     },
   },
 ];
