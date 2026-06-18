@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+
+{% include head.html %}
+
+<body class="theme-{% if site.resume_theme %}{{ site.resume_theme }}{% endif %}">
+
+  <div class="wrapper" itemscope itemtype="http://schema.org/Person">
+
+    <header class="page-header">
+
+      {% if site.resume_avatar == 'true' %}
+      <img src="{{ site.baseurl }}images/avatar.png" alt="my photo" class="avatar" itemprop="image">
+      {% endif %}
+
+      <h1 class="header-name" itemprop="name">{{ site.resume_name }}</h1>
+
+      <div class="title-bar">
+        <h2 class="header-title" itemprop="jobTitle">{{ site.resume_title }}</h2>
+        {% include icon-links.html %}
+      </div>
+
+    </header>
+
+    {{ content }}
+
+    <footer class="page-footer">
+      <p class="footer-line">Earl Patrick Bellinger, Ph.D.</p>
+    </footer>
+
+  </div>
+
+</body>
+
+</html>
