@@ -54,7 +54,7 @@
     "order": 40,
     "slug": "ozwizard",
     "name": "OZwizard",
-    "description": "Interactive one-zone stellar pulsation explorer for Stellingwerf's Wizard of OZ models.",
+    "description": "Interactive explorer for Stellingwerf's one-zone stellar pulsation models.",
     "href": "/apps/ozwizard/",
     "repo": "earlbellinger/ozwizard",
     "branch": "main",
