@@ -46,6 +46,7 @@ jobs:
           DISPATCH_BRANCH: ${{ github.event.client_payload.branch }}
           DISPATCH_SHA: ${{ github.event.client_payload.sha }}
           INPUT_APP: ${{ inputs.app }}
+          APP_SYNC_TOKEN: ${{ secrets.APP_SYNC_TOKEN }}
         run: |
           set -euo pipefail
           app="${DISPATCH_APP:-${INPUT_APP:-all}}"

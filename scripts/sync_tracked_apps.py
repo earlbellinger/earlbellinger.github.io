@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import quote
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,7 +73,7 @@ def log(message: str) -> None:
 
 def run(command: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     resolved = resolve_command(command)
-    log(f"+ {' '.join(command)}  (cwd={cwd})")
+    log(f"+ {format_command(command)}  (cwd={cwd})")
     try:
         return subprocess.run(resolved, cwd=str(cwd), check=check, text=True)
     except FileNotFoundError as error:
@@ -90,6 +91,15 @@ def capture(command: list[str], cwd: Path, *, check: bool = True) -> str:
         stderr=subprocess.PIPE,
     )
     return result.stdout.strip()
+
+
+def format_command(command: list[str]) -> str:
+    text = " ".join(command)
+    token = os.environ.get("APP_SYNC_TOKEN", "")
+    if token:
+        text = text.replace(token, "***")
+        text = text.replace(quote(token, safe=""), "***")
+    return text
 
 
 def resolve_command(command: list[str]) -> list[str]:
@@ -172,7 +182,7 @@ def ensure_inside(path: Path, root: Path) -> Path:
 def clone_app(app: dict, workspace: Path, expected_sha: str | None) -> tuple[Path, str]:
     clone_dir = workspace / "source" / app["slug"]
     clone_dir.parent.mkdir(parents=True, exist_ok=True)
-    clone_url = f"https://github.com/{app['repo']}.git"
+    clone_url = github_clone_url(app["repo"])
     run(
         [
             "git",
@@ -192,6 +202,13 @@ def clone_app(app: dict, workspace: Path, expected_sha: str | None) -> tuple[Pat
         run(["git", "checkout", "--detach", expected_sha], clone_dir)
     source_sha = capture(["git", "rev-parse", "HEAD"], clone_dir)
     return clone_dir, source_sha
+
+
+def github_clone_url(repo: str) -> str:
+    token = os.environ.get("APP_SYNC_TOKEN", "")
+    if token:
+        return f"https://x-access-token:{quote(token, safe='')}@github.com/{repo}.git"
+    return f"https://github.com/{repo}.git"
 
 
 def run_build_commands(app: dict, clone_dir: Path) -> None:
