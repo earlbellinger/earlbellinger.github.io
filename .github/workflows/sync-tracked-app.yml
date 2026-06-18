@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: tracked-app-sync
+  group: tracked-app-sync-${{ github.event.client_payload.app || github.event.inputs.app || 'all' }}
   cancel-in-progress: false
 
 jobs:
