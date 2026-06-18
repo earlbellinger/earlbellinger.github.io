@@ -1,4 +1,5 @@
 name: Sync tracked app
+run-name: "Sync tracked app: ${{ github.event.client_payload.app || github.event.inputs.app || 'all' }}"
 
 on:
   repository_dispatch:
@@ -76,13 +77,72 @@ jobs:
 
       - name: Push website commit
         if: steps.sync.outputs.committed == 'true'
+        env:
+          DISPATCH_APP: ${{ github.event.client_payload.app }}
+          DISPATCH_REPO: ${{ github.event.client_payload.repo }}
+          DISPATCH_BRANCH: ${{ github.event.client_payload.branch }}
+          DISPATCH_SHA: ${{ github.event.client_payload.sha }}
+          INPUT_APP: ${{ inputs.app }}
+          APP_SYNC_TOKEN: ${{ secrets.APP_SYNC_TOKEN }}
         run: |
           set -euo pipefail
+
+          build_args() {
+            app="${DISPATCH_APP:-${INPUT_APP:-all}}"
+            repo="${DISPATCH_REPO:-}"
+            branch="${DISPATCH_BRANCH:-}"
+            sha="${DISPATCH_SHA:-}"
+
+            args=(--app "$app" --commit)
+            if [ -n "$repo" ]; then
+              args+=(--source-repo "$repo")
+            fi
+            if [ -n "$branch" ]; then
+              args+=(--source-branch "$branch")
+            fi
+            if [ -n "$sha" ]; then
+              args+=(--source-sha "$sha")
+            fi
+          }
+
+          regenerate_from_latest_master() {
+            git fetch origin master
+            retry_dir="$(mktemp -d)"
+            git worktree add --detach "$retry_dir" origin/master
+
+            if (
+              cd "$retry_dir"
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              build_args
+              before="$(git rev-parse HEAD)"
+              python scripts/sync_tracked_apps.py "${args[@]}"
+              after="$(git rev-parse HEAD)"
+              if [ "$before" = "$after" ]; then
+                echo "Latest master already contains this app output."
+                exit 0
+              fi
+              git push origin HEAD:master
+            ); then
+              git worktree remove --force "$retry_dir" >/dev/null 2>&1 || true
+              return 0
+            fi
+
+            git worktree remove --force "$retry_dir" >/dev/null 2>&1 || true
+            return 1
+          }
+
+          if git push origin HEAD:master; then
+            exit 0
+          fi
+
           for attempt in 1 2 3; do
-            if git push origin HEAD:master; then
+            echo "Push race detected; regenerating from latest master (attempt ${attempt})."
+            if regenerate_from_latest_master; then
               exit 0
             fi
-            git fetch origin master
-            git rebase origin/master
+            sleep $((attempt * 5))
           done
-          git push origin HEAD:master
+
+          echo "Failed to push after regenerating from latest master."
+          exit 1
