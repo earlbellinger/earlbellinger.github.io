@@ -4,5 +4,11 @@
     "repo": "earlbellinger/mc_atlas",
     "source_sha": "aa0526008bc673184bc632aaca2beb2bd4a0ee7c",
     "synced_at": "2026-06-18T20:28:59Z"
+  },
+  "ozwizard": {
+    "branch": "main",
+    "repo": "earlbellinger/ozwizard",
+    "source_sha": "0606e499421c2ebf56cf7342fca1b697839fb0ab",
+    "synced_at": "2026-06-18T20:31:16Z"
   }
 }
