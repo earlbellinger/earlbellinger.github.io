@@ -1,0 +1,118 @@
+[
+  {
+    "order": 10,
+    "slug": "colors-of-art",
+    "name": "The Colors of Art",
+    "description": "Explore named colors through artworks with matching color statistics.",
+    "href": "/apps/colors-of-art/",
+    "repo": "earlbellinger/colors-of-art",
+    "branch": "codex/initial-color-art-map",
+    "sync": {
+      "commands": [
+        ["npm", "ci"],
+        ["npm", "test"],
+        ["npm", "run", "build"]
+      ],
+      "artifact_path": "dist"
+    }
+  },
+  {
+    "order": 20,
+    "slug": "kappa",
+    "name": "Kappa",
+    "description": "RR Lyrae RSP animations and convergence diagnostics for pulsation models.",
+    "href": "/apps/kappa/",
+    "repo": "earlbellinger/kappa",
+    "branch": "main",
+    "sync": {
+      "artifact_path": "site"
+    }
+  },
+  {
+    "order": 30,
+    "slug": "blazhko_ltte_visualizer",
+    "name": "Blazhko + LTTE Visualizer",
+    "description": "Explore RR Lyrae Blazhko modulation and light-travel-time phase shifts.",
+    "href": "/apps/blazhko_ltte_visualizer/",
+    "repo": "earlbellinger/blazhko_ltte_visualizer",
+    "branch": "main",
+    "sync": {
+      "commands": [
+        ["node", "--check", "app.js"]
+      ],
+      "paths": [
+        "index.html",
+        "app.js",
+        "styles.css",
+        "README.md",
+        "data",
+        "scripts"
+      ]
+    }
+  },
+  {
+    "order": 40,
+    "slug": "ozwizard",
+    "name": "OZwizard",
+    "description": "Interactive one-zone stellar pulsation explorer for Stellingwerf's Wizard of OZ models.",
+    "href": "/apps/ozwizard/",
+    "repo": "earlbellinger/ozwizard",
+    "branch": "main",
+    "sync": {
+      "workdir": "python_implementation/web_app",
+      "commands": [
+        ["npm", "ci"],
+        ["npm", "test"],
+        ["npm", "run", "build"]
+      ],
+      "artifact_path": "python_implementation/web_app/dist",
+      "moves": [
+        {"from": "wizard_of_oz.html", "to": "index.html"}
+      ],
+      "postprocess": ["ozwizard_static_loader"]
+    }
+  },
+  {
+    "order": 50,
+    "slug": "mc_atlas",
+    "name": "Magellanic Cloud Atlas",
+    "description": "Interactive 3-D map of Magellanic Cloud variables, clusters, and red-clump structure.",
+    "href": "/apps/mc_atlas/",
+    "repo": "earlbellinger/mc_atlas",
+    "branch": "master",
+    "sync": {
+      "paths": [
+        ".gitignore",
+        "AGENTS.md",
+        "README.md",
+        "index.html",
+        "public",
+        "scripts",
+        "src"
+      ]
+    }
+  },
+  {
+    "order": 60,
+    "slug": "sun-clock",
+    "name": "Bellringer Sun Clock",
+    "description": "Live asteroseismology clock built from solar oscillation ray paths.",
+    "href": "/apps/sun-clock/",
+    "repo": "earlbellinger/sun-clock",
+    "branch": "main",
+    "sync": {
+      "commands": [
+        ["node", "--check", "clock.js"]
+      ],
+      "paths": [
+        ".gitignore",
+        "README.md",
+        "clock-data.js",
+        "clock.css",
+        "clock.js",
+        "favicon.svg",
+        "index.html"
+      ]
+    }
+  }
+]

@@ -12,30 +12,13 @@ title: Apps | Earl Patrick Bellinger
       </tr>
     </thead>
     <tbody>
+      {% assign apps = site.data.apps | sort: "order" %}
+      {% for app in apps %}
       <tr>
-        <td><a href="/apps/colors-of-art/">The Colors of Art</a></td>
-        <td>Explore named colors through artworks with matching color statistics.</td>
+        <td><a href="{{ app.href }}">{{ app.name }}</a></td>
+        <td>{{ app.description }}</td>
       </tr>
-      <tr>
-        <td><a href="/apps/kappa/">Kappa</a></td>
-        <td>RR Lyrae RSP animations and convergence diagnostics for pulsation models.</td>
-      </tr>
-      <tr>
-        <td><a href="/apps/blazhko_ltte_visualizer/">Blazhko + LTTE Visualizer</a></td>
-        <td>Explore RR Lyrae Blazhko modulation and light-travel-time phase shifts.</td>
-      </tr>
-      <tr>
-        <td><a href="/apps/ozwizard/">OZwizard</a></td>
-        <td>Interactive one-zone stellar pulsation explorer for Stellingwerf's Wizard of OZ models.</td>
-      </tr>
-      <tr>
-        <td><a href="/apps/mc_atlas/">Magellanic Cloud Atlas</a></td>
-        <td>Interactive 3-D map of Magellanic Cloud variables, clusters, and red-clump structure.</td>
-      </tr>
-      <tr>
-        <td><a href="/apps/sun-clock/">Bellringer Sun Clock</a></td>
-        <td>Live asteroseismology clock built from solar oscillation ray paths.</td>
-      </tr>
+      {% endfor %}
     </tbody>
   </table>
 </section>
