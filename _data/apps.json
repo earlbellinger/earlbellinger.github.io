@@ -111,7 +111,8 @@
         "clock.css",
         "clock.js",
         "favicon.svg",
-        "index.html"
+        "index.html",
+        "social-preview.png"
       ]
     }
   }
