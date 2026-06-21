@@ -436,6 +436,14 @@
         { x: 0.41, y: 0.55, sx: 0.045, sy: 0.03, distance: 0.47, vx: 24, vy: 16 },
         { x: 0.57, y: 0.62, sx: 0.045, sy: 0.03, distance: 0.5, vx: -4, vy: -18 }
       ];
+      const gravitySettings = {
+        closeHeating: 2,
+        corePressure: 14,
+        distanceScale: 86,
+        softening: 45,
+        strength: 520,
+        virialRatio: 0.6
+      };
 
       function randomSeed(seed) {
         let state = seed;
@@ -549,11 +557,10 @@
           q = rand() * 0.35;
         }
 
-        const escapeSpeed = 46 * Math.pow(1 + radius * radius, -0.25);
+        const escapeSpeed = 48 * Math.pow(1 + radius * radius, -0.25);
         const speed = q * escapeSpeed;
         const angle = rand() * Math.PI * 2;
-        const leftDrift = 12 + rand() * 10;
-        let vx = Math.cos(angle) * speed - leftDrift;
+        let vx = Math.cos(angle) * speed;
         let vy = Math.sin(angle) * speed;
 
         if (entrySide === "top") {
@@ -577,7 +584,82 @@
       }
 
       function makeVelocity(rand, radius, entrySide = null, center = null) {
-        return addClusterStream(samplePlummerVelocity(rand, 0.5 + rand() * 2.6, entrySide), center);
+        return addClusterStream(samplePlummerVelocity(rand, radius, entrySide), center);
+      }
+
+      function isMergerPair(a, b) {
+        return (a === 3 && b === 4) || (a === 4 && b === 3);
+      }
+
+      function pairGravityScale(a, b) {
+        if (a.cloud !== null && a.cloud === b.cloud) {
+          return 1;
+        }
+
+        if (isMergerPair(a.cloud, b.cloud)) {
+          return 0.52;
+        }
+
+        if (a.cloud === null || b.cloud === null) {
+          return 0.16;
+        }
+
+        return 0.045;
+      }
+
+      function virializeClusters() {
+        for (let cloud = 0; cloud < clusterCenters.length; cloud += 1) {
+          const members = stars.filter((star) => star.cloud === cloud);
+
+          if (members.length < 2) {
+            continue;
+          }
+
+          let potential = 0;
+          let kinetic = 0;
+
+          for (const star of members) {
+            kinetic += 0.5 * star.mass * (star.vx * star.vx + star.vy * star.vy);
+          }
+
+          for (let i = 0; i < members.length; i += 1) {
+            const a = members[i];
+
+            for (let j = i + 1; j < members.length; j += 1) {
+              const b = members[j];
+              const dx = b.x - a.x;
+              const dy = b.y - a.y;
+              const dz = (b.distance - a.distance) * gravitySettings.distanceScale;
+              const radius = Math.sqrt(dx * dx + dy * dy + dz * dz + gravitySettings.softening * gravitySettings.softening);
+              potential += gravitySettings.strength * a.mass * b.mass / radius;
+            }
+          }
+
+          if (kinetic <= 0 || potential <= 0) {
+            continue;
+          }
+
+          const scale = clamp(Math.sqrt(gravitySettings.virialRatio * potential / (2 * kinetic)), 0.45, 3.2);
+
+          for (const star of members) {
+            star.vx *= scale;
+            star.vy *= scale;
+          }
+        }
+      }
+
+      function addBulkMotion(rand) {
+        for (const star of stars) {
+          if (star.cloud !== null) {
+            const center = clusterCenters[star.cloud];
+            star.vx += center.vx;
+            star.vy += center.vy;
+          } else {
+            star.vx -= 10 + rand() * 8;
+          }
+
+          limitVelocity(star);
+        }
       }
 
       function makeStars() {
@@ -599,7 +681,7 @@
             x: rand() * width,
             y: rand() * height
           };
-          const motion = addClusterStream(samplePlummerVelocity(rand, plummer.radius), inCloud ? center : null);
+          const motion = samplePlummerVelocity(rand, plummer.radius);
 
           stars.push({
             cloud: inCloud ? centerIndex : null,
@@ -614,6 +696,8 @@
           });
         }
 
+        virializeClusters();
+        addBulkMotion(rand);
         stars.sort((a, b) => a.radius - b.radius);
       }
 
@@ -783,7 +867,7 @@
         const rand = motionRand || Math.random;
         const side = rand() < 0.5 ? "top" : "bottom";
         const center = star.cloud !== null ? clusterCenters[star.cloud] : null;
-        const motion = makeVelocity(rand, star.radius, side, center);
+        const motion = makeVelocity(rand, star.radius, center ? null : side, center);
         const margin = star.radius + 18;
 
         star.x = width * (0.18 + rand() * 0.74);
@@ -794,6 +878,7 @@
         if (star.cloud !== null) {
           const plummer = samplePlummerPosition(rand, center);
           star.x = clamp(plummer.x, 8, width - 8);
+          star.y = clamp(plummer.y, 8, height - 8);
           star.distance = distanceForStar(rand, center, 1);
         } else {
           star.distance = rand();
@@ -804,7 +889,7 @@
 
       function limitVelocity(star) {
         const speed = Math.hypot(star.vx, star.vy);
-        const cap = 82;
+        const cap = 96;
 
         if (speed > cap) {
           star.vx = star.vx / speed * cap;
@@ -813,9 +898,8 @@
       }
 
       function applyGravity(seconds) {
-        const gravity = 760;
-        const softening = 24;
-        const distanceScale = 72;
+        const softening = gravitySettings.softening;
+        const distanceScale = gravitySettings.distanceScale;
 
         for (let i = 0; i < stars.length; i += 1) {
           const a = stars[i];
@@ -825,8 +909,10 @@
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dz = (b.distance - a.distance) * distanceScale;
+            const planarDistance = Math.hypot(dx, dy);
+            const safePlanarDistance = Math.max(planarDistance, 0.001);
             const radiusSquared = dx * dx + dy * dy + dz * dz + softening * softening;
-            const force = gravity * seconds / (radiusSquared * Math.sqrt(radiusSquared));
+            const force = gravitySettings.strength * pairGravityScale(a, b) * seconds / (radiusSquared * Math.sqrt(radiusSquared));
             const ax = dx * force;
             const ay = dy * force;
 
@@ -834,6 +920,41 @@
             a.vy += ay * b.mass;
             b.vx -= ax * a.mass;
             b.vy -= ay * a.mass;
+
+            const coreRadius = a.radius + b.radius + 15;
+
+            if (planarDistance >= coreRadius) {
+              continue;
+            }
+
+            let nx = dx / safePlanarDistance;
+            let ny = dy / safePlanarDistance;
+
+            if (planarDistance < 0.001) {
+              const angle = ((a.id * 12.9898 + b.id * 78.233) % 1) * Math.PI * 2;
+              nx = Math.cos(angle);
+              ny = Math.sin(angle);
+            }
+
+            const tx = -ny;
+            const ty = nx;
+            const pressure = Math.pow(1 - planarDistance / coreRadius, 2);
+            const push = gravitySettings.corePressure * pressure * seconds;
+            const spinDirection = (a.id + b.id) % 2 === 0 ? 1 : -1;
+            const spin = gravitySettings.closeHeating * pressure * seconds * spinDirection;
+            const relativeVx = b.vx - a.vx;
+            const relativeVy = b.vy - a.vy;
+            const closing = relativeVx * nx + relativeVy * ny;
+            const rebound = closing < 0 ? -closing * pressure * 0.18 : 0;
+
+            a.vx -= nx * (push + rebound) / Math.sqrt(a.mass);
+            a.vy -= ny * (push + rebound) / Math.sqrt(a.mass);
+            b.vx += nx * (push + rebound) / Math.sqrt(b.mass);
+            b.vy += ny * (push + rebound) / Math.sqrt(b.mass);
+            a.vx -= tx * spin;
+            a.vy -= ty * spin;
+            b.vx += tx * spin;
+            b.vy += ty * spin;
           }
         }
       }
@@ -861,9 +982,6 @@
         applyGravity(seconds);
 
         for (const star of stars) {
-          const damping = Math.pow(0.996, seconds * 60);
-          star.vx *= damping;
-          star.vy *= damping;
           applyRightBoundary(star, seconds);
           limitVelocity(star);
 
