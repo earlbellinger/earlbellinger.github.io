@@ -482,18 +482,14 @@
       }
 
       function makeVelocity(rand, radius, entrySide = null) {
-        if (rand() < 0.42) {
-          return { vx: 0, vy: 0 };
-        }
-
         const radiusBoost = clamp((radius - 1.4) / 4.5, 0, 1);
-        const vx = Math.min(1.05, 0.04 + Math.pow(rand(), 2.4) * 0.78 + radiusBoost * 0.23);
-        let vy = gaussian(rand) * 0.08;
+        const vx = 7 + Math.pow(rand(), 1.5) * 22 + radiusBoost * 8;
+        let vy = gaussian(rand) * 2.2;
 
         if (entrySide === "top") {
-          vy = Math.abs(vy) + 0.04 + rand() * 0.12;
+          vy = Math.abs(vy) + 1.2 + rand() * 3.8;
         } else if (entrySide === "bottom") {
-          vy = -Math.abs(vy) - 0.04 - rand() * 0.12;
+          vy = -Math.abs(vy) - 1.2 - rand() * 3.8;
         }
 
         return { vx, vy };
@@ -739,6 +735,7 @@
 
           if (star.x < -margin) {
             star.x = -margin;
+            star.vx = Math.abs(star.vx) + 1;
           }
 
           if (star.x > width + margin) {
@@ -813,22 +810,24 @@
         }
 
         const speed = travel / elapsed;
-        const maxBump = clamp(speed / 450, 0, 2);
+        const maxBump = clamp(speed / 85, 0, 18);
         const directionX = dx / travel;
         const directionY = dy / travel;
 
         for (const star of stars) {
           const distance = Math.hypot(star.x - pointer.x, star.y - pointer.y);
-          const hitRadius = Math.max(star.radius + 16, 20);
+          const hitRadius = Math.max(star.radius + 42, 52);
 
           if (distance > hitRadius) {
             continue;
           }
 
-          const falloff = 1 - distance / hitRadius;
+          const falloff = Math.pow(1 - distance / hitRadius, 1.15);
           const bump = maxBump * falloff;
           star.x += directionX * bump;
           star.y += directionY * bump;
+          star.vx = clamp(star.vx + directionX * bump * 2.4, 1, 58);
+          star.vy = clamp(star.vy + directionY * bump * 2.4, -38, 38);
         }
       }
 
