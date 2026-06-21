@@ -392,7 +392,7 @@
     physical: [
       ["zeta", `\\(${TEX.zeta}\\)`, "thermal response", 0.05, 12, 0.05, 1, COLORS.zeta],
       ["zetac", `\\(${TEX.zetac}\\)`, "convective response", 0, 12, 0.05, 1, COLORS.zetac],
-      ["gammac", `\\(${TEX.gammac}\\)`, "convective flux fraction", 0, 1, 0.01, 0.2, COLORS.gammac],
+      ["gammac", `\\(${TEX.gammac}\\)`, "convective flux fraction", 0, 1, 0.01, 0.5, COLORS.gammac],
       ["m", `\\(${TEX.m}\\)`, "shell form factor", 3, 20, 0.1, 10, COLORS.m],
       ["gamma1", `\\(${TEX.gamma1}\\)`, "adiabatic exponent", 1.01, 1.67, 0.01, 1.1, COLORS.gamma1],
       ["n", `\\(${TEX.n}\\)`, "\u03BA-\u03C1 exponent", 0, 3, 0.05, 1, COLORS.n],
@@ -491,7 +491,7 @@
     "Thick convective shell": { ...paperBase, phaseWarmupTau: 7.5, zeta: 0.1, zetac: 10, gammac: 1, m: 5, gamma1: 1.1, n: 1, s: 3, sourceExp: 0, cq: 0, r0: 1.1, v0: 0, h0: 1, uc0: 1, tEnd: 24, step: 1e-3, logErrTol: -8, variableM: false, driver: "h", runUntilStable: false },
     "RR Lyrae fundamental": { ...overtoneBase, m: 10, sourceExp: -2, r0: 1.2 },
     "RR Lyrae low-amplitude fundamental": { ...overtoneBase, m: 10, sourceExp: -2, r0: 1.1 },
-    "RR Lyrae low-amplitude fundamental, damped": { ...overtoneBase, phaseWarmupTau: 40, zetac: 1, gammac: 0.2, m: 10, sourceExp: -2, cq: 5, r0: 1.1, tEnd: 100 },
+    "RR Lyrae low-amplitude fundamental, damped": { ...overtoneBase, phaseWarmupTau: 40, zetac: 1, gammac: 0.5, m: 10, sourceExp: -2, cq: 5, r0: 1.1, tEnd: 100 },
     "RR Lyrae first overtone": { ...overtoneBase, m: 15, sourceExp: 2, r0: 1.05 },
     "RR Lyrae first overtone, damped": { ...overtoneBase, phaseWarmupTau: 40, m: 15, sourceExp: 2, cq: 7, r0: 1.05, tEnd: 80 },
     "RR Lyrae high-amplitude first overtone": { ...overtoneBase, m: 15, sourceExp: 2, r0: 1.1 },
@@ -779,17 +779,39 @@
   function phaseWarmupTau(rows, requested) {
     return requested !== void 0 && Number.isFinite(requested) ? requested : defaultWarmupTau(rows);
   }
+  function refinedLuminosityExtremum(rows, index, mode) {
+    if (index <= 0 || index >= rows.length - 1) return rows[index];
+    const previous = rows[index - 1];
+    const current = rows[index];
+    const next = rows[index + 1];
+    const x0 = previous.tau - current.tau;
+    const x2 = next.tau - current.tau;
+    if (!(x0 < 0 && x2 > 0)) return current;
+    const y0 = previous.L - current.L;
+    const y2 = next.L - current.L;
+    const slope0 = y0 / x0;
+    const a = (slope0 - y2 / x2) / (x0 - x2);
+    const b = slope0 - a * x0;
+    if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) < 1e-14) return current;
+    if (mode === "min" && a <= 0 || mode === "max" && a >= 0) return current;
+    const vertex = -b / (2 * a);
+    if (!Number.isFinite(vertex) || vertex < x0 || vertex > x2) return current;
+    const luminosity = current.L + a * vertex * vertex + b * vertex;
+    if (!Number.isFinite(luminosity)) return current;
+    return { ...current, tau: current.tau + vertex, L: luminosity };
+  }
   function findLuminosityMaxima(rows, after, minSeparation = 0.75) {
     const maxima = [];
     for (let i = 1; i < rows.length - 1; i += 1) {
       const row = rows[i];
       if (row.tau < after) continue;
       if (rows[i - 1].L < row.L && row.L >= rows[i + 1].L) {
+        const maximum = refinedLuminosityExtremum(rows, i, "max");
         const last = maxima.at(-1);
-        if (last && row.tau - last.tau < minSeparation) {
-          if (row.L > last.L) maxima[maxima.length - 1] = row;
+        if (last && maximum.tau - last.tau < minSeparation) {
+          if (maximum.L > last.L) maxima[maxima.length - 1] = maximum;
         } else {
-          maxima.push(row);
+          maxima.push(maximum);
         }
       }
     }
@@ -801,11 +823,12 @@
       const row = rows[i];
       if (row.tau < after) continue;
       if (rows[i - 1].L > row.L && row.L <= rows[i + 1].L) {
+        const minimum = refinedLuminosityExtremum(rows, i, "min");
         const last = minima.at(-1);
-        if (last && row.tau - last.tau < minSeparation) {
-          if (row.L < last.L) minima[minima.length - 1] = row;
+        if (last && minimum.tau - last.tau < minSeparation) {
+          if (minimum.L < last.L) minima[minima.length - 1] = minimum;
         } else {
-          minima.push(row);
+          minima.push(minimum);
         }
       }
     }
@@ -824,12 +847,19 @@
     return (max - min) / scale;
   }
   function minimumBetween(rows, startTau, endTau) {
+    let minimumIndex = -1;
     let minimum = null;
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
       if (row.tau <= startTau || row.tau >= endTau) continue;
-      if (!minimum || row.L < minimum.L) minimum = row;
+      if (!minimum || row.L < minimum.L) {
+        minimum = row;
+        minimumIndex = i;
+      }
     }
-    return minimum;
+    if (minimumIndex < 0) return minimum;
+    const refined = refinedLuminosityExtremum(rows, minimumIndex, "min");
+    return refined.tau > startTau && refined.tau < endTau ? refined : minimum;
   }
   function median(values) {
     const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);

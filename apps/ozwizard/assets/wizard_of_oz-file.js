@@ -312,7 +312,7 @@
     physical: [
       ["zeta", `\\(${TEX.zeta}\\)`, "thermal response", 0.05, 12, 0.05, 1, COLORS.zeta],
       ["zetac", `\\(${TEX.zetac}\\)`, "convective response", 0, 12, 0.05, 1, COLORS.zetac],
-      ["gammac", `\\(${TEX.gammac}\\)`, "convective flux fraction", 0, 1, 0.01, 0.2, COLORS.gammac],
+      ["gammac", `\\(${TEX.gammac}\\)`, "convective flux fraction", 0, 1, 0.01, 0.5, COLORS.gammac],
       ["m", `\\(${TEX.m}\\)`, "shell form factor", 3, 20, 0.1, 10, COLORS.m],
       ["gamma1", `\\(${TEX.gamma1}\\)`, "adiabatic exponent", 1.01, 1.67, 0.01, 1.1, COLORS.gamma1],
       ["n", `\\(${TEX.n}\\)`, "\u03BA-\u03C1 exponent", 0, 3, 0.05, 1, COLORS.n],
@@ -412,7 +412,7 @@
     "Thick convective shell": { ...paperBase, phaseWarmupTau: 7.5, zeta: 0.1, zetac: 10, gammac: 1, m: 5, gamma1: 1.1, n: 1, s: 3, sourceExp: 0, cq: 0, r0: 1.1, v0: 0, h0: 1, uc0: 1, tEnd: 24, step: 1e-3, logErrTol: -8, variableM: false, driver: "h", runUntilStable: false },
     "RR Lyrae fundamental": { ...overtoneBase, m: 10, sourceExp: -2, r0: 1.2 },
     "RR Lyrae low-amplitude fundamental": { ...overtoneBase, m: 10, sourceExp: -2, r0: 1.1 },
-    "RR Lyrae low-amplitude fundamental, damped": { ...overtoneBase, phaseWarmupTau: 40, zetac: 1, gammac: 0.2, m: 10, sourceExp: -2, cq: 5, r0: 1.1, tEnd: 100 },
+    "RR Lyrae low-amplitude fundamental, damped": { ...overtoneBase, phaseWarmupTau: 40, zetac: 1, gammac: 0.5, m: 10, sourceExp: -2, cq: 5, r0: 1.1, tEnd: 100 },
     "RR Lyrae first overtone": { ...overtoneBase, m: 15, sourceExp: 2, r0: 1.05 },
     "RR Lyrae first overtone, damped": { ...overtoneBase, phaseWarmupTau: 40, m: 15, sourceExp: 2, cq: 7, r0: 1.05, tEnd: 80 },
     "RR Lyrae high-amplitude first overtone": { ...overtoneBase, m: 15, sourceExp: 2, r0: 1.1 },
@@ -799,17 +799,39 @@
   function phaseWarmupTau(rows, requested) {
     return requested !== void 0 && Number.isFinite(requested) ? requested : defaultWarmupTau(rows);
   }
+  function refinedLuminosityExtremum(rows, index, mode) {
+    if (index <= 0 || index >= rows.length - 1) return rows[index];
+    const previous = rows[index - 1];
+    const current = rows[index];
+    const next = rows[index + 1];
+    const x0 = previous.tau - current.tau;
+    const x2 = next.tau - current.tau;
+    if (!(x0 < 0 && x2 > 0)) return current;
+    const y0 = previous.L - current.L;
+    const y2 = next.L - current.L;
+    const slope0 = y0 / x0;
+    const a = (slope0 - y2 / x2) / (x0 - x2);
+    const b = slope0 - a * x0;
+    if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) < 1e-14) return current;
+    if (mode === "min" && a <= 0 || mode === "max" && a >= 0) return current;
+    const vertex = -b / (2 * a);
+    if (!Number.isFinite(vertex) || vertex < x0 || vertex > x2) return current;
+    const luminosity = current.L + a * vertex * vertex + b * vertex;
+    if (!Number.isFinite(luminosity)) return current;
+    return { ...current, tau: current.tau + vertex, L: luminosity };
+  }
   function findLuminosityMaxima(rows, after, minSeparation = 0.75) {
     const maxima = [];
     for (let i = 1; i < rows.length - 1; i += 1) {
       const row = rows[i];
       if (row.tau < after) continue;
       if (rows[i - 1].L < row.L && row.L >= rows[i + 1].L) {
+        const maximum = refinedLuminosityExtremum(rows, i, "max");
         const last = maxima.at(-1);
-        if (last && row.tau - last.tau < minSeparation) {
-          if (row.L > last.L) maxima[maxima.length - 1] = row;
+        if (last && maximum.tau - last.tau < minSeparation) {
+          if (maximum.L > last.L) maxima[maxima.length - 1] = maximum;
         } else {
-          maxima.push(row);
+          maxima.push(maximum);
         }
       }
     }
@@ -821,11 +843,12 @@
       const row = rows[i];
       if (row.tau < after) continue;
       if (rows[i - 1].L > row.L && row.L <= rows[i + 1].L) {
+        const minimum = refinedLuminosityExtremum(rows, i, "min");
         const last = minima.at(-1);
-        if (last && row.tau - last.tau < minSeparation) {
-          if (row.L < last.L) minima[minima.length - 1] = row;
+        if (last && minimum.tau - last.tau < minSeparation) {
+          if (minimum.L < last.L) minima[minima.length - 1] = minimum;
         } else {
-          minima.push(row);
+          minima.push(minimum);
         }
       }
     }
@@ -844,12 +867,19 @@
     return (max - min) / scale;
   }
   function minimumBetween(rows, startTau, endTau) {
+    let minimumIndex = -1;
     let minimum = null;
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
       if (row.tau <= startTau || row.tau >= endTau) continue;
-      if (!minimum || row.L < minimum.L) minimum = row;
+      if (!minimum || row.L < minimum.L) {
+        minimum = row;
+        minimumIndex = i;
+      }
     }
-    return minimum;
+    if (minimumIndex < 0) return minimum;
+    const refined = refinedLuminosityExtremum(rows, minimumIndex, "min");
+    return refined.tau > startTau && refined.tau < endTau ? refined : minimum;
   }
   function median(values) {
     const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
@@ -1286,13 +1316,14 @@
   var SONIFICATION_MAX_HARMONICS = 32;
   var PIANO_DEFAULT_ENVELOPE = { attack: 0.015, decay: 0.22, release: 0.36 };
   var PIANO_DEFAULT_SUSTAIN_LEVEL = 0.38;
-  var MODEL_ANIMATION_BASE_DURATION_MS = 8e3;
+  var MODEL_ANIMATION_BASE_DURATION_MS = 4e3;
   var MODEL_ANIMATION_MIN_SPEED = 0.25;
   var MODEL_ANIMATION_MAX_SPEED = 4;
   var GRID_LOOP_BASE_INTERVAL_MS = 90;
   var GRID_LOOP_MIN_SPEED = 0.25;
   var GRID_LOOP_MAX_SPEED = 4;
   var PHASE_MARKER_COLOR = "#FFD166";
+  var PHASE_SCRUB_CANVAS_IDS = ["lightCanvas", "velocityCanvas", "pressureCanvas"];
   var SONIFICATION_SOURCE_LABELS = {
     luminosity: "luminosity",
     velocity: "radial velocity",
@@ -1343,6 +1374,7 @@
   var sonificationStopTimer = 0;
   var sonificationVoices = /* @__PURE__ */ new Set();
   var sonificationActive = false;
+  var activePhaseScrub = null;
   var pianoModeActive = false;
   var pianoStartOctave = PIANO_DEFAULT_START_OCTAVE;
   var pianoMasterGain = null;
@@ -1400,7 +1432,7 @@
     lum: { L: true, Lr: true, Lc: true }
   };
   var PLOT_PANEL_LABELS = {
-    model: "Moving Shell",
+    model: "Shell",
     light: "Lightcurve",
     velocity: "RV Curve",
     time: "History",
@@ -2359,6 +2391,7 @@
     el("resetPreset").addEventListener("click", () => applyPreset(selectedPreset));
     setupPlotPanelToggles();
     setupInteractivePlots();
+    setupPhaseScrubbing();
     setupGridCanvasInteractions();
     window.addEventListener("resize", drawAll);
     window.addEventListener("resize", drawAdsrVisualization);
@@ -2971,6 +3004,57 @@
       canvas.addEventListener("pointerleave", () => clearFourierHover(canvasId));
       canvas.addEventListener("contextmenu", (event) => event.preventDefault());
     });
+  }
+  function setupPhaseScrubbing() {
+    PHASE_SCRUB_CANVAS_IDS.forEach((canvasId) => {
+      const canvas = document.getElementById(canvasId);
+      if (!(canvas instanceof HTMLCanvasElement)) return;
+      canvas.classList.add("phase-scrub-canvas");
+      canvas.addEventListener("pointerdown", (event) => beginPhaseScrub(event, canvasId));
+      canvas.addEventListener("pointermove", (event) => updatePhaseScrub(event, canvasId));
+      canvas.addEventListener("pointerup", (event) => finishPhaseScrub(event, canvasId));
+      canvas.addEventListener("pointercancel", (event) => finishPhaseScrub(event, canvasId));
+    });
+  }
+  function phaseFromCanvasPoint(canvasId, point) {
+    const render = plotRenderStates.get(canvasId);
+    if (!render || !latestPhaseRows.length || gridState.enabled) return null;
+    if (point.x < render.plot.left || point.x > render.plot.left + render.plot.width) return null;
+    const clamped = clampPointToPlot(point, render.plot);
+    return clamp3(xFromPixel(render, clamped.x), 0, 2);
+  }
+  function scrubPhaseToPointer(canvas, canvasId, event) {
+    const phase = phaseFromCanvasPoint(canvasId, canvasPoint(canvas, event));
+    if (phase === null) return;
+    currentAnimationPhase = phase;
+    modelAnimationStartTime = null;
+    drawAnimatedPhaseViews();
+  }
+  function beginPhaseScrub(event, canvasId) {
+    if (event.button !== 0 || gridState.enabled || !latestPhaseRows.length) return;
+    const canvas = event.currentTarget;
+    const phase = phaseFromCanvasPoint(canvasId, canvasPoint(canvas, event));
+    if (phase === null) return;
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    activePhaseScrub = { canvasId, pointerId: event.pointerId };
+    currentAnimationPhase = phase;
+    modelAnimationStartTime = null;
+    drawAnimatedPhaseViews();
+  }
+  function updatePhaseScrub(event, canvasId) {
+    if (!activePhaseScrub || activePhaseScrub.canvasId !== canvasId || activePhaseScrub.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    scrubPhaseToPointer(event.currentTarget, canvasId, event);
+  }
+  function finishPhaseScrub(event, canvasId) {
+    if (!activePhaseScrub || activePhaseScrub.canvasId !== canvasId || activePhaseScrub.pointerId !== event.pointerId) return;
+    const canvas = event.currentTarget;
+    event.preventDefault();
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    activePhaseScrub = null;
+    modelAnimationStartTime = null;
+    drawAnimatedPhaseViews();
   }
   function beginGridCanvasInteraction(event, canvasId) {
     if (!gridState.enabled) return;
@@ -4070,11 +4154,13 @@
     const currentFourier = current?.fourier ? current : null;
     const xlim = range(allPoints.map((point) => point.period), 0.05);
     const panels = [
-      { label: "r21", value: (result) => result.fourier.r21 },
-      { label: "phi21", value: (result) => result.fourier.phi21 },
-      { label: "r31", value: (result) => result.fourier.r31 },
-      { label: "phi31", value: (result) => result.fourier.phi31 }
+      { latex: "r_{21}", label: { base: "r", subscript: "21" }, value: (result) => result.fourier.r21 },
+      { latex: "\\phi_{21}", label: { base: "phi", subscript: "21" }, value: (result) => result.fourier.phi21 },
+      { latex: "r_{31}", label: { base: "r", subscript: "31" }, value: (result) => result.fourier.r31 },
+      { latex: "\\phi_{31}", label: { base: "phi", subscript: "31" }, value: (result) => result.fourier.phi31 }
     ];
+    canvas.dataset.fourierAxisLabels = panels.map((item) => item.latex).join(",");
+    canvas.dataset.fourierPathCount = String(path.length);
     const gap = 16;
     const pad = { left: 78, right: 18, top: 24, bottom: 58 };
     const panelWidth = (rect.width - gap * (columns - 1)) / columns;
@@ -4090,10 +4176,13 @@
       };
       const values = allPoints.map(item.value);
       const ylim = range(values, 0.08);
-      drawAxes(ctx, box, xlim, ylim, "period/\u03C4", item.label, THEME.axisText, THEME.axisText, Math.max(8, box.left - 70));
+      const ylabelX = Math.max(8, box.left - 70);
+      drawAxes(ctx, box, xlim, ylim, "period/\u03C4", "", THEME.axisText, THEME.axisText, ylabelX);
+      drawFourierAxisLabel(ctx, item.label, ylabelX, box.top + box.height / 2);
       collectFourierPointHits(box, xlim, ylim, allPoints, item.value);
-      drawFourierPoints(ctx, box, xlim, ylim, gridPoints, item.value, "rgba(190, 200, 216, 0.28)", 2.4);
-      drawFourierPoints(ctx, box, xlim, ylim, path, item.value, (result) => gridResultColor(result, 0.72), 3.4);
+      drawFourierPoints(ctx, box, xlim, ylim, gridPoints, item.value, "rgba(190, 200, 216, 0.24)", 2.1);
+      drawFourierPath(ctx, box, xlim, ylim, path, item.value, 1.9);
+      drawFourierPoints(ctx, box, xlim, ylim, path, item.value, (result) => gridResultColor(result, 0.78), 2.9);
       const highlighted = gridState.heldResult || gridState.hoverResult;
       if (highlighted?.fourier && highlighted !== currentFourier) drawFourierPoints(ctx, box, xlim, ylim, [highlighted], item.value, (result) => gridResultColor(result, 0.98), 5.4);
       if (currentFourier) drawFourierPoints(ctx, box, xlim, ylim, [currentFourier], item.value, (result) => gridResultColor(result, 0.98), 6.2);
@@ -4117,6 +4206,53 @@
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       fourierPointHits.push({ result, x, y, radius: 5 });
     });
+  }
+  function drawFourierAxisLabel(ctx, label, x, y) {
+    const base = label.base === "phi" ? "\u03C6" : label.base;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "left";
+    ctx.fillStyle = THEME.axisText;
+    ctx.font = "12px Inter, sans-serif";
+    const baseWidth = ctx.measureText(base).width;
+    ctx.font = "8px Inter, sans-serif";
+    const subscriptWidth = ctx.measureText(label.subscript).width;
+    const start = -(baseWidth + subscriptWidth + 1) / 2;
+    ctx.font = "12px Inter, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText(base, start, 0);
+    ctx.font = "8px Inter, sans-serif";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(label.subscript, start + baseWidth + 1, 5);
+    ctx.restore();
+  }
+  function drawFourierPath(ctx, plot, xlim, ylim, points, value, width) {
+    if (points.length < 2) return;
+    const sx = (x) => plot.left + (x - xlim[0]) / (xlim[1] - xlim[0]) * plot.width;
+    const sy = (y) => plot.top + plot.height - (y - ylim[0]) / (ylim[1] - ylim[0]) * plot.height;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plot.left, plot.top, plot.width, plot.height);
+    ctx.clip();
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 1; i < points.length; i += 1) {
+      const previous = points[i - 1];
+      const current = points[i];
+      const x0 = sx(previous.period);
+      const y0 = sy(value(previous));
+      const x1 = sx(current.period);
+      const y1 = sy(value(current));
+      if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
+      ctx.strokeStyle = gridResultColor(current, 0.62);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
   function drawFourierPoints(ctx, plot, xlim, ylim, points, value, color, radius) {
     const sx = (x) => plot.left + (x - xlim[0]) / (xlim[1] - xlim[0]) * plot.width;
@@ -4289,6 +4425,17 @@
     if (gridState.enabled) return void 0;
     return latestPhaseRows.length ? { x: currentAnimationPhase, color: PHASE_MARKER_COLOR } : void 0;
   }
+  function syncPhaseCanvasState() {
+    PHASE_SCRUB_CANVAS_IDS.forEach((canvasId) => {
+      const canvas = document.getElementById(canvasId);
+      if (!(canvas instanceof HTMLCanvasElement)) return;
+      canvas.classList.toggle("phase-scrub-enabled", latestPhaseRows.length > 0 && !gridState.enabled);
+      if (latestPhaseRows.length) canvas.dataset.currentPhase = fmtFixed(currentAnimationPhase, 3);
+      else delete canvas.dataset.currentPhase;
+      if (activePhaseScrub?.canvasId === canvasId) canvas.dataset.phaseScrubbing = "true";
+      else delete canvas.dataset.phaseScrubbing;
+    });
+  }
   function drawPhasePlots() {
     const marker = phaseMarker();
     drawSeries("lightCanvas", gridPhaseSeries("L", COLORS.L, latestPhaseSample), {
@@ -4324,6 +4471,7 @@
         phaseMarker: marker
       });
     }
+    syncPhaseCanvasState();
   }
   function drawCanvasMessage(ctx, width, height, message) {
     ctx.fillStyle = THEME.axisText;
@@ -4538,12 +4686,16 @@
     if (modelAnimationFrame) return;
     const tick = (timestamp) => {
       if (!document.hidden) {
-        if (modelAnimationStartTime === null) {
-          modelAnimationStartTime = timestamp - currentAnimationPhase / 2 * modelAnimationDurationMs();
+        if (activePhaseScrub) {
+          modelAnimationStartTime = null;
+        } else {
+          if (modelAnimationStartTime === null) {
+            modelAnimationStartTime = timestamp - currentAnimationPhase / 2 * modelAnimationDurationMs();
+          }
+          const duration = modelAnimationDurationMs();
+          const elapsed = (timestamp - modelAnimationStartTime) % duration;
+          currentAnimationPhase = elapsed / duration * 2;
         }
-        const duration = modelAnimationDurationMs();
-        const elapsed = (timestamp - modelAnimationStartTime) % duration;
-        currentAnimationPhase = elapsed / duration * 2;
         drawAnimatedPhaseViews();
       } else {
         modelAnimationStartTime = null;
