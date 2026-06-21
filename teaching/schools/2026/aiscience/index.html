@@ -44,6 +44,11 @@
       width: 105px;
     }
 
+    .avatar-link,
+    .avatar-link:hover {
+      border-bottom: none;
+    }
+
     h1 {
       font-family: "Noto Serif", "Lora", "Minion Pro", Palatino, Georgia, serif;
       font-size: 2.5rem;
@@ -263,7 +268,9 @@
 <body>
   <div class="wrapper">
     <header class="page-header">
-      <img src="https://earlbellinger.com/images/avatar.png" alt="Earl Bellinger" class="avatar">
+      <a href="https://earlbellinger.com/" class="avatar-link" aria-label="Earl Bellinger's homepage">
+        <img src="https://earlbellinger.com/images/avatar.png" alt="Earl Bellinger" class="avatar">
+      </a>
       <h1>Clustering Clusters</h1>
       <p class="subtitle">Searching for star clusters with Gaia</p>
       <p class="meta">
