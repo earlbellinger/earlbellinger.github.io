@@ -74,6 +74,15 @@
       margin: 0 0 1.6rem;
     }
 
+    .lead {
+      font-size: 1.08rem;
+      margin: 0 0 1.25rem;
+    }
+
+    .prompt {
+      margin: 0 0 0.75rem;
+    }
+
     .resource-list {
       list-style: none;
       margin: 0;
@@ -84,7 +93,7 @@
       border-bottom: 1px solid #c7c7c7;
       display: grid;
       gap: 0.5rem;
-      grid-template-columns: minmax(10rem, 13rem) 1fr;
+      grid-template-columns: minmax(11rem, 15rem) 1fr;
       padding: 0.62rem 0;
     }
 
@@ -95,12 +104,14 @@
     .resource-label {
       font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-weight: 700;
+      overflow-wrap: anywhere;
     }
 
     .note-section {
       padding-top: 1rem;
     }
 
+    .content-section p,
     .note-section p {
       margin: 0.7rem 0 0.3rem;
     }
@@ -183,7 +194,13 @@
     </header>
 
     <main>
+      <section class="content-section" aria-label="Overview">
+        <p class="lead">In this lab, you will use Gaia observations and MIST stellar models to rediscover the Pleiades and compare the cluster to a theoretical isochrone.</p>
+      </section>
+
       <section class="content-section" aria-label="Course materials">
+        <p class="prompt"><strong>Start here</strong><br>
+        Download the lab materials from the Google Drive folder, then open <code>lab.ipynb</code> in JupyterLab. Keep all downloaded files in the same directory as the notebook.</p>
         <ul class="resource-list">
           <li>
             <span class="resource-label">Slides</span>
@@ -195,29 +212,15 @@
           </li>
           <li>
             <span class="resource-label">Notebook</span>
-            <span><a href="https://drive.google.com/file/d/1zcw0F4BLzONh_yjdrj4t09mxfxgl9nin/view?usp=drive_link">lab.ipynb</a> | <a href="https://drive.google.com/file/d/1Qr_s49ObeeTaANsCHXxFEJEVB_QqjEa_/view?usp=drive_link">solutions.ipynb</a></span>
-          </li>
-        </ul>
-      </section>
-
-      <section class="content-section" aria-label="Data files">
-        <ul class="resource-list">
-          <li>
-            <span class="resource-label">Gaia observations</span>
-            <span><a href="https://drive.google.com/file/d/1UZ6npME-yLoqk0rlX_A-fCvuEU12LY-u/view?usp=drive_link">gaia.csv</a></span>
-          </li>
-          <li>
-            <span class="resource-label">MIST models</span>
-            <span><a href="https://drive.google.com/file/d/1LiuYS2eoxZPb72SKttMTRxUSVNIL_4qU/view?usp=drive_link">mist_isochrone_112Myr.dat</a></span>
-          </li>
-          <li>
-            <span class="resource-label">Known clusters</span>
-            <span><a href="https://drive.google.com/file/d/1vNM7hBgnc_8LSyO221PBgwPIdXqRi9kY/view?usp=drive_link">known_clusters.dat</a></span>
+            <span><a href="https://drive.google.com/file/d/1zcw0F4BLzONh_yjdrj4t09mxfxgl9nin/view?usp=drive_link">lab.ipynb</a> | <a href="https://drive.google.com/file/d/1Qr_s49ObeeTaANsCHXxFEJEVB_QqjEa_/view?usp=drive_link">solutions.ipynb</a> for reference after you have tried the exercises</span>
           </li>
         </ul>
       </section>
 
       <section class="content-section note-section" aria-label="Installation notes">
+        <p><strong>Before running</strong><br>
+        Install the optional packages used for clustering and notebook rendering.</p>
+
         <p><strong>HDBSCAN</strong><br>
         An implementation is available in sklearn, but it is very slow. I recommend installing the python package <code>hdbscan</code>. It can sometimes be tricky to install. Try:</p>
         <pre><code>conda install -c conda-forge hdbscan</code></pre>
@@ -225,6 +228,30 @@
         <p><strong>MyST</strong><br>
         The lab uses MyST for beautification! Please also</p>
         <pre><code>pip install jupyterlab_myst</code></pre>
+      </section>
+
+      <section class="content-section" aria-label="Data files">
+        <p class="prompt"><strong>Data used in the lab</strong><br>
+        The notebook expects these files to be available locally in the same folder.</p>
+        <ul class="resource-list">
+          <li>
+            <span class="resource-label"><a href="https://drive.google.com/file/d/1UZ6npME-yLoqk0rlX_A-fCvuEU12LY-u/view?usp=drive_link">gaia.csv</a></span>
+            <span>Gaia DR3 observations near the Pleiades.</span>
+          </li>
+          <li>
+            <span class="resource-label"><a href="https://drive.google.com/file/d/1LiuYS2eoxZPb72SKttMTRxUSVNIL_4qU/view?usp=drive_link">mist_isochrone_112Myr.dat</a></span>
+            <span>MIST model isochrone for the cluster comparison.</span>
+          </li>
+          <li>
+            <span class="resource-label"><a href="https://drive.google.com/file/d/1vNM7hBgnc_8LSyO221PBgwPIdXqRi9kY/view?usp=drive_link">known_clusters.dat</a></span>
+            <span>Catalog of known open clusters for the extension exercise.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="content-section" aria-label="Troubleshooting">
+        <p><strong>Troubleshooting</strong><br>
+        If <code>hdbscan</code> is difficult to install, you can still inspect the data and plots before the clustering step. The solutions notebook shows the expected output.</p>
       </section>
     </main>
 
