@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AI+Science Summer School 2026 lab materials for clustering star clusters with Gaia.">
+  <title>AI+Science Summer School 2026 | Clustering Clusters</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css?family=Lora:400,700|Noto+Serif|Open+Sans:400,300,700,800" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: #EAE6E3;
+    }
+
+    body {
+      color: #111213;
+      font-family: "Lora", "Minion Pro", Palatino, Georgia, serif;
+      font-size: 16px;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .wrapper {
+      margin: 0 auto;
+      max-width: 728px;
+      padding: 0 24px;
+    }
+
+    .page-header {
+      padding: 2.25rem 0 1.35rem;
+      text-align: center;
+    }
+
+    .avatar {
+      border-radius: 100px;
+      display: block;
+      margin: 0 auto 0.5rem;
+      max-width: 100%;
+      width: 105px;
+    }
+
+    h1 {
+      font-family: "Noto Serif", "Lora", "Minion Pro", Palatino, Georgia, serif;
+      font-size: 2.5rem;
+      font-weight: normal;
+      line-height: 1.15;
+      margin: 0.5rem 0 0;
+    }
+
+    .subtitle {
+      color: #555;
+      font-family: "Noto Serif", "Lora", "Minion Pro", Palatino, Georgia, serif;
+      font-size: 1.45rem;
+      font-weight: lighter;
+      line-height: 1.25;
+      margin: 0.25rem 0 0;
+    }
+
+    .meta {
+      margin: 1.4rem auto 0;
+      max-width: 34rem;
+    }
+
+    main {
+      padding-top: 0.55rem;
+    }
+
+    .content-section {
+      margin: 0 0 1.6rem;
+    }
+
+    .resource-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .resource-list li {
+      border-bottom: 1px solid #c7c7c7;
+      display: grid;
+      gap: 0.5rem;
+      grid-template-columns: minmax(10rem, 13rem) 1fr;
+      padding: 0.62rem 0;
+    }
+
+    .resource-list li:first-child {
+      padding-top: 0;
+    }
+
+    .resource-label {
+      font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-weight: 700;
+    }
+
+    .note-section {
+      padding-top: 1rem;
+    }
+
+    .note-section p {
+      margin: 0.7rem 0 0.3rem;
+    }
+
+    code {
+      font-family: Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.95em;
+    }
+
+    pre {
+      background: rgba(255, 255, 255, 0.38);
+      border-left: 4px solid #c7c7c7;
+      margin: 0 0 0.8rem;
+      overflow-x: auto;
+      padding: 0.65rem 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    a {
+      border-bottom: 1px solid;
+      color: #333;
+      text-decoration: none;
+    }
+
+    a:hover {
+      border-bottom: none;
+      color: #9c9c9c;
+    }
+
+    .page-footer {
+      border-top: 4px solid #c7c7c7;
+      color: #999;
+      font-size: 0.875rem;
+      margin-bottom: 3rem;
+      padding-top: 1.5rem;
+      text-align: center;
+    }
+
+    .page-footer p {
+      margin: 0;
+    }
+
+    @media (max-width: 600px) {
+      .page-header {
+      padding-top: 1.7rem;
+      }
+
+      h1 {
+        font-size: 2rem;
+      }
+
+      .subtitle {
+        font-size: 1.25rem;
+      }
+
+      .resource-list li {
+        display: block;
+      }
+
+      .resource-label {
+        display: block;
+        margin-bottom: 0.1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <header class="page-header">
+      <img src="https://earlbellinger.com/images/avatar.png" alt="Earl Bellinger" class="avatar">
+      <h1>Clustering Clusters</h1>
+      <p class="subtitle">Searching for star clusters with Gaia</p>
+      <p class="meta">
+        Lecturer:
+        <a href="https://earlbellinger.com/">Earl Bellinger</a>,
+        Yale University<br>
+        <a href="https://datascience.uchicago.edu/events/ai-science-summer-school-2026/">AI+Science Summer School 2026</a>
+      </p>
+    </header>
+
+    <main>
+      <section class="content-section" aria-label="Course materials">
+        <ul class="resource-list">
+          <li>
+            <span class="resource-label">Slides</span>
+            <span><a href="https://docs.google.com/presentation/d/1kT1fKvqaXqylyGU6FDKJCJpaXIHzjIfHcoQSk8zKj8E/edit?usp=sharing">Lecture slides</a></span>
+          </li>
+          <li>
+            <span class="resource-label">Files</span>
+            <span><a href="https://drive.google.com/drive/folders/18483z-ikKDbrg4jP4bdmRLolY4wZtskH?usp=sharing">Google Drive folder</a></span>
+          </li>
+          <li>
+            <span class="resource-label">Notebook</span>
+            <span><a href="https://drive.google.com/drive/folders/18483z-ikKDbrg4jP4bdmRLolY4wZtskH?usp=sharing">lab.ipynb</a> | <a href="https://drive.google.com/drive/folders/18483z-ikKDbrg4jP4bdmRLolY4wZtskH?usp=sharing">solutions</a></span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="content-section" aria-label="Data files">
+        <ul class="resource-list">
+          <li>
+            <span class="resource-label">Gaia observations</span>
+            <span><a href="https://drive.google.com/drive/folders/18483z-ikKDbrg4jP4bdmRLolY4wZtskH?usp=sharing">gaia.csv</a></span>
+          </li>
+          <li>
+            <span class="resource-label">MIST models</span>
+            <span><a href="https://drive.google.com/drive/folders/18483z-ikKDbrg4jP4bdmRLolY4wZtskH?usp=sharing">mist_isochrone_112Myr.dat</a></span>
+          </li>
+          <li>
+            <span class="resource-label">Known clusters</span>
+            <span><a href="https://drive.google.com/drive/folders/18483z-ikKDbrg4jP4bdmRLolY4wZtskH?usp=sharing">known_clusters.dat</a></span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="content-section note-section" aria-label="Installation notes">
+        <p><strong>HDBSCAN</strong><br>
+        An implementation is available in sklearn, but it is very slow. I recommend installing the python package <code>hdbscan</code>. It can sometimes be tricky to install. Try:</p>
+        <pre><code>conda install -c conda-forge hdbscan</code></pre>
+
+        <p><strong>MyST</strong><br>
+        The lab uses MyST for beautification! Please also</p>
+        <pre><code>pip install jupyterlab_myst</code></pre>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <p>Earl Patrick Bellinger, Yale University</p>
+    </footer>
+  </div>
+</body>
+</html>
