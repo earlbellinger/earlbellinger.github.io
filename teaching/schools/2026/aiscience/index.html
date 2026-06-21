@@ -456,6 +456,13 @@
         strength: 520,
         virialRatio: 0.42
       };
+      const imfSettings = {
+        breakMass: 0.5,
+        highAlpha: 2.3,
+        highMax: 150,
+        lowAlpha: 1.3,
+        lowMin: 0.12
+      };
 
       function randomSeed(seed) {
         let state = seed;
@@ -520,24 +527,45 @@
         return Math.pow(low + rand() * (high - low), 1 / exponent);
       }
 
-      function sampleInitialMass(rand) {
-        const lowMin = 0.12;
-        const breakMass = 0.5;
-        const highMax = 8;
-        const lowAlpha = 1.3;
-        const highAlpha = 2.3;
-        const lowWeight = powerLawIntegral(lowMin, breakMass, lowAlpha);
-        const highWeight = Math.pow(breakMass, highAlpha - lowAlpha) * powerLawIntegral(breakMass, highMax, highAlpha);
-
-        if (rand() < lowWeight / (lowWeight + highWeight)) {
-          return samplePowerLaw(rand, lowMin, breakMass, lowAlpha);
+      function imfSegmentWeight(min, max, alpha, scale = 1) {
+        if (max <= min) {
+          return 0;
         }
 
-        return samplePowerLaw(rand, breakMass, highMax, highAlpha);
+        return scale * powerLawIntegral(min, max, alpha);
       }
 
-      function radiusForMass(mass, rand) {
-        return clamp(1.25 + Math.pow(mass, 0.38) * 1.72 + Math.pow(rand(), 3) * 0.45, 1.4, 6.1);
+      function sampleInitialMassInRange(rand, min = imfSettings.lowMin, max = imfSettings.highMax) {
+        const lowMin = clamp(min, imfSettings.lowMin, imfSettings.breakMass);
+        const lowMax = clamp(max, imfSettings.lowMin, imfSettings.breakMass);
+        const highMin = clamp(min, imfSettings.breakMass, imfSettings.highMax);
+        const highMax = clamp(max, imfSettings.breakMass, imfSettings.highMax);
+        const highScale = Math.pow(imfSettings.breakMass, imfSettings.highAlpha - imfSettings.lowAlpha);
+        const lowWeight = imfSegmentWeight(lowMin, lowMax, imfSettings.lowAlpha);
+        const highWeight = imfSegmentWeight(highMin, highMax, imfSettings.highAlpha, highScale);
+
+        if (lowWeight > 0 && rand() < lowWeight / (lowWeight + highWeight)) {
+          return samplePowerLaw(rand, lowMin, lowMax, imfSettings.lowAlpha);
+        }
+
+        return samplePowerLaw(rand, highMin, highMax, imfSettings.highAlpha);
+      }
+
+      function sampleInitialMass(rand) {
+        return sampleInitialMassInRange(rand);
+      }
+
+      function radiusForMass(mass) {
+        return clamp(1.15 + Math.log10(mass / imfSettings.lowMin + 1) * 2.55, 1.35, 9.2);
+      }
+
+      function dynamicalMass(star) {
+        return Math.min(star.mass, 8);
+      }
+
+      function assignMass(star, mass) {
+        star.mass = mass;
+        star.radius = radiusForMass(mass);
       }
 
       function samplePlummerPosition(rand, center) {
@@ -631,7 +659,8 @@
           let kinetic = 0;
 
           for (const star of members) {
-            kinetic += 0.5 * star.mass * (star.vx * star.vx + star.vy * star.vy);
+            const mass = dynamicalMass(star);
+            kinetic += 0.5 * mass * (star.vx * star.vx + star.vy * star.vy);
           }
 
           for (let i = 0; i < members.length; i += 1) {
@@ -643,7 +672,7 @@
               const dy = b.y - a.y;
               const dz = (b.distance - a.distance) * gravitySettings.distanceScale;
               const radius = Math.sqrt(dx * dx + dy * dy + dz * dz + gravitySettings.softening * gravitySettings.softening);
-              potential += gravitySettings.strength * a.mass * b.mass / radius;
+              potential += gravitySettings.strength * dynamicalMass(a) * dynamicalMass(b) / radius;
             }
           }
 
@@ -689,6 +718,27 @@
         star.fast = true;
       }
 
+      function guaranteeMassiveStars(rand) {
+        const used = new Set();
+        const guarantees = [
+          [100, imfSettings.highMax],
+          [50, 100],
+          [10, 50]
+        ];
+
+        for (const range of guarantees) {
+          const candidates = stars.filter((star) => star.cloud !== null && !used.has(star.id));
+
+          if (candidates.length === 0) {
+            return;
+          }
+
+          const star = candidates[Math.floor(rand() * candidates.length)];
+          used.add(star.id);
+          assignMass(star, sampleInitialMassInRange(rand, range[0], range[1]));
+        }
+      }
+
       function makeStars() {
         const rand = randomSeed(20260620);
         motionRand = randomSeed(20260621);
@@ -702,7 +752,7 @@
           const centerIndex = Math.floor(rand() * clusterCenters.length);
           const center = clusterCenters[centerIndex];
           const mass = sampleInitialMass(rand);
-          const radius = radiusForMass(mass, rand);
+          const radius = radiusForMass(mass);
           const plummer = inCloud ? samplePlummerPosition(rand, center) : {
             radius: 3 + rand() * 2,
             x: rand() * width,
@@ -718,11 +768,12 @@
             radius,
             vx: motion.vx,
             vy: motion.vy,
-            x: clamp(plummer.x, radius + 10, width - radius - 10),
-            y: clamp(plummer.y, radius + 10, height - radius - 10)
+            x: clamp(plummer.x, 8, width - 8),
+            y: clamp(plummer.y, 8, height - 8)
           });
         }
 
+        guaranteeMassiveStars(rand);
         virializeClusters();
         addBulkMotion(rand);
         stars.sort((a, b) => a.radius - b.radius);
@@ -935,6 +986,8 @@
 
           for (let j = i + 1; j < stars.length; j += 1) {
             const b = stars[j];
+            const massA = dynamicalMass(a);
+            const massB = dynamicalMass(b);
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dz = (b.distance - a.distance) * distanceScale;
@@ -945,10 +998,10 @@
             const ax = dx * force;
             const ay = dy * force;
 
-            a.vx += ax * b.mass;
-            a.vy += ay * b.mass;
-            b.vx -= ax * a.mass;
-            b.vy -= ay * a.mass;
+            a.vx += ax * massB;
+            a.vy += ay * massB;
+            b.vx -= ax * massA;
+            b.vy -= ay * massA;
 
             const coreRadius = a.radius + b.radius + 15;
 
@@ -976,10 +1029,10 @@
             const closing = relativeVx * nx + relativeVy * ny;
             const rebound = closing < 0 ? -closing * pressure * 0.18 : 0;
 
-            a.vx -= nx * (push + rebound) / Math.sqrt(a.mass);
-            a.vy -= ny * (push + rebound) / Math.sqrt(a.mass);
-            b.vx += nx * (push + rebound) / Math.sqrt(b.mass);
-            b.vy += ny * (push + rebound) / Math.sqrt(b.mass);
+            a.vx -= nx * (push + rebound) / Math.sqrt(massA);
+            a.vy -= ny * (push + rebound) / Math.sqrt(massA);
+            b.vx += nx * (push + rebound) / Math.sqrt(massB);
+            b.vy += ny * (push + rebound) / Math.sqrt(massB);
             a.vx -= tx * spin;
             a.vy -= ty * spin;
             b.vx += tx * spin;
