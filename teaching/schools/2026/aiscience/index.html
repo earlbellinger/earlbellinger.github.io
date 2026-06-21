@@ -430,11 +430,11 @@
       let lastPointer = null;
       let motionRand = null;
       const clusterCenters = [
-        { x: 0.28, y: 0.15, sx: 0.056, sy: 0.034, distance: 0.18, vx: -5, vy: 2 },
-        { x: 0.74, y: 0.32, sx: 0.052, sy: 0.036, distance: 0.64, vx: -8, vy: -1 },
-        { x: 0.31, y: 0.84, sx: 0.06, sy: 0.038, distance: 0.35, vx: -6, vy: -4 },
-        { x: 0.41, y: 0.55, sx: 0.045, sy: 0.03, distance: 0.47, vx: 24, vy: 16 },
-        { x: 0.57, y: 0.62, sx: 0.045, sy: 0.03, distance: 0.5, vx: -4, vy: -18 }
+        { x: 0.28, y: 0.15, sx: 0.056, sy: 0.034, distance: 0.18, vx: -5, vy: 2, vz: 3 },
+        { x: 0.74, y: 0.32, sx: 0.052, sy: 0.036, distance: 0.64, vx: -8, vy: -1, vz: -4 },
+        { x: 0.31, y: 0.84, sx: 0.06, sy: 0.038, distance: 0.35, vx: -6, vy: -4, vz: 2 },
+        { x: 0.41, y: 0.55, sx: 0.045, sy: 0.03, distance: 0.47, vx: 24, vy: 16, vz: 7 },
+        { x: 0.57, y: 0.62, sx: 0.045, sy: 0.03, distance: 0.5, vx: -4, vy: -18, vz: -6 }
       ];
       const motionSettings = {
         bulkScale: 0.58,
@@ -451,7 +451,12 @@
       const gravitySettings = {
         closeHeating: 2,
         corePressure: 14,
-        distanceScale: 86,
+        depthBounce: 0.58,
+        depthSpeedCap: 38,
+        depthWallDamping: 5,
+        depthWallStrength: 70,
+        depthWallZone: 0.08,
+        distanceScale: 150,
         softening: 45,
         strength: 520,
         virialRatio: 0.42
@@ -513,7 +518,7 @@
           return rand();
         }
 
-        return clamp(center.distance + gaussian(rand) * 0.035 * Math.max(cloudScale, 0.6), 0, 1);
+        return clamp(center.distance + gaussian(rand) * 0.055 * Math.max(cloudScale, 0.6), 0, 1);
       }
 
       function powerLawIntegral(min, max, alpha) {
@@ -608,8 +613,11 @@
         const escapeSpeed = 34 * Math.pow(1 + radius * radius, -0.25);
         const speed = q * escapeSpeed;
         const angle = rand() * Math.PI * 2;
-        let vx = Math.cos(angle) * speed;
-        let vy = Math.sin(angle) * speed;
+        const zDirection = rand() * 2 - 1;
+        const plane = Math.sqrt(Math.max(1 - zDirection * zDirection, 0));
+        let vx = Math.cos(angle) * plane * speed;
+        let vy = Math.sin(angle) * plane * speed;
+        const vz = zDirection * speed;
 
         if (entrySide === "top") {
           vy = Math.abs(vy) + motionSettings.verticalEntry + rand() * motionSettings.verticalEntryRange;
@@ -617,7 +625,7 @@
           vy = -Math.abs(vy) - motionSettings.verticalEntry - rand() * motionSettings.verticalEntryRange;
         }
 
-        return { vx, vy };
+        return { vx, vy, vz };
       }
 
       function addClusterStream(motion, center) {
@@ -627,7 +635,8 @@
 
         return {
           vx: motion.vx + (center.vx || 0) * motionSettings.bulkScale,
-          vy: motion.vy + (center.vy || 0) * motionSettings.bulkScale
+          vy: motion.vy + (center.vy || 0) * motionSettings.bulkScale,
+          vz: motion.vz + (center.vz || 0) * motionSettings.bulkScale
         };
       }
 
@@ -668,7 +677,7 @@
 
           for (const star of members) {
             const mass = dynamicalMass(star);
-            kinetic += 0.5 * mass * (star.vx * star.vx + star.vy * star.vy);
+            kinetic += 0.5 * mass * (star.vx * star.vx + star.vy * star.vy + star.vz * star.vz);
           }
 
           for (let i = 0; i < members.length; i += 1) {
@@ -693,6 +702,7 @@
           for (const star of members) {
             star.vx *= scale;
             star.vy *= scale;
+            star.vz *= scale;
           }
         }
       }
@@ -703,8 +713,10 @@
             const center = clusterCenters[star.cloud];
             star.vx += center.vx * motionSettings.bulkScale;
             star.vy += center.vy * motionSettings.bulkScale;
+            star.vz += center.vz * motionSettings.bulkScale;
           } else {
             star.vx -= motionSettings.fieldDrift + rand() * motionSettings.fieldDriftRange;
+            star.vz += (rand() - 0.5) * motionSettings.fieldDriftRange;
           }
 
           maybeAddHighVelocityTail(star, rand);
@@ -720,17 +732,22 @@
         }
 
         const angle = rand() * Math.PI * 2;
+        const zDirection = rand() * 2 - 1;
+        const plane = Math.sqrt(Math.max(1 - zDirection * zDirection, 0));
         const kick = motionSettings.highVelocityMin + Math.pow(rand(), 0.45) * motionSettings.highVelocityRange;
-        star.vx += Math.cos(angle) * kick;
-        star.vy += Math.sin(angle) * kick;
+        star.vx += Math.cos(angle) * plane * kick;
+        star.vy += Math.sin(angle) * plane * kick;
+        star.vz += zDirection * kick;
         star.fast = true;
       }
 
       function getCloudStats() {
         const stats = clusterCenters.map(() => ({
           count: 0,
+          distance: 0,
           radius: 0,
           vx: 0,
+          vz: 0,
           vy: 0,
           x: 0,
           y: 0
@@ -743,10 +760,12 @@
 
           const stat = stats[star.cloud];
           stat.count += 1;
+          stat.distance += star.distance;
           stat.x += star.x;
           stat.y += star.y;
           stat.vx += star.vx;
           stat.vy += star.vy;
+          stat.vz += star.vz;
         }
 
         for (const stat of stats) {
@@ -756,8 +775,10 @@
 
           stat.x /= stat.count;
           stat.y /= stat.count;
+          stat.distance /= stat.count;
           stat.vx /= stat.count;
           stat.vy /= stat.count;
+          stat.vz /= stat.count;
         }
 
         for (const star of stars) {
@@ -768,7 +789,8 @@
           const stat = stats[star.cloud];
           const dx = star.x - stat.x;
           const dy = star.y - stat.y;
-          stat.radius += dx * dx + dy * dy;
+          const dz = (star.distance - stat.distance) * gravitySettings.distanceScale;
+          stat.radius += dx * dx + dy * dy + dz * dz;
         }
 
         for (const stat of stats) {
@@ -794,17 +816,21 @@
 
           const dx = star.x - stat.x;
           const dy = star.y - stat.y;
-          const distance = Math.max(Math.hypot(dx, dy), 1);
+          const dz = (star.distance - stat.distance) * gravitySettings.distanceScale;
+          const distance = Math.max(Math.hypot(dx, dy, dz), 1);
           const nx = dx / distance;
           const ny = dy / distance;
+          const nz = dz / distance;
           const massBias = clamp(Math.log10(star.mass / 1.2), -0.85, 1.15);
           const lowMass = clamp((0.7 - star.mass) / 0.7, 0, 1);
           const outerBias = clamp((distance - stat.radius * 0.65) / Math.max(stat.radius, 1), 0, 1);
 
           star.vx -= nx * massBias * coolPhysicsSettings.massSegregationStrength * seconds;
           star.vy -= ny * massBias * coolPhysicsSettings.massSegregationStrength * seconds;
+          star.vz -= nz * massBias * coolPhysicsSettings.massSegregationStrength * seconds;
           star.vx += nx * lowMass * outerBias * coolPhysicsSettings.evaporationStrength * seconds;
           star.vy += ny * lowMass * outerBias * coolPhysicsSettings.evaporationStrength * seconds;
+          star.vz += nz * lowMass * outerBias * coolPhysicsSettings.evaporationStrength * seconds;
         }
       }
 
@@ -817,6 +843,7 @@
         }
 
         const merger = {
+          distance: (a.distance * a.count + b.distance * b.count) / (a.count + b.count),
           x: (a.x * a.count + b.x * b.count) / (a.count + b.count),
           y: (a.y * a.count + b.y * b.count) / (a.count + b.count)
         };
@@ -828,13 +855,15 @@
 
           const dx = star.x - merger.x;
           const dy = star.y - merger.y;
-          const distance = Math.max(Math.hypot(dx, dy), 1);
+          const dz = (star.distance - merger.distance) * gravitySettings.distanceScale;
+          const distance = Math.max(Math.hypot(dx, dy, dz), 1);
           const lowMass = clamp((1.2 - star.mass) / 1.2, 0, 1);
           const stretch = clamp((distance - 36) / 96, 0, 1);
           const acceleration = lowMass * stretch * coolPhysicsSettings.tidalStrength * seconds;
 
           star.vx += dx / distance * acceleration;
           star.vy += dy / distance * acceleration;
+          star.vz += dz / distance * acceleration;
         }
       }
 
@@ -855,10 +884,12 @@
 
         const dx = star.x - stat.x;
         const dy = star.y - stat.y;
+        const dz = (star.distance - stat.distance) * gravitySettings.distanceScale;
         const dvx = star.vx - stat.vx;
         const dvy = star.vy - stat.vy;
-        const distance = Math.hypot(dx, dy);
-        const speed = Math.hypot(dvx, dvy);
+        const dvz = star.vz - stat.vz;
+        const distance = Math.hypot(dx, dy, dz);
+        const speed = Math.hypot(dvx, dvy, dvz);
         const lowMass = star.mass < 0.85;
         const inMerger = star.cloud === 3 || star.cloud === 4;
 
@@ -945,6 +976,7 @@
             tailClock: 0,
             vx: motion.vx,
             vy: motion.vy,
+            vz: motion.vz,
             x: clamp(plummer.x, 8, width - 8),
             y: clamp(plummer.y, 8, height - 8)
           });
@@ -1152,6 +1184,7 @@
         star.y = side === "top" ? -margin : height + margin;
         star.vx = motion.vx;
         star.vy = motion.vy;
+        star.vz = motion.vz;
         star.distance = center ? distanceForStar(rand, center, 1) : rand();
 
         maybeAddHighVelocityTail(star, rand);
@@ -1162,12 +1195,17 @@
       }
 
       function limitVelocity(star) {
-        const speed = Math.hypot(star.vx, star.vy);
+        const speed = Math.hypot(star.vx, star.vy, star.vz);
         const cap = motionSettings.speedCap;
 
         if (speed > cap) {
           star.vx = star.vx / speed * cap;
           star.vy = star.vy / speed * cap;
+          star.vz = star.vz / speed * cap;
+        }
+
+        if (Math.abs(star.vz) > gravitySettings.depthSpeedCap) {
+          star.vz = Math.sign(star.vz) * gravitySettings.depthSpeedCap;
         }
       }
 
@@ -1185,48 +1223,56 @@
             const dx = b.x - a.x;
             const dy = b.y - a.y;
             const dz = (b.distance - a.distance) * distanceScale;
-            const planarDistance = Math.hypot(dx, dy);
-            const safePlanarDistance = Math.max(planarDistance, 0.001);
+            const spatialDistance = Math.hypot(dx, dy, dz);
+            const safeSpatialDistance = Math.max(spatialDistance, 0.001);
             const radiusSquared = dx * dx + dy * dy + dz * dz + softening * softening;
             const force = gravitySettings.strength * pairGravityScale(a, b) * seconds / (radiusSquared * Math.sqrt(radiusSquared));
             const ax = dx * force;
             const ay = dy * force;
+            const az = dz * force;
 
             a.vx += ax * massB;
             a.vy += ay * massB;
+            a.vz += az * massB;
             b.vx -= ax * massA;
             b.vy -= ay * massA;
+            b.vz -= az * massA;
 
             const coreRadius = a.radius + b.radius + 15;
 
-            if (planarDistance >= coreRadius) {
+            if (spatialDistance >= coreRadius) {
               continue;
             }
 
-            let nx = dx / safePlanarDistance;
-            let ny = dy / safePlanarDistance;
+            let nx = dx / safeSpatialDistance;
+            let ny = dy / safeSpatialDistance;
+            let nz = dz / safeSpatialDistance;
 
-            if (planarDistance < 0.001) {
+            if (spatialDistance < 0.001) {
               const angle = ((a.id * 12.9898 + b.id * 78.233) % 1) * Math.PI * 2;
               nx = Math.cos(angle);
               ny = Math.sin(angle);
+              nz = 0;
             }
 
             const tx = -ny;
             const ty = nx;
-            const pressure = Math.pow(1 - planarDistance / coreRadius, 2);
+            const pressure = Math.pow(1 - spatialDistance / coreRadius, 2);
             const push = gravitySettings.corePressure * pressure * seconds;
             const spinDirection = (a.id + b.id) % 2 === 0 ? 1 : -1;
             const spin = gravitySettings.closeHeating * pressure * seconds * spinDirection;
             const relativeVx = b.vx - a.vx;
             const relativeVy = b.vy - a.vy;
-            const closing = relativeVx * nx + relativeVy * ny;
+            const relativeVz = b.vz - a.vz;
+            const closing = relativeVx * nx + relativeVy * ny + relativeVz * nz;
             const rebound = closing < 0 ? -closing * pressure * 0.18 : 0;
 
             a.vx -= nx * (push + rebound) / Math.sqrt(massA);
             a.vy -= ny * (push + rebound) / Math.sqrt(massA);
+            a.vz -= nz * (push + rebound) / Math.sqrt(massA);
             b.vx += nx * (push + rebound) / Math.sqrt(massB);
             b.vy += ny * (push + rebound) / Math.sqrt(massB);
+            b.vz += nz * (push + rebound) / Math.sqrt(massB);
             a.vx -= tx * spin;
             a.vy -= ty * spin;
             b.vx += tx * spin;
@@ -1252,6 +1298,32 @@
         }
       }
 
+      function applyDistanceWalls(star, seconds) {
+        const zone = gravitySettings.depthWallZone;
+        const strength = gravitySettings.depthWallStrength;
+        const damping = gravitySettings.depthWallDamping;
+
+        if (star.distance <= 0) {
+          star.distance = 0;
+          star.vz = Math.abs(star.vz) * gravitySettings.depthBounce + 4;
+          return;
+        }
+
+        if (star.distance >= 1) {
+          star.distance = 1;
+          star.vz = -Math.abs(star.vz) * gravitySettings.depthBounce - 4;
+          return;
+        }
+
+        if (star.distance < zone) {
+          const pressure = Math.pow(1 - star.distance / zone, 2);
+          star.vz += (strength * pressure + Math.max(-star.vz, 0) * damping * pressure) * seconds;
+        } else if (star.distance > 1 - zone) {
+          const pressure = Math.pow(1 - (1 - star.distance) / zone, 2);
+          star.vz -= (strength * pressure + Math.max(star.vz, 0) * damping * pressure) * seconds;
+        }
+      }
+
       function updateStars(seconds) {
         const margin = 26;
         const scaledSeconds = seconds * motionSettings.timeScale;
@@ -1263,10 +1335,12 @@
 
         for (const star of stars) {
           applyRightBoundary(star, scaledSeconds);
+          applyDistanceWalls(star, scaledSeconds);
           limitVelocity(star);
 
           star.x += star.vx * scaledSeconds;
           star.y += star.vy * scaledSeconds;
+          star.distance += star.vz * scaledSeconds / gravitySettings.distanceScale;
 
           if (star.y < -margin && star.vy < 0) {
             star.vy = Math.abs(star.vy) || 0.05;
@@ -1275,6 +1349,8 @@
           }
 
           applyRightBoundary(star, scaledSeconds);
+          applyDistanceWalls(star, scaledSeconds);
+          limitVelocity(star);
           updateTidalTail(star, scaledSeconds, cloudStats);
 
           if (star.x < -margin) {
