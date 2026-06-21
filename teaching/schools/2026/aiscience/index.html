@@ -31,6 +31,16 @@
       padding: 0 24px;
     }
 
+    .stellar-column {
+      display: none;
+    }
+
+    .stellar-canvas {
+      display: block;
+      height: 100%;
+      width: 100%;
+    }
+
     .page-header {
       padding: 2.25rem 0 1.35rem;
       text-align: center;
@@ -211,6 +221,24 @@
       margin: 0;
     }
 
+    @media (min-width: 1080px) {
+      .stellar-column {
+        display: block;
+        height: 100vh;
+        min-height: 640px;
+        overflow: hidden;
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: max(0px, calc((100% - 728px) / 2));
+        z-index: 1;
+      }
+
+      .stellar-canvas {
+        cursor: crosshair;
+      }
+    }
+
     @media (max-width: 600px) {
       .page-header {
       padding-top: 1.7rem;
@@ -375,5 +403,418 @@
       <p>Earl Patrick Bellinger, Yale University</p>
     </footer>
   </div>
+
+  <aside class="stellar-column" aria-label="Interactive star cluster artwork">
+    <canvas class="stellar-canvas" id="stellar-cluster-art"></canvas>
+  </aside>
+  <script>
+    (() => {
+      const canvas = document.getElementById("stellar-cluster-art");
+
+      if (!canvas) {
+        return;
+      }
+
+      const ctx = canvas.getContext("2d");
+      const stars = [];
+      let animationFrame = null;
+      let width = 0;
+      let height = 0;
+      let lastHitId = null;
+      let lastFrame = 0;
+      let motionRand = null;
+
+      function randomSeed(seed) {
+        let state = seed;
+
+        return () => {
+          state |= 0;
+          state = state + 0x6D2B79F5 | 0;
+          let t = Math.imul(state ^ state >>> 15, 1 | state);
+          t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+          return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+      }
+
+      function gaussian(rand) {
+        let u = 0;
+        let v = 0;
+
+        while (u === 0) {
+          u = rand();
+        }
+
+        while (v === 0) {
+          v = rand();
+        }
+
+        return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+      }
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function makeVelocity(rand, radius, entrySide = null) {
+        if (rand() < 0.42) {
+          return { vx: 0, vy: 0 };
+        }
+
+        const radiusBoost = clamp((radius - 1.4) / 4.5, 0, 1);
+        const vx = Math.min(1.05, 0.04 + Math.pow(rand(), 2.4) * 0.78 + radiusBoost * 0.23);
+        let vy = gaussian(rand) * 0.08;
+
+        if (entrySide === "top") {
+          vy = Math.abs(vy) + 0.04 + rand() * 0.12;
+        } else if (entrySide === "bottom") {
+          vy = -Math.abs(vy) - 0.04 - rand() * 0.12;
+        }
+
+        return { vx, vy };
+      }
+
+      function makeStars() {
+        const rand = randomSeed(20260620);
+        motionRand = randomSeed(20260621);
+        const area = width * height;
+        const count = clamp(Math.round(area / 2300), 110, 210);
+        const centers = [
+          { x: 0.25, y: 0.18, sx: 0.075, sy: 0.048 },
+          { x: 0.68, y: 0.29, sx: 0.082, sy: 0.06 },
+          { x: 0.36, y: 0.51, sx: 0.09, sy: 0.055 },
+          { x: 0.76, y: 0.67, sx: 0.076, sy: 0.072 },
+          { x: 0.32, y: 0.84, sx: 0.08, sy: 0.048 }
+        ];
+
+        stars.length = 0;
+
+        for (let i = 0; i < count; i += 1) {
+          const inCloud = rand() < 0.86;
+          const centerIndex = Math.floor(rand() * centers.length);
+          const center = centers[centerIndex];
+          const cloudScale = rand() < 0.64 ? 0.42 : 1;
+          const x = inCloud
+            ? center.x * width + gaussian(rand) * center.sx * cloudScale * width
+            : rand() * width;
+          const y = inCloud
+            ? center.y * height + gaussian(rand) * center.sy * cloudScale * height
+            : rand() * height;
+          const radius = 1.4 + Math.pow(rand(), 2.2) * 4.5;
+          const motion = makeVelocity(rand, radius);
+          const normalizedCloudDistance = inCloud
+            ? Math.hypot((x / width - center.x) / center.sx, (y / height - center.y) / center.sy)
+            : 5;
+
+          stars.push({
+            cloud: inCloud ? centerIndex : null,
+            id: i,
+            radius,
+            selectionScore: rand() + Math.min(normalizedCloudDistance, 4) * 0.16 + (inCloud ? 0 : 0.5),
+            vx: motion.vx,
+            vy: motion.vy,
+            x: clamp(x, radius + 10, width - radius - 10),
+            y: clamp(y, radius + 10, height - radius - 10)
+          });
+        }
+
+        stars.sort((a, b) => a.selectionScore - b.selectionScore);
+        stars.forEach((star, index) => {
+          star.active = index < Math.round(stars.length * 0.3);
+          delete star.selectionScore;
+        });
+        stars.sort((a, b) => a.radius - b.radius);
+      }
+
+      function getActiveClusters() {
+        const activeStars = stars.filter((star) => star.active);
+        const visited = new Set();
+        const clusters = [];
+        const clusterDistance = clamp(Math.min(width, height) * 0.14, 32, 48);
+
+        for (const star of activeStars) {
+          if (visited.has(star.id)) {
+            continue;
+          }
+
+          const cluster = [];
+          const queue = [star];
+          visited.add(star.id);
+
+          while (queue.length > 0) {
+            const current = queue.shift();
+            cluster.push(current);
+
+            for (const candidate of activeStars) {
+              if (visited.has(candidate.id)) {
+                continue;
+              }
+
+              const dx = candidate.x - current.x;
+              const dy = candidate.y - current.y;
+
+              if (Math.hypot(dx, dy) <= clusterDistance + current.radius + candidate.radius) {
+                visited.add(candidate.id);
+                queue.push(candidate);
+              }
+            }
+          }
+
+          if (cluster.length >= 3) {
+            clusters.push(cluster);
+          }
+        }
+
+        return clusters;
+      }
+
+      function convexHull(points) {
+        if (points.length <= 3) {
+          return points.slice();
+        }
+
+        const sorted = points.slice().sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
+        const cross = (origin, a, b) => {
+          return (a.x - origin.x) * (b.y - origin.y) - (a.y - origin.y) * (b.x - origin.x);
+        };
+        const lower = [];
+        const upper = [];
+
+        for (const point of sorted) {
+          while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) {
+            lower.pop();
+          }
+
+          lower.push(point);
+        }
+
+        for (let i = sorted.length - 1; i >= 0; i -= 1) {
+          const point = sorted[i];
+
+          while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) {
+            upper.pop();
+          }
+
+          upper.push(point);
+        }
+
+        upper.pop();
+        lower.pop();
+
+        return lower.concat(upper);
+      }
+
+      function drawClusterBorder(cluster, index) {
+        const hull = convexHull(cluster);
+
+        if (hull.length < 3) {
+          return;
+        }
+
+        const center = hull.reduce((sum, point) => {
+          sum.x += point.x;
+          sum.y += point.y;
+          return sum;
+        }, { x: 0, y: 0 });
+        center.x /= hull.length;
+        center.y /= hull.length;
+
+        const pad = 14 + Math.min(index, 4) * 1.6;
+        const expanded = hull.map((point) => {
+          const dx = point.x - center.x;
+          const dy = point.y - center.y;
+          const length = Math.max(Math.hypot(dx, dy), 1);
+
+          return {
+            x: point.x + dx / length * (pad + point.radius),
+            y: point.y + dy / length * (pad + point.radius)
+          };
+        });
+
+        ctx.beginPath();
+
+        for (let i = 0; i < expanded.length; i += 1) {
+          const current = expanded[i];
+          const next = expanded[(i + 1) % expanded.length];
+          const midpoint = {
+            x: (current.x + next.x) / 2,
+            y: (current.y + next.y) / 2
+          };
+
+          if (i === 0) {
+            const previous = expanded[expanded.length - 1];
+            ctx.moveTo((previous.x + current.x) / 2, (previous.y + current.y) / 2);
+          }
+
+          ctx.quadraticCurveTo(current.x, current.y, midpoint.x, midpoint.y);
+        }
+
+        ctx.closePath();
+        ctx.fillStyle = "rgba(58, 58, 58, 0.055)";
+        ctx.strokeStyle = "rgba(58, 58, 58, 0.5)";
+        ctx.lineWidth = 1.25;
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#EAE6E3";
+        ctx.fillRect(0, 0, width, height);
+
+        getActiveClusters().forEach((cluster, index) => {
+          drawClusterBorder(cluster, index);
+        });
+
+        for (const star of stars) {
+          ctx.beginPath();
+          ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+          ctx.fillStyle = star.active ? "#383838" : "#aaa5a1";
+          ctx.fill();
+
+          if (star.radius > 3.5) {
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, star.radius + 3, 0, Math.PI * 2);
+            ctx.strokeStyle = star.active ? "rgba(56, 56, 56, 0.12)" : "rgba(170, 165, 161, 0.16)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+      }
+
+      function respawnFromVerticalEdge(star) {
+        const rand = motionRand || Math.random;
+        const side = rand() < 0.5 ? "top" : "bottom";
+        const motion = makeVelocity(rand, star.radius, side);
+        const margin = star.radius + 18;
+
+        star.x = 8 + rand() * Math.max(width - 16, 1);
+        star.y = side === "top" ? -margin : height + margin;
+        star.vx = motion.vx;
+        star.vy = motion.vy;
+        star.active = rand() < 0.3;
+        lastHitId = null;
+      }
+
+      function updateStars(seconds) {
+        const margin = 26;
+
+        for (const star of stars) {
+          if (star.vx === 0 && star.vy === 0) {
+            continue;
+          }
+
+          star.x += star.vx * seconds;
+          star.y += star.vy * seconds;
+
+          if (star.y < -margin && star.vy < 0) {
+            star.vy = Math.abs(star.vy) || 0.05;
+          } else if (star.y > height + margin && star.vy > 0) {
+            star.vy = -Math.abs(star.vy) || -0.05;
+          }
+
+          if (star.x > width + margin) {
+            respawnFromVerticalEdge(star);
+          }
+        }
+      }
+
+      function animate(timestamp) {
+        const seconds = lastFrame ? Math.min((timestamp - lastFrame) / 1000, 0.08) : 0;
+        lastFrame = timestamp;
+
+        updateStars(seconds);
+        draw();
+        animationFrame = requestAnimationFrame(animate);
+      }
+
+      function startAnimation() {
+        if (animationFrame === null) {
+          animationFrame = requestAnimationFrame(animate);
+        }
+      }
+
+      function stopAnimation() {
+        if (animationFrame !== null) {
+          cancelAnimationFrame(animationFrame);
+          animationFrame = null;
+          lastFrame = 0;
+        }
+      }
+
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+
+        if (rect.width === 0 || rect.height === 0) {
+          stopAnimation();
+          return;
+        }
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        width = rect.width;
+        height = rect.height;
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        makeStars();
+        draw();
+        startAnimation();
+      }
+
+      function hitTest(x, y) {
+        let nearest = null;
+        let nearestDistance = Infinity;
+
+        for (const star of stars) {
+          const distance = Math.hypot(star.x - x, star.y - y);
+          const hitRadius = Math.max(star.radius + 10, 13);
+
+          if (distance <= hitRadius && distance < nearestDistance) {
+            nearest = star;
+            nearestDistance = distance;
+          }
+        }
+
+        return nearest;
+      }
+
+      function handleMove(event) {
+        const rect = canvas.getBoundingClientRect();
+        const star = hitTest(event.clientX - rect.left, event.clientY - rect.top);
+
+        if (!star) {
+          lastHitId = null;
+          return;
+        }
+
+        if (star.id === lastHitId) {
+          return;
+        }
+
+        star.active = !star.active;
+        lastHitId = star.id;
+        draw();
+      }
+
+      canvas.addEventListener("pointermove", handleMove);
+      canvas.addEventListener("pointerover", handleMove);
+      canvas.addEventListener("pointerdown", handleMove);
+      canvas.addEventListener("mousemove", handleMove);
+      canvas.addEventListener("mouseover", handleMove);
+      canvas.addEventListener("pointerleave", () => {
+        lastHitId = null;
+      });
+      canvas.addEventListener("mouseleave", () => {
+        lastHitId = null;
+      });
+
+      if ("ResizeObserver" in window) {
+        const observer = new ResizeObserver(resizeCanvas);
+        observer.observe(canvas);
+      } else {
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+      }
+    })();
+  </script>
 </body>
 </html>
