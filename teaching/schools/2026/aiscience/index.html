@@ -436,13 +436,25 @@
         { x: 0.41, y: 0.55, sx: 0.045, sy: 0.03, distance: 0.47, vx: 24, vy: 16 },
         { x: 0.57, y: 0.62, sx: 0.045, sy: 0.03, distance: 0.5, vx: -4, vy: -18 }
       ];
+      const motionSettings = {
+        bulkScale: 0.58,
+        fieldDrift: 5,
+        fieldDriftRange: 5,
+        highVelocityChance: 0.045,
+        highVelocityMin: 42,
+        highVelocityRange: 34,
+        speedCap: 92,
+        timeScale: 0.58,
+        verticalEntry: 3,
+        verticalEntryRange: 5
+      };
       const gravitySettings = {
         closeHeating: 2,
         corePressure: 14,
         distanceScale: 86,
         softening: 45,
         strength: 520,
-        virialRatio: 0.6
+        virialRatio: 0.42
       };
 
       function randomSeed(seed) {
@@ -557,16 +569,16 @@
           q = rand() * 0.35;
         }
 
-        const escapeSpeed = 48 * Math.pow(1 + radius * radius, -0.25);
+        const escapeSpeed = 34 * Math.pow(1 + radius * radius, -0.25);
         const speed = q * escapeSpeed;
         const angle = rand() * Math.PI * 2;
         let vx = Math.cos(angle) * speed;
         let vy = Math.sin(angle) * speed;
 
         if (entrySide === "top") {
-          vy = Math.abs(vy) + 5 + rand() * 8;
+          vy = Math.abs(vy) + motionSettings.verticalEntry + rand() * motionSettings.verticalEntryRange;
         } else if (entrySide === "bottom") {
-          vy = -Math.abs(vy) - 5 - rand() * 8;
+          vy = -Math.abs(vy) - motionSettings.verticalEntry - rand() * motionSettings.verticalEntryRange;
         }
 
         return { vx, vy };
@@ -578,8 +590,8 @@
         }
 
         return {
-          vx: motion.vx + (center.vx || 0),
-          vy: motion.vy + (center.vy || 0)
+          vx: motion.vx + (center.vx || 0) * motionSettings.bulkScale,
+          vy: motion.vy + (center.vy || 0) * motionSettings.bulkScale
         };
       }
 
@@ -652,14 +664,29 @@
         for (const star of stars) {
           if (star.cloud !== null) {
             const center = clusterCenters[star.cloud];
-            star.vx += center.vx;
-            star.vy += center.vy;
+            star.vx += center.vx * motionSettings.bulkScale;
+            star.vy += center.vy * motionSettings.bulkScale;
           } else {
-            star.vx -= 10 + rand() * 8;
+            star.vx -= motionSettings.fieldDrift + rand() * motionSettings.fieldDriftRange;
           }
 
+          maybeAddHighVelocityTail(star, rand);
           limitVelocity(star);
         }
+      }
+
+      function maybeAddHighVelocityTail(star, rand) {
+        star.fast = false;
+
+        if (rand() > motionSettings.highVelocityChance) {
+          return;
+        }
+
+        const angle = rand() * Math.PI * 2;
+        const kick = motionSettings.highVelocityMin + Math.pow(rand(), 0.45) * motionSettings.highVelocityRange;
+        star.vx += Math.cos(angle) * kick;
+        star.vy += Math.sin(angle) * kick;
+        star.fast = true;
       }
 
       function makeStars() {
@@ -884,12 +911,14 @@
           star.distance = rand();
         }
 
+        maybeAddHighVelocityTail(star, rand);
+        limitVelocity(star);
         lastPointer = null;
       }
 
       function limitVelocity(star) {
         const speed = Math.hypot(star.vx, star.vy);
-        const cap = 96;
+        const cap = motionSettings.speedCap;
 
         if (speed > cap) {
           star.vx = star.vx / speed * cap;
@@ -978,15 +1007,16 @@
 
       function updateStars(seconds) {
         const margin = 26;
+        const scaledSeconds = seconds * motionSettings.timeScale;
 
-        applyGravity(seconds);
+        applyGravity(scaledSeconds);
 
         for (const star of stars) {
-          applyRightBoundary(star, seconds);
+          applyRightBoundary(star, scaledSeconds);
           limitVelocity(star);
 
-          star.x += star.vx * seconds;
-          star.y += star.vy * seconds;
+          star.x += star.vx * scaledSeconds;
+          star.y += star.vy * scaledSeconds;
 
           if (star.y < -margin && star.vy < 0) {
             star.vy = Math.abs(star.vy) || 0.05;
@@ -994,7 +1024,7 @@
             star.vy = -Math.abs(star.vy) || -0.05;
           }
 
-          applyRightBoundary(star, seconds);
+          applyRightBoundary(star, scaledSeconds);
 
           if (star.x < -margin) {
             respawnFromVerticalEdge(star);
