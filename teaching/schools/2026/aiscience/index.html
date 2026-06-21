@@ -49,14 +49,20 @@
     .avatar {
       border-radius: 100px;
       display: block;
-      margin: 0 auto 0.5rem;
+      margin: 0;
       max-width: 100%;
-      width: 105px;
+      width: 100%;
     }
 
     .avatar-link,
     .avatar-link:hover {
       border-bottom: none;
+    }
+
+    .avatar-link {
+      display: block;
+      margin: 0 auto 0.5rem;
+      width: 105px;
     }
 
     h1 {
@@ -420,9 +426,16 @@
       let animationFrame = null;
       let width = 0;
       let height = 0;
-      let lastHitId = null;
       let lastFrame = 0;
+      let lastPointer = null;
       let motionRand = null;
+      const clusterCenters = [
+        { x: 0.25, y: 0.18, sx: 0.075, sy: 0.048, distance: 0.2 },
+        { x: 0.68, y: 0.29, sx: 0.082, sy: 0.06, distance: 0.55 },
+        { x: 0.36, y: 0.51, sx: 0.09, sy: 0.055, distance: 0.35 },
+        { x: 0.76, y: 0.67, sx: 0.076, sy: 0.072, distance: 0.74 },
+        { x: 0.32, y: 0.84, sx: 0.08, sy: 0.048, distance: 0.48 }
+      ];
 
       function randomSeed(seed) {
         let state = seed;
@@ -455,6 +468,19 @@
         return Math.max(min, Math.min(max, value));
       }
 
+      function colorForDistance(distance, alpha = 1) {
+        const tone = Math.round(58 + distance * 132);
+        return `rgba(${tone}, ${tone}, ${tone}, ${alpha})`;
+      }
+
+      function distanceForStar(rand, center, cloudScale) {
+        if (!center) {
+          return rand();
+        }
+
+        return clamp(center.distance + gaussian(rand) * 0.035 * Math.max(cloudScale, 0.6), 0, 1);
+      }
+
       function makeVelocity(rand, radius, entrySide = null) {
         if (rand() < 0.42) {
           return { vx: 0, vy: 0 };
@@ -478,20 +504,13 @@
         motionRand = randomSeed(20260621);
         const area = width * height;
         const count = clamp(Math.round(area / 2300), 110, 210);
-        const centers = [
-          { x: 0.25, y: 0.18, sx: 0.075, sy: 0.048 },
-          { x: 0.68, y: 0.29, sx: 0.082, sy: 0.06 },
-          { x: 0.36, y: 0.51, sx: 0.09, sy: 0.055 },
-          { x: 0.76, y: 0.67, sx: 0.076, sy: 0.072 },
-          { x: 0.32, y: 0.84, sx: 0.08, sy: 0.048 }
-        ];
 
         stars.length = 0;
 
         for (let i = 0; i < count; i += 1) {
           const inCloud = rand() < 0.86;
-          const centerIndex = Math.floor(rand() * centers.length);
-          const center = centers[centerIndex];
+          const centerIndex = Math.floor(rand() * clusterCenters.length);
+          const center = clusterCenters[centerIndex];
           const cloudScale = rand() < 0.64 ? 0.42 : 1;
           const x = inCloud
             ? center.x * width + gaussian(rand) * center.sx * cloudScale * width
@@ -501,15 +520,12 @@
             : rand() * height;
           const radius = 1.4 + Math.pow(rand(), 2.2) * 4.5;
           const motion = makeVelocity(rand, radius);
-          const normalizedCloudDistance = inCloud
-            ? Math.hypot((x / width - center.x) / center.sx, (y / height - center.y) / center.sy)
-            : 5;
 
           stars.push({
             cloud: inCloud ? centerIndex : null,
+            distance: distanceForStar(rand, inCloud ? center : null, cloudScale),
             id: i,
             radius,
-            selectionScore: rand() + Math.min(normalizedCloudDistance, 4) * 0.16 + (inCloud ? 0 : 0.5),
             vx: motion.vx,
             vy: motion.vy,
             x: clamp(x, radius + 10, width - radius - 10),
@@ -517,21 +533,19 @@
           });
         }
 
-        stars.sort((a, b) => a.selectionScore - b.selectionScore);
-        stars.forEach((star, index) => {
-          star.active = index < Math.round(stars.length * 0.3);
-          delete star.selectionScore;
-        });
         stars.sort((a, b) => a.radius - b.radius);
       }
 
-      function getActiveClusters() {
-        const activeStars = stars.filter((star) => star.active);
+      function getClusters() {
+        const visibleStars = stars.filter((star) => {
+          return star.x >= -20 && star.x <= width + 20 && star.y >= -20 && star.y <= height + 20;
+        });
         const visited = new Set();
         const clusters = [];
-        const clusterDistance = clamp(Math.min(width, height) * 0.14, 32, 48);
+        const clusterDistance = clamp(Math.min(width, height) * 0.145, 34, 50);
+        const distanceScale = 155;
 
-        for (const star of activeStars) {
+        for (const star of visibleStars) {
           if (visited.has(star.id)) {
             continue;
           }
@@ -544,22 +558,23 @@
             const current = queue.shift();
             cluster.push(current);
 
-            for (const candidate of activeStars) {
+            for (const candidate of visibleStars) {
               if (visited.has(candidate.id)) {
                 continue;
               }
 
               const dx = candidate.x - current.x;
               const dy = candidate.y - current.y;
+              const dd = (candidate.distance - current.distance) * distanceScale;
 
-              if (Math.hypot(dx, dy) <= clusterDistance + current.radius + candidate.radius) {
+              if (Math.hypot(dx, dy, dd) <= clusterDistance + current.radius + candidate.radius) {
                 visited.add(candidate.id);
                 queue.push(candidate);
               }
             }
           }
 
-          if (cluster.length >= 3) {
+          if (cluster.length >= 4) {
             clusters.push(cluster);
           }
         }
@@ -613,10 +628,12 @@
         const center = hull.reduce((sum, point) => {
           sum.x += point.x;
           sum.y += point.y;
+          sum.distance += point.distance;
           return sum;
-        }, { x: 0, y: 0 });
+        }, { x: 0, y: 0, distance: 0 });
         center.x /= hull.length;
         center.y /= hull.length;
+        center.distance /= hull.length;
 
         const pad = 14 + Math.min(index, 4) * 1.6;
         const expanded = hull.map((point) => {
@@ -649,8 +666,8 @@
         }
 
         ctx.closePath();
-        ctx.fillStyle = "rgba(58, 58, 58, 0.055)";
-        ctx.strokeStyle = "rgba(58, 58, 58, 0.5)";
+        ctx.fillStyle = colorForDistance(center.distance, 0.055);
+        ctx.strokeStyle = colorForDistance(center.distance, 0.5);
         ctx.lineWidth = 1.25;
         ctx.fill();
         ctx.stroke();
@@ -661,20 +678,20 @@
         ctx.fillStyle = "#EAE6E3";
         ctx.fillRect(0, 0, width, height);
 
-        getActiveClusters().forEach((cluster, index) => {
+        getClusters().forEach((cluster, index) => {
           drawClusterBorder(cluster, index);
         });
 
         for (const star of stars) {
           ctx.beginPath();
           ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
-          ctx.fillStyle = star.active ? "#383838" : "#aaa5a1";
+          ctx.fillStyle = colorForDistance(star.distance);
           ctx.fill();
 
           if (star.radius > 3.5) {
             ctx.beginPath();
             ctx.arc(star.x, star.y, star.radius + 3, 0, Math.PI * 2);
-            ctx.strokeStyle = star.active ? "rgba(56, 56, 56, 0.12)" : "rgba(170, 165, 161, 0.16)";
+            ctx.strokeStyle = colorForDistance(star.distance, 0.14);
             ctx.lineWidth = 1;
             ctx.stroke();
           }
@@ -691,8 +708,16 @@
         star.y = side === "top" ? -margin : height + margin;
         star.vx = motion.vx;
         star.vy = motion.vy;
-        star.active = rand() < 0.3;
-        lastHitId = null;
+
+        if (star.cloud !== null) {
+          const center = clusterCenters[star.cloud];
+          star.x = clamp(center.x * width + gaussian(rand) * center.sx * width, 8, width - 8);
+          star.distance = distanceForStar(rand, center, 1);
+        } else {
+          star.distance = rand();
+        }
+
+        lastPointer = null;
       }
 
       function updateStars(seconds) {
@@ -710,6 +735,10 @@
             star.vy = Math.abs(star.vy) || 0.05;
           } else if (star.y > height + margin && star.vy > 0) {
             star.vy = -Math.abs(star.vy) || -0.05;
+          }
+
+          if (star.x < -margin) {
+            star.x = -margin;
           }
 
           if (star.x > width + margin) {
@@ -760,51 +789,56 @@
         startAnimation();
       }
 
-      function hitTest(x, y) {
-        let nearest = null;
-        let nearestDistance = Infinity;
+      function bumpStars(event) {
+        const rect = canvas.getBoundingClientRect();
+        const pointer = {
+          time: event.timeStamp,
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        };
+
+        if (!lastPointer) {
+          lastPointer = pointer;
+          return;
+        }
+
+        const dx = pointer.x - lastPointer.x;
+        const dy = pointer.y - lastPointer.y;
+        const travel = Math.hypot(dx, dy);
+        const elapsed = Math.max((pointer.time - lastPointer.time) / 1000, 0.016);
+        lastPointer = pointer;
+
+        if (travel < 0.5) {
+          return;
+        }
+
+        const speed = travel / elapsed;
+        const maxBump = clamp(speed / 450, 0, 2);
+        const directionX = dx / travel;
+        const directionY = dy / travel;
 
         for (const star of stars) {
-          const distance = Math.hypot(star.x - x, star.y - y);
-          const hitRadius = Math.max(star.radius + 10, 13);
+          const distance = Math.hypot(star.x - pointer.x, star.y - pointer.y);
+          const hitRadius = Math.max(star.radius + 16, 20);
 
-          if (distance <= hitRadius && distance < nearestDistance) {
-            nearest = star;
-            nearestDistance = distance;
+          if (distance > hitRadius) {
+            continue;
           }
-        }
 
-        return nearest;
+          const falloff = 1 - distance / hitRadius;
+          const bump = maxBump * falloff;
+          star.x += directionX * bump;
+          star.y += directionY * bump;
+        }
       }
 
-      function handleMove(event) {
-        const rect = canvas.getBoundingClientRect();
-        const star = hitTest(event.clientX - rect.left, event.clientY - rect.top);
-
-        if (!star) {
-          lastHitId = null;
-          return;
-        }
-
-        if (star.id === lastHitId) {
-          return;
-        }
-
-        star.active = !star.active;
-        lastHitId = star.id;
-        draw();
-      }
-
-      canvas.addEventListener("pointermove", handleMove);
-      canvas.addEventListener("pointerover", handleMove);
-      canvas.addEventListener("pointerdown", handleMove);
-      canvas.addEventListener("mousemove", handleMove);
-      canvas.addEventListener("mouseover", handleMove);
+      canvas.addEventListener("pointermove", bumpStars);
+      canvas.addEventListener("mousemove", bumpStars);
       canvas.addEventListener("pointerleave", () => {
-        lastHitId = null;
+        lastPointer = null;
       });
       canvas.addEventListener("mouseleave", () => {
-        lastHitId = null;
+        lastPointer = null;
       });
 
       if ("ResizeObserver" in window) {
