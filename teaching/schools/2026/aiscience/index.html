@@ -107,12 +107,52 @@
       overflow-wrap: anywhere;
     }
 
+    .data-table {
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin: 0;
+      width: 100%;
+    }
+
+    .data-table th,
+    .data-table td {
+      border-bottom: 1px solid #c7c7c7;
+      padding: 0.62rem 0.75rem 0.62rem 0;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .data-table th {
+      color: #555;
+      font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .data-table th:last-child,
+    .data-table td:last-child {
+      padding-right: 0;
+    }
+
     .note-section {
       padding-top: 1rem;
     }
 
+    .helper-note {
+      background: rgba(255, 255, 255, 0.28);
+      border-left: 3px solid #c7c7c7;
+      color: #555;
+      font-size: 0.92rem;
+      margin: 0.75rem 0 0.95rem;
+      padding: 0.65rem 0.85rem;
+    }
+
     .lab-preview {
       margin: 0.35rem 0 1.6rem;
+    }
+
+    .preview-label {
+      text-align: center;
     }
 
     .lab-preview img {
@@ -187,6 +227,36 @@
         display: block;
         margin-bottom: 0.1rem;
       }
+
+      .data-table,
+      .data-table tbody,
+      .data-table tr,
+      .data-table td {
+        display: block;
+        width: 100%;
+      }
+
+      .data-table thead {
+        display: none;
+      }
+
+      .data-table tr {
+        border-bottom: 1px solid #c7c7c7;
+        padding: 0.62rem 0;
+      }
+
+      .data-table td {
+        border-bottom: none;
+        padding: 0.12rem 0;
+      }
+
+      .data-table td::before {
+        color: #666;
+        content: attr(data-label) ": ";
+        font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
     }
   </style>
 </head>
@@ -215,7 +285,30 @@
       </section>
 
       <section class="content-section" aria-label="Overview">
-        <p class="lead">In this lab, you will use observations of the positions and motions of stars measured by the Gaia spacecraft in Gaia DR3 (based on data collected from 25 July 2014 to 28 May 2017) to find a well-known star cluster and compare its properties to a theoretical stellar evolution model.</p>
+        <p class="lead">In this lab, you will apply unsupervised machine learning algorithms to observations of the positions and motions of stars measured by the Gaia spacecraft in Gaia DR3 (2014-2017) to find a well-known star cluster and compare its properties to a theoretical stellar evolution model.</p>
+      </section>
+
+      <p class="preview-label">Preview: The lab should look like this</p>
+
+      <figure class="lab-preview">
+        <img src="lab-preview.png" alt="JupyterLab view of the Clustering Clusters lab notebook">
+      </figure>
+
+      <section class="content-section note-section" aria-label="Installation notes">
+        <p><strong>Before running</strong><br>
+        Install the packages used for clustering and notebook rendering.</p>
+
+        <aside class="helper-note" aria-label="Jupyter setup note">
+          You will also need JupyterLab or Jupyter Notebook to run the lab. If you do not have this on your computer, I personally use <a href="https://www.anaconda.com/download">Anaconda3</a> to set it up. You could alternatively ask a coding agent such as <a href="https://openai.com/codex/">Codex</a> or <a href="https://docs.anthropic.com/en/docs/claude-code/overview">Claude Code</a> to set up the prerequisites for this lab, using this page's URL as context.
+        </aside>
+
+        <p><strong>HDBSCAN</strong><br>
+        HDBSCAN stands for Hierarchical Density-Based Spatial Clustering of Applications with Noise. An implementation is available in sklearn, but it is very slow. I recommend installing the python package <code>hdbscan</code>. It can sometimes be tricky to install. Try:</p>
+        <pre><code>conda install -c conda-forge hdbscan</code></pre>
+
+        <p><strong>MyST</strong><br>
+        The lab uses MyST for beautification! Please also</p>
+        <pre><code>pip install jupyterlab_myst</code></pre>
       </section>
 
       <section class="content-section" aria-label="Course materials">
@@ -233,46 +326,42 @@
         </ul>
       </section>
 
-      <figure class="lab-preview">
-        <img src="lab-preview.png" alt="JupyterLab view of the Clustering Clusters lab notebook">
-      </figure>
-
-      <section class="content-section note-section" aria-label="Installation notes">
-        <p><strong>Before running</strong><br>
-        Install the optional packages used for clustering and notebook rendering.</p>
-
-        <p><strong>HDBSCAN</strong><br>
-        An implementation is available in sklearn, but it is very slow. I recommend installing the python package <code>hdbscan</code>. It can sometimes be tricky to install. Try:</p>
-        <pre><code>conda install -c conda-forge hdbscan</code></pre>
-
-        <p><strong>MyST</strong><br>
-        The lab uses MyST for beautification! Please also</p>
-        <pre><code>pip install jupyterlab_myst</code></pre>
-      </section>
-
       <section class="content-section" aria-label="Data files">
         <p class="prompt"><strong>Data used in the lab</strong><br>
         The notebook expects these files to be available locally in the same folder.</p>
-        <ul class="resource-list">
-          <li>
-            <span class="resource-label"><a href="https://drive.google.com/file/d/1UZ6npME-yLoqk0rlX_A-fCvuEU12LY-u/view?usp=drive_link">gaia.csv</a></span>
-            <span>Gaia DR3 observations near the Pleiades.</span>
-          </li>
-          <li>
-            <span class="resource-label"><a href="https://drive.google.com/file/d/1LiuYS2eoxZPb72SKttMTRxUSVNIL_4qU/view?usp=drive_link">mist_isochrone_112Myr.dat</a></span>
-            <span>MIST model isochrone for the cluster comparison.</span>
-          </li>
-          <li>
-            <span class="resource-label"><a href="https://drive.google.com/file/d/1vNM7hBgnc_8LSyO221PBgwPIdXqRi9kY/view?usp=drive_link">known_clusters.dat</a></span>
-            <span>Catalog of known open clusters for the extension exercise.</span>
-          </li>
-        </ul>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th scope="col">File</th>
+              <th scope="col">Use</th>
+              <th scope="col">Origin</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="File"><span class="resource-label"><a href="https://drive.google.com/file/d/1UZ6npME-yLoqk0rlX_A-fCvuEU12LY-u/view?usp=drive_link">gaia.csv</a></span></td>
+              <td data-label="Use">Gaia DR3 observations near the Pleiades.</td>
+              <td data-label="Origin"><a href="https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...1G/abstract">Gaia Collaboration et al. 2023</a></td>
+            </tr>
+            <tr>
+              <td data-label="File"><span class="resource-label"><a href="https://drive.google.com/file/d/1LiuYS2eoxZPb72SKttMTRxUSVNIL_4qU/view?usp=drive_link">mist_isochrone_112Myr.dat</a></span></td>
+              <td data-label="Use">MIST model isochrone for the cluster comparison.</td>
+              <td data-label="Origin"><a href="https://ui.adsabs.harvard.edu/abs/2016ApJ...823..102C/abstract">Choi et al. 2016</a>; <a href="https://ui.adsabs.harvard.edu/abs/2016ApJS..222....8D/abstract">Dotter 2016</a></td>
+            </tr>
+            <tr>
+              <td data-label="File"><span class="resource-label"><a href="https://drive.google.com/file/d/1vNM7hBgnc_8LSyO221PBgwPIdXqRi9kY/view?usp=drive_link">known_clusters.dat</a></span></td>
+              <td data-label="Use">Catalog of known open clusters for the extension exercise.</td>
+              <td data-label="Origin"><a href="https://ui.adsabs.harvard.edu/abs/2023A%26A...673A.114H/abstract">Hunt &amp; Reffert 2023</a></td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
-      <section class="content-section" aria-label="Troubleshooting">
-        <p><strong>Troubleshooting</strong><br>
-        If <code>hdbscan</code> is difficult to install, you can still inspect the data and plots before the clustering step. The solutions notebook shows the expected output.</p>
+      <section class="content-section" aria-label="Suggested LLM and agent usage">
+        <p><strong>Suggested LLM/agent usage</strong><br>
+        I encourage you to use LLMs and coding agents as pedagogical tools: ask them to explain unfamiliar code, translate equations into intuition, debug environment issues, or suggest checks on your reasoning. To preserve your learning, try each step yourself first, then use the model to compare approaches, ask follow-up questions, and articulate in your own words why the result makes sense. You could ask them to solve everything for you, but recall you already have the solutions above.</p>
       </section>
+
     </main>
 
     <footer class="page-footer">
