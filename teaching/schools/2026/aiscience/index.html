@@ -1145,22 +1145,14 @@
         const rand = motionRand || Math.random;
         const side = rand() < 0.5 ? "top" : "bottom";
         const center = star.cloud !== null ? clusterCenters[star.cloud] : null;
-        const motion = makeVelocity(rand, star.radius, center ? null : side, center);
+        const motion = makeVelocity(rand, star.radius, side, center);
         const margin = star.radius + 18;
 
-        star.x = width * (0.18 + rand() * 0.74);
+        star.x = clamp(rand() * width, 8, width - 8);
         star.y = side === "top" ? -margin : height + margin;
         star.vx = motion.vx;
         star.vy = motion.vy;
-
-        if (star.cloud !== null) {
-          const plummer = samplePlummerPosition(rand, center);
-          star.x = clamp(plummer.x, 8, width - 8);
-          star.y = clamp(plummer.y, 8, height - 8);
-          star.distance = distanceForStar(rand, center, 1);
-        } else {
-          star.distance = rand();
-        }
+        star.distance = center ? distanceForStar(rand, center, 1) : rand();
 
         maybeAddHighVelocityTail(star, rand);
         limitVelocity(star);
