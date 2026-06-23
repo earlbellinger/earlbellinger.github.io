@@ -1061,6 +1061,7 @@
     .metric[data-stability-expanded] {
       cursor: pointer;
       touch-action: manipulation;
+      max-width: 100%;
     }
 
     .metric[data-stability-expanded] b,
@@ -1074,18 +1075,29 @@
 
     .metric .stability-formula {
       display: none;
+      margin-left: 6px;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
 
-    .metric[data-stability-expanded]:hover .stability-summary,
-    .metric[data-stability-expanded]:focus-visible .stability-summary,
-    .metric[data-stability-expanded][aria-expanded="true"] .stability-summary {
-      display: none;
+    .metric .stability-equation {
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
 
-    .metric[data-stability-expanded]:hover .stability-formula,
-    .metric[data-stability-expanded]:focus-visible .stability-formula,
+    .metric .stability-equation-chunk {
+      display: inline-block;
+      max-width: 100%;
+      vertical-align: middle;
+    }
+
     .metric[data-stability-expanded][aria-expanded="true"] .stability-formula {
       display: inline;
+    }
+
+    .metric[data-stability-expanded][aria-expanded="true"] {
+      flex: 1 1 min(100%, 520px);
+      white-space: normal;
     }
 
     .metric[data-stability-expanded]:focus-visible,
@@ -1436,6 +1448,18 @@
       overflow-x: hidden;
     }
 
+    .plot-panel[data-plot-panel="heatEngine"] {
+      --heat-engine-panel-size: 316px;
+      width: min(100%, var(--heat-engine-panel-size));
+      flex: 0 0 min(100%, var(--heat-engine-panel-size));
+      min-width: 0;
+      overflow-x: hidden;
+    }
+
+    .heat-engine-canvas {
+      height: 260px;
+    }
+
     canvas.model-canvas {
       width: 100%;
       height: 100%;
@@ -1474,10 +1498,6 @@
     canvas.reference-control-canvas {
       cursor: crosshair;
       touch-action: none;
-    }
-
-    .reference-plot-panel[data-reference-panel="phase"] canvas {
-      height: 340px;
     }
 
     .legend {
@@ -1545,9 +1565,12 @@
       gap: 5px 9px;
     }
 
-    .annotation-symbol-break {
-      flex-basis: 100%;
-      height: 0;
+    .annotation-symbol-group {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 5px 9px;
+      white-space: nowrap;
     }
 
     .annotation-symbol-item {
@@ -1573,11 +1596,13 @@
       border: 1.6px solid var(--color);
       border-radius: 999px;
       color: transparent;
+      width: 11px;
+      height: 11px;
     }
 
     .annotation-symbol.open.small {
-      width: 10px;
-      height: 10px;
+      width: 8px;
+      height: 8px;
     }
 
     .annotation-symbol.dot {
@@ -2035,6 +2060,14 @@
       .plot-panel[data-plot-panel="model"] {
         --model-panel-size: 286px;
       }
+
+      .plot-panel[data-plot-panel="heatEngine"] {
+        --heat-engine-panel-size: 286px;
+      }
+
+      .heat-engine-canvas {
+        height: 230px;
+      }
     }
   </style>
 </head>
@@ -2199,7 +2232,7 @@
         </div>
       </section>
 
-      <section class="plot-grid" id="plotGrid" data-pressure-visible="false" data-visible-plots="9">
+      <section class="plot-grid" id="plotGrid" data-pressure-visible="false" data-visible-plots="10">
         <div class="plot-panel" data-plot-panel="model">
           <div class="plot-title">
             <div class="plot-title-left" data-plot-control-home="model">
@@ -2220,6 +2253,19 @@
           </div>
         </div>
 
+        <div class="plot-panel" data-plot-panel="heatEngine">
+          <div class="plot-title">
+            <div class="plot-title-left" data-plot-control-home="heatEngine">
+              <label class="plot-enable-control" data-plot-control="heatEngine">
+                <input type="checkbox" data-plot-toggle="heatEngine" checked aria-label="Hide Heat Engine plot">
+                <span>Heat Engine</span>
+              </label>
+              <h3>Heat Engine</h3>
+            </div>
+          </div>
+          <canvas class="heat-engine-canvas" id="heatEngineCanvas" aria-label="work-cycle heat engine piston visualization"></canvas>
+        </div>
+
         <div class="plot-panel" data-plot-panel="light">
           <div class="plot-title">
             <div class="plot-title-left" data-plot-control-home="light">
@@ -2230,22 +2276,25 @@
               <h3>Lightcurve</h3>
             </div>
             <label class="legend-item legend-toggle annotation-toggle" id="phaseAnnotationToggleLabel" style="--accent:#FFD166">
-              <input id="phaseAnnotationsToggle" type="checkbox" aria-label="Annotations" checked>
+              <input id="phaseAnnotationsToggle" type="checkbox" aria-label="Annotations">
               <span>Annotations</span>
             </label>
           </div>
           <canvas id="lightCanvas"></canvas>
           <div class="legend phase-annotation-controls" id="phaseAnnotationControls">
             <div class="annotation-symbol-legend" id="phaseAnnotationLegendItems" hidden aria-label="Annotation legend">
-              <span class="annotation-symbol-item"><span class="annotation-symbol dot" style="--color:#B884FF"></span>max L</span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol dot small" style="--color:#B884FF"></span>min L</span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol open" style="--color:#8FAEFF"></span>max R</span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol open small" style="--color:#8FAEFF"></span>min R</span>
-              <span class="annotation-symbol-break" aria-hidden="true"></span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol" style="--color:#4DA3FF">×</span>max V</span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol small" style="--color:#FF5F6D">×</span>min V</span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol" style="--color:#FFD166">↑</span>max T</span>
-              <span class="annotation-symbol-item"><span class="annotation-symbol" style="--color:#FFD166">↓</span>min T</span>
+              <span class="annotation-symbol-group">
+                <span class="annotation-symbol-item"><span class="annotation-symbol dot" style="--color:#B884FF"></span>max L</span>
+                <span class="annotation-symbol-item"><span class="annotation-symbol dot small" style="--color:#B884FF"></span>min L</span>
+                <span class="annotation-symbol-item"><span class="annotation-symbol open" style="--color:#8FAEFF"></span>max R</span>
+                <span class="annotation-symbol-item"><span class="annotation-symbol open small" style="--color:#8FAEFF"></span>min R</span>
+              </span>
+              <span class="annotation-symbol-group">
+                <span class="annotation-symbol-item"><span class="annotation-symbol" style="--color:#4DA3FF">×</span>max V</span>
+                <span class="annotation-symbol-item"><span class="annotation-symbol small" style="--color:#FF5F6D">×</span>min V</span>
+                <span class="annotation-symbol-item"><span class="annotation-symbol" style="--color:#FFD166">↑</span>max T</span>
+                <span class="annotation-symbol-item"><span class="annotation-symbol" style="--color:#FFD166">↓</span>min T</span>
+              </span>
             </div>
           </div>
         </div>
@@ -2266,6 +2315,32 @@
             </div>
           </div>
           <canvas id="velocityCanvas"></canvas>
+        </div>
+
+        <div class="plot-panel" data-plot-panel="tpOpacity">
+          <div class="plot-title">
+            <div class="plot-title-left" data-plot-control-home="tpOpacity">
+              <label class="plot-enable-control" data-plot-control="tpOpacity">
+                <input type="checkbox" data-plot-toggle="tpOpacity" checked aria-label="Hide T-P Opacity plot">
+                <span>T-P Opacity</span>
+              </label>
+              <h3>T-P Opacity</h3>
+            </div>
+          </div>
+          <canvas id="tpOpacityCanvas" aria-label="temperature pressure opacity plot"></canvas>
+        </div>
+
+        <div class="plot-panel reference-plot-panel" data-plot-panel="phasePortrait" data-reference-panel="phase">
+          <div class="plot-title">
+            <div class="plot-title-left" data-plot-control-home="phasePortrait">
+              <label class="plot-enable-control" data-plot-control="phasePortrait">
+                <input type="checkbox" data-plot-toggle="phasePortrait" checked aria-label="Hide Thermal-Convection Loop plot">
+                <span>Thermal-Convection Loop</span>
+              </label>
+              <h3>Thermal-Convection Loop</h3>
+            </div>
+          </div>
+          <canvas id="phasePortraitCanvas" aria-label="H of R and U_c of R phase portrait"></canvas>
         </div>
 
         <div class="plot-panel" id="pressurePhasePanel" hidden>
@@ -2309,19 +2384,6 @@
           <div class="legend" id="lumLegend"></div>
         </div>
 
-        <div class="plot-panel" data-plot-panel="tpOpacity">
-          <div class="plot-title">
-            <div class="plot-title-left" data-plot-control-home="tpOpacity">
-              <label class="plot-enable-control" data-plot-control="tpOpacity">
-                <input type="checkbox" data-plot-toggle="tpOpacity" checked aria-label="Hide T-P Opacity plot">
-                <span>T-P Opacity</span>
-              </label>
-              <h3>T-P Opacity</h3>
-            </div>
-          </div>
-          <canvas id="tpOpacityCanvas" aria-label="temperature pressure opacity plot"></canvas>
-        </div>
-
         <div class="plot-panel reference-plot-panel" data-plot-panel="stability" data-reference-panel="stability">
           <div class="plot-title">
             <div class="plot-title-left" data-plot-control-home="stability">
@@ -2346,19 +2408,6 @@
             </div>
           </div>
           <canvas id="cepheidGuideCanvas" aria-label="instability strip"></canvas>
-        </div>
-
-        <div class="plot-panel reference-plot-panel" data-plot-panel="phasePortrait" data-reference-panel="phase">
-          <div class="plot-title">
-            <div class="plot-title-left" data-plot-control-home="phasePortrait">
-              <label class="plot-enable-control" data-plot-control="phasePortrait">
-                <input type="checkbox" data-plot-toggle="phasePortrait" checked aria-label="Hide Thermal-Convection Loop plot">
-                <span>Thermal-Convection Loop</span>
-              </label>
-              <h3>Thermal-Convection Loop</h3>
-            </div>
-          </div>
-          <canvas id="phasePortraitCanvas" aria-label="H of R and U_c of R phase portrait"></canvas>
         </div>
 
       </section>
@@ -2470,7 +2519,7 @@
           </p>
         </div>
 
-        <details class="content-panel derivation-panel" id="derivationPanel" open>
+        <details class="content-panel derivation-panel" id="derivationPanel">
           <summary><h3>Derivation</h3></summary>
           <div class="derivation-content" id="derivationContent"></div>
         </details>
