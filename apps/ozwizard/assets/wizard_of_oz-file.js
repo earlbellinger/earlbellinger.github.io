@@ -1328,6 +1328,11 @@
       message: selection.kind === "damping_decade" ? "time window: last damping decade" : selection.kind === "partial_damping" ? "time window: partial damping window" : selection.kind === "growth_decade" ? "time window: runaway growth decade" : selection.kind === "partial_growth" ? "time window: partial runaway growth" : message
     };
   }
+  function shouldUseRunawayGrowthWindow(rows, phase) {
+    if (phase.reason === "ok") return false;
+    const selection = terminalTimeWindowSelection(rows, "runaway");
+    return selection.kind === "growth_decade" || selection.kind === "partial_growth";
+  }
   function terminalTimeWindowSelection(rows, reason) {
     const finiteRows = rows.filter((row) => Number.isFinite(row.tau));
     if (finiteRows.length <= 2) return { rows: [...finiteRows], kind: "terminal" };
@@ -7969,6 +7974,13 @@
     if (gridState.enabled) return buildPhaseDisplayWindow(phase, phaseMessage);
     if (isTimeWindowReason(latestResult.message)) {
       return buildTimeDisplayWindow(rows, latestResult.message, timeWindowMessage(latestResult.message));
+    }
+    if (!gridState.enabled && phase.reason !== "ok") {
+      if (stability.allStable) {
+        return buildTimeDisplayWindow(rows, "equilibrium", phaseMessage ?? "time window: phase unavailable");
+      }
+      const message = shouldUseRunawayGrowthWindow(rows, phase) ? "time window: runaway growth" : "time window: unstable trend";
+      return buildTimeDisplayWindow(rows, "runaway", message);
     }
     if (!gridState.enabled && shouldUseStableDampingTimeWindow(phase, stability)) {
       return buildTimeDisplayWindow(rows, "equilibrium", "time window: stable damping");
