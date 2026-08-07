@@ -44,6 +44,7 @@ test-results/
 
 # Unreleased/internal red-clump volume sidecars
 /public/data/xmc-red-clump-volume*.json*
+/public/data/oden-author-red-clump-volume-v1.json*
 
 # Bulky scientific/archive formats
 *.fits

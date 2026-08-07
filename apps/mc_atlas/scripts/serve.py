@@ -9,10 +9,7 @@ from urllib.parse import unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ATLAS_URL_PATH = "/public/data/magellanic-clouds.json"
-ATLAS_JSON = ROOT / "public" / "data" / "magellanic-clouds.json"
-ATLAS_BR = ROOT / "public" / "data" / "magellanic-clouds.json.br"
-ATLAS_GZIP = ROOT / "public" / "data" / "magellanic-clouds.json.gz"
+PUBLIC_DATA_DIR = (ROOT / "public" / "data").resolve()
 
 
 def accepts_encoding(header: str, coding: str) -> bool:
@@ -37,17 +34,27 @@ def accepts_encoding(header: str, coding: str) -> bool:
 class CompressedAtlasHandler(SimpleHTTPRequestHandler):
     def send_head(self):
         request_path = posixpath.normpath(unquote(urlsplit(self.path).path))
-        if request_path == ATLAS_URL_PATH:
+        if request_path.startswith("/public/data/") and request_path.endswith(".json"):
+            identity_path = (ROOT / request_path.lstrip("/")).resolve()
+            try:
+                identity_path.relative_to(PUBLIC_DATA_DIR)
+            except ValueError:
+                return super().send_head()
+            if not identity_path.exists():
+                return super().send_head()
+
             accept_encoding = self.headers.get("Accept-Encoding", "")
-            if accepts_encoding(accept_encoding, "br") and ATLAS_BR.exists():
-                return self.send_atlas_variant(ATLAS_BR, "br")
-            if accepts_encoding(accept_encoding, "gzip") and ATLAS_GZIP.exists():
-                return self.send_atlas_variant(ATLAS_GZIP, "gzip")
-            return self.send_atlas_variant(ATLAS_JSON, None)
+            brotli_path = identity_path.with_suffix(identity_path.suffix + ".br")
+            gzip_path = identity_path.with_suffix(identity_path.suffix + ".gz")
+            if accepts_encoding(accept_encoding, "br") and brotli_path.exists():
+                return self.send_json_variant(brotli_path, "br", identity_path)
+            if accepts_encoding(accept_encoding, "gzip") and gzip_path.exists():
+                return self.send_json_variant(gzip_path, "gzip", identity_path)
+            return self.send_json_variant(identity_path, None, identity_path)
 
         return super().send_head()
 
-    def send_atlas_variant(self, path: Path, content_encoding: str | None):
+    def send_json_variant(self, path: Path, content_encoding: str | None, identity_path: Path):
         try:
             stat = path.stat()
         except OSError:
@@ -61,8 +68,7 @@ class CompressedAtlasHandler(SimpleHTTPRequestHandler):
         self.send_header("Vary", "Accept-Encoding")
         if content_encoding:
             self.send_header("Content-Encoding", content_encoding)
-            if ATLAS_JSON.exists():
-                self.send_header("X-Uncompressed-Content-Length", str(ATLAS_JSON.stat().st_size))
+            self.send_header("X-Uncompressed-Content-Length", str(identity_path.stat().st_size))
         self.end_headers()
 
         if self.command == "HEAD":
@@ -78,7 +84,7 @@ def main() -> None:
     handler = functools.partial(CompressedAtlasHandler, directory=str(ROOT))
     server = ThreadingHTTPServer(("", args.port), handler)
     print(f"Serving {ROOT} at http://localhost:{args.port}/")
-    print("Atlas data negotiation: br -> gzip -> identity")
+    print("Public JSON negotiation: br -> gzip -> identity")
     server.serve_forever()
 
 

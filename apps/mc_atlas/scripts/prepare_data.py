@@ -10,6 +10,8 @@ import gzip
 import hashlib
 import os
 import re
+import shutil
+import subprocess
 import tarfile
 import urllib.parse
 import urllib.request
@@ -267,6 +269,7 @@ FOURIER_PCA_POWER_BOUNDS = (0.8, 3.0)
 COLOR_CURVE_CACHE = PROCESSED / "ogle_color_curves.json"
 FIT_DIAGNOSTICS = ROOT / "diagnostics" / "color_fit_quality.json"
 XMC_DENSITY_COUNTS = PROCESSED / "xmc_rc_density_counts.json"
+RED_CLUMP_LAYER_ENV = "MC_ATLAS_INCLUDE_RED_CLUMP_LAYER"
 XMC_DENSITY_SMOOTH_SIGMA_CELLS = 2.4
 XMC_DENSITY_SMOOTH_RADIUS_CELLS = 8
 REDDENING_DIR = RAW / "reddening"
@@ -6778,6 +6781,49 @@ def parse_fits_distance_map(
     return cells
 
 
+def env_flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def include_red_clump_layer() -> bool:
+    return env_flag_enabled(RED_CLUMP_LAYER_ENV)
+
+
+def strip_unpublished_red_clump_layer(payload: dict[str, object]) -> None:
+    datasets = payload.get("datasets")
+    if isinstance(datasets, dict):
+        datasets.pop("redClump", None)
+
+    fields = payload.get("fields")
+    if isinstance(fields, dict):
+        fields.pop("redClump", None)
+
+    counts = payload.get("counts")
+    if isinstance(counts, dict):
+        for key in list(counts):
+            if str(key).startswith("redClump"):
+                counts.pop(key, None)
+
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        meta.pop("redClumpDensityNote", None)
+        meta.pop("redClumpDensitySource", None)
+        generated_from = meta.get("generatedFrom")
+        if isinstance(generated_from, list):
+            meta["generatedFrom"] = [item for item in generated_from if item != "XMC Red Clump Distance Map FITS"]
+
+    sources = payload.get("sources")
+    if isinstance(sources, list):
+        payload["sources"] = [
+            source
+            for source in sources
+            if not (
+                isinstance(source, dict)
+                and source.get("name") == "XMC Red Clump Distance Map of the Magellanic Clouds"
+            )
+        ]
+
+
 def red_clump_density_key(lon: float, lat: float, bin_scale: int = 4) -> tuple[int, int]:
     return (round(lon * bin_scale), round(lat * bin_scale))
 
@@ -7021,6 +7067,20 @@ def compress_brotli(data: bytes) -> bytes | None:
         except ImportError:
             continue
         return brotli_module.compress(data, quality=11)
+    node = shutil.which("node")
+    if node:
+        script = (
+            "const fs=require('node:fs');"
+            "const z=require('node:zlib');"
+            "const input=fs.readFileSync(0);"
+            "const output=z.brotliCompressSync(input,{params:{[z.constants.BROTLI_PARAM_QUALITY]:11}});"
+            "process.stdout.write(output);"
+        )
+        try:
+            result = subprocess.run([node, "-e", script], input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        return result.stdout
     return None
 
 
@@ -7055,9 +7115,13 @@ def main() -> None:
     smc_origin = mean_vector([star for star in catalog if star.location == "SMC"])
     basis = make_basis(origin)
     rows = serialize_catalog(catalog, origin, basis)
-    red_clump = parse_fits_distance_map(RAW / "MC_RC_Distance_Map_Oden25_galactic.fits", origin, basis)
-    red_clump_density_counts, red_clump_density_meta = load_red_clump_density_counts(XMC_DENSITY_COUNTS)
-    red_clump_density_summary = attach_red_clump_density(red_clump, red_clump_density_counts)
+    red_clump: list[list[float]] = []
+    red_clump_density_meta: dict[str, object] | None = None
+    red_clump_density_summary: dict[str, int | float] = {}
+    if include_red_clump_layer():
+        red_clump = parse_fits_distance_map(RAW / "MC_RC_Distance_Map_Oden25_galactic.fits", origin, basis)
+        red_clump_density_counts, red_clump_density_meta = load_red_clump_density_counts(XMC_DENSITY_COUNTS)
+        red_clump_density_summary = attach_red_clump_density(red_clump, red_clump_density_counts)
     perren_clusters = parse_perren_clusters(PERREN_CLUSTER_TABLE, PERREN_ASTECA_TABLE)
     viscacha_clusters = parse_viscacha_clusters(VISCACHA_CLUSTER_TABLE)
     viscacha_counter_bridge_clusters = parse_viscacha_counter_bridge_clusters(VISCACHA_COUNTER_BRIDGE_CLUSTER_TABLE)
@@ -7359,6 +7423,9 @@ def main() -> None:
             },
         ],
     }
+
+    if not include_red_clump_layer():
+        strip_unpublished_red_clump_layer(payload)
 
     apply_eclipsing_binary_distance_anchors(payload, root=ROOT)
 

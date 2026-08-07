@@ -75,6 +75,7 @@ canvas {
   z-index: 1;
   background: transparent;
   pointer-events: none;
+  will-change: filter, opacity;
 }
 
 .catalogCanvas {
@@ -398,28 +399,6 @@ h2 {
 
 .check + .check {
   margin-top: 4px;
-}
-
-.redClumpModeRow {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin: 7px 0 0 29px;
-}
-
-.redClumpModeButton {
-  min-height: 25px;
-  border-radius: 7px;
-  padding: 3px 6px;
-  color: var(--alabaster-grey);
-  font-size: 0.72rem;
-  line-height: 1;
-}
-
-.redClumpModeButton.active {
-  border-color: rgba(252, 163, 17, 0.72);
-  background: rgba(252, 163, 17, 0.15);
-  color: var(--cream);
 }
 
 .check > input[type="checkbox"] {

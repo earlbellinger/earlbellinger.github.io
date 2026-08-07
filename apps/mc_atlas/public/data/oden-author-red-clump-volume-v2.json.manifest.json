@@ -1,0 +1,258 @@
+{
+  "artifact": "oden_author_red_clump_likelihood_volume_build_manifest_v2",
+  "browserSummary": {
+    "densityReferenceLikelihoodStarsPerVoxel": 201.102302,
+    "densityReferenceQuantile": 0.995,
+    "galacticCartesianBoundsKpc": {
+      "x": [
+        -16.75,
+        48.75
+      ],
+      "y": [
+        -68.75,
+        -17.75
+      ],
+      "z": [
+        -75.25,
+        -4.75
+      ]
+    },
+    "serializedLikelihoodCountMax": 555.605591,
+    "serializedLikelihoodCountMedian": 0.122858,
+    "serializedLikelihoodCountP90": 4.556364,
+    "serializedVoxelCount": 429477
+  },
+  "codeVersion": "e332612ee729fa25899a8acdefda282f40a9d703",
+  "configuration": {
+    "antiAliasSigmaVoxels": 0.8,
+    "densityReferenceQuantile": 0.995,
+    "distanceModulusSigmaMag": 0.1,
+    "kernelSampleCount": 31,
+    "kernelSupportSigma": 3.5,
+    "serializationThresholdExpectedStarsPerVoxel": 0.03,
+    "voxelSizeKpc": 0.5
+  },
+  "createdUtc": "2026-08-07T03:34:06+00:00",
+  "gridSummary": {
+    "antiAliasKernel": {
+      "distribution": "isotropic Gaussian on the Cartesian voxel grid",
+      "role": "numerical density-estimator anti-aliasing, not an astrophysical distance error",
+      "sigmaKpc": 0.4,
+      "sigmaVoxels": 0.8
+    },
+    "distanceKernel": {
+      "distribution": "Gaussian in distance modulus",
+      "fractionalSigmaLinearApproximation": 0.0460517,
+      "modulusOffsetsMag": [
+        -0.35,
+        -0.326667,
+        -0.303333,
+        -0.28,
+        -0.256667,
+        -0.233333,
+        -0.21,
+        -0.186667,
+        -0.163333,
+        -0.14,
+        -0.116667,
+        -0.093333,
+        -0.07,
+        -0.046667,
+        -0.023333,
+        0.0,
+        0.023333,
+        0.046667,
+        0.07,
+        0.093333,
+        0.116667,
+        0.14,
+        0.163333,
+        0.186667,
+        0.21,
+        0.233333,
+        0.256667,
+        0.28,
+        0.303333,
+        0.326667,
+        0.35
+      ],
+      "normalizedWeights": [
+        0.0001018632,
+        0.0004486406,
+        0.0009356319,
+        0.0018478492,
+        0.0034560748,
+        0.0061214571,
+        0.0102678985,
+        0.0163103546,
+        0.0245358052,
+        0.0349536318,
+        0.0471562625,
+        0.0602478461,
+        0.0728951697,
+        0.083523956,
+        0.0906313478,
+        0.0931324224,
+        0.0906313478,
+        0.083523956,
+        0.0728951697,
+        0.0602478461,
+        0.0471562625,
+        0.0349536318,
+        0.0245358052,
+        0.0163103546,
+        0.0102678985,
+        0.0061214571,
+        0.0034560748,
+        0.0018478492,
+        0.0009356319,
+        0.0004486406,
+        0.0001018632
+      ],
+      "sampleCount": 31,
+      "sigmaMag": 0.1,
+      "supportSigma": 3.5
+    },
+    "gridOriginIndex": [
+      -43,
+      -169,
+      -190
+    ],
+    "pointGridMass": 2349340,
+    "postAntiAliasLikelihoodMass": 2349340.024616902,
+    "postAntiAliasLikelihoodMassBeforeNormalization": 2349340.024616902,
+    "preAntiAliasLikelihoodMass": 2349340.023477232,
+    "voxelGridShape": [
+      171,
+      142,
+      186
+    ],
+    "voxelSizeKpc": 0.5
+  },
+  "outputs": {
+    "brotli": {
+      "bytes": 2534914,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\public\\data\\oden-author-red-clump-volume-v2.json.br",
+      "sha256": "AFA5B16B60C3604DC4E5EE4B9254E45554B9F12297C89597B4D2669EB7386E50"
+    },
+    "comparisonDiagnostic": {
+      "bytes": 335621,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\diagnostics\\figures\\oden_author_red_clump_likelihood_volume_v2\\point_vs_likelihood_volume.png",
+      "sha256": "0A9C96EB954C8B19DF2B8591AADC331643EA7831BBCCFB356DA540E8304F8405"
+    },
+    "gzip": {
+      "bytes": 3931343,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\public\\data\\oden-author-red-clump-volume-v2.json.gz",
+      "sha256": "4277C5B0656BDDE8A5CAD4467D2EF11671738FEB6D903AF6A8DD96FBC2C1F29C"
+    },
+    "json": {
+      "bytes": 17044653,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\public\\data\\oden-author-red-clump-volume-v2.json",
+      "sha256": "7781240E353916F695814E185BEACA17F9046F1E6F630D847B950696B09CCA18"
+    },
+    "kernelDiagnostic": {
+      "bytes": 287582,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\diagnostics\\figures\\oden_author_red_clump_likelihood_volume_v2\\distance_kernel_sensitivity.png",
+      "sha256": "F655B37C4BE664AB6FC6B2349B361D7F4FB4E0D22E89BE2CCAA29CF0D35A7A9B"
+    },
+    "report": {
+      "bytes": 2826,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\diagnostics\\figures\\oden_author_red_clump_likelihood_volume_v2\\report.md",
+      "sha256": "DDFCC76BF606D76209694D635F4BA7C8712755054C6E3DC39DCFFD94AE58EF8D"
+    },
+    "scienceGrid": {
+      "bytes": 4738724,
+      "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\data\\processed\\rc_publication\\rc_volume_observed_likelihood_v2.npz",
+      "sha256": "E2092C19B63B91529C35E860C35A0006CECCB55CCBE580F6E047CE1336DCFEBB"
+    }
+  },
+  "profiles": {
+    "combined": {
+      "count": 2349340,
+      "maxKpc": 101.442212,
+      "meanKpc": 53.048095,
+      "medianKpc": 51.711856,
+      "minKpc": 30.595455,
+      "p05Kpc": 43.502351,
+      "p16Kpc": 46.624057,
+      "p84Kpc": 59.958481,
+      "p95Kpc": 66.791396,
+      "stdKpc": 7.15823
+    },
+    "lmcOdenStreamSplit": {
+      "count": 1879791,
+      "maxKpc": 83.20415,
+      "meanKpc": 51.169041,
+      "medianKpc": 50.627811,
+      "minKpc": 30.595455,
+      "p05Kpc": 43.186129,
+      "p16Kpc": 46.170743,
+      "p84Kpc": 56.299639,
+      "p95Kpc": 60.944692,
+      "stdKpc": 5.337823
+    },
+    "smcOdenStreamSplit": {
+      "count": 469549,
+      "maxKpc": 101.442212,
+      "meanKpc": 60.570695,
+      "medianKpc": 60.749711,
+      "minKpc": 35.293579,
+      "p05Kpc": 46.218831,
+      "p16Kpc": 51.886315,
+      "p84Kpc": 68.645552,
+      "p95Kpc": 74.47731,
+      "stdKpc": 8.460747
+    }
+  },
+  "scientificStatus": {
+    "atlasReady": true,
+    "label": "uncertainty-convolved observed red-clump distance-likelihood volume",
+    "physicalVolumeFlag": false,
+    "pointEstimatePredecessor": "C:\\Users\\earlb\\Downloads\\mc_atlas\\data\\processed\\legacy\\oden-author-red-clump-point-volume-v1\\oden-author-red-clump-volume-v1.json"
+  },
+  "source": {
+    "bytes": 50605397,
+    "fits": {
+      "member": "mc_rc_parallax_less_strict_small.fits",
+      "memberBytes": 56393280,
+      "memberCompressedBytes": 50604553,
+      "memberCrc32": "D082287C",
+      "memberSha256": "EDA13A7C621AE2AFB6F8A61487DE493B1FFC73E5C9D469AB6B899E6DDC1C5113",
+      "rowCount": 2349340,
+      "schema": [
+        {
+          "format": "D",
+          "name": "ra",
+          "unit": "deg"
+        },
+        {
+          "format": "D",
+          "name": "dec",
+          "unit": "deg"
+        },
+        {
+          "format": "D",
+          "name": "distance",
+          "unit": "kpc"
+        }
+      ]
+    },
+    "path": "C:\\Users\\earlb\\Downloads\\mc_atlas\\data\\raw\\mc_rc_parallax_less_strict_small.fits.zip",
+    "sha256": "6948CAD5CCA1C6DCD98C0BE059409517A7F80D687095D1CDCA4CB8282F51D9D3"
+  },
+  "validation": {
+    "evaluationMassFraction": 0.999998,
+    "fullGridBridgeLikelihoodMass": 190.726437,
+    "likelihoodCombinedMedianKpc": 51.881475,
+    "likelihoodLmcMedianKpc": 50.701948,
+    "likelihoodSmcMedianKpc": 60.631572,
+    "serializedBridgeLikelihoodMass": 173.859319,
+    "serializedLikelihoodMass": 2345335.571584,
+    "serializedMassFraction": 0.9982954987,
+    "serializedVoxelCount": 429477,
+    "sourceBridgeCount": 179,
+    "sourceCombinedMedianKpc": 51.711856,
+    "sourceLmcMedianKpc": 50.627811,
+    "sourceSmcMedianKpc": 60.749711
+  }
+}

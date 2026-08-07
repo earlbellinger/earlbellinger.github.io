@@ -1,8 +1,8 @@
-const DATA_VERSION = "20260515-rrlyrae-labels";
+const DATA_VERSION = "20260807-oden-author-rc-volume-v10";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
-const RED_CLUMP_VOLUME_DATA_URL = `./public/data/xmc-red-clump-volume-full-ruiz-dern-photometric.json?v=${DATA_VERSION}`;
-// Keep the unpublished RC volume analysis dormant for release; flip on when the UI returns.
-const RED_CLUMP_VOLUME_ANALYSIS_ENABLED = false;
+const RED_CLUMP_VOLUME_DATA_URL = `./public/data/oden-author-red-clump-volume-v2.json?v=${DATA_VERSION}`;
+const RED_CLUMP_LAYER_ENABLED = true;
+const RED_CLUMP_VOLUME_ANALYSIS_ENABLED = true;
 const LOADING_PROGRESS = {
   requestStart: 0.02,
   dataDownloadDone: 0.46,
@@ -155,11 +155,7 @@ const RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS = 7;
 const RED_CLUMP_SOURCE_STAR_COUNT_LABEL = "2.3M";
 const RED_CLUMP_RENDER_MODE_SURFACE = "surface";
 const RED_CLUMP_RENDER_MODE_VOLUME = "volume";
-const RED_CLUMP_RENDER_MODES = new Set(
-  RED_CLUMP_VOLUME_ANALYSIS_ENABLED
-    ? [RED_CLUMP_RENDER_MODE_SURFACE, RED_CLUMP_RENDER_MODE_VOLUME]
-    : [RED_CLUMP_RENDER_MODE_SURFACE],
-);
+const RED_CLUMP_RENDER_MODES = new Set([RED_CLUMP_RENDER_MODE_VOLUME]);
 const RED_CLUMP_ZOOM_FADE_START = 75;
 const RED_CLUMP_ZOOM_FADE_END = 350;
 // User-facing yaw zero is the observer-side OGLE view.
@@ -466,7 +462,7 @@ const PULSATOR_PRESET_DATASET_KEYS = {
   miras: ["miras"],
 };
 const AUXILIARY_DATASET_PRESET_KEYS = {
-  clusters: ["clusters", "redclump"],
+  clusters: ["clusters"],
   redclump: ["redclump"],
   eb: ["eb"],
 };
@@ -529,8 +525,8 @@ const RED_CLUMP_SURFACE_POINT_FILL = 1;
 const RED_CLUMP_SURFACE_VIEWPORT_MARGIN = 36;
 const RED_CLUMP_DENSITY_ALPHA_FLOOR = 0.075;
 const RED_CLUMP_DENSITY_ALPHA_POWER = 1.65;
-const RED_CLUMP_VOLUME_ALPHA_SCALE = 0.026;
-const RED_CLUMP_VOLUME_ALPHA_MAX = 0.018;
+const RED_CLUMP_VOLUME_ALPHA_SCALE = 0.074;
+const RED_CLUMP_VOLUME_ALPHA_MAX = 0.07;
 const RED_CLUMP_VOLUME_SURFACE_ALPHA_SCALE = 0.13;
 const RED_CLUMP_VOLUME_SURFACE_ALPHA_MAX = 0.18;
 const RED_CLUMP_VOLUME_MAX_SIGMA_OFFSET = 2.7;
@@ -553,7 +549,14 @@ const RED_CLUMP_VOLUME_GRID_ANGULAR_OFFSETS = [
   [0.3, 0.3],
 ];
 const RED_CLUMP_VOLUME_GRID_JITTER = 0.92;
-const RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE = 5.2;
+const RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE = 1.8;
+const RED_CLUMP_VOLUME_SUBVOXEL_JITTER_FRACTION = 0.44;
+const RED_CLUMP_VOLUME_SUBSPLAT_COUNT = 4;
+const RED_CLUMP_VOLUME_SUBSPLAT_RADIUS_FRACTION = 0.5;
+const RED_CLUMP_VOLUME_POINT_SIZE_MAX_PX = 96;
+const RED_CLUMP_VOLUME_RECONSTRUCTION_SIGMA_KPC = 0.1;
+const RED_CLUMP_VOLUME_RECONSTRUCTION_BLUR_MIN_PX = 0.6;
+const RED_CLUMP_VOLUME_RECONSTRUCTION_BLUR_MAX_PX = 10;
 const RED_CLUMP_LMC_CENTER = { lon: 280.47, lat: -32.89 };
 const RED_CLUMP_SMC_CENTER = { lon: 302.8, lat: -44.3 };
 const RED_CLUMP_LMC_PRIOR_DISTANCE_KPC = 50.0;
@@ -1230,7 +1233,7 @@ const state = {
   uncertaintySeed: DEFAULT_UNCERTAINTY_SEED,
   datasetPreset: null,
   pulsatorPreset: null,
-  redClumpMode: RED_CLUMP_RENDER_MODE_SURFACE,
+  redClumpMode: RED_CLUMP_RENDER_MODE_VOLUME,
   datasets: {
     cepheids: true,
     rrlyrae: true,
@@ -1378,6 +1381,11 @@ const scene = {
   redClumpVolume: [],
   redClumpVolumePayload: null,
   redClumpVolumeSeed: DEFAULT_UNCERTAINTY_SEED,
+  redClumpVoxelSizeKpc: RED_CLUMP_VOLUME_GRID_SPACING_KPC,
+  redClumpDisplayJitterFraction: RED_CLUMP_VOLUME_SUBVOXEL_JITTER_FRACTION,
+  redClumpSourceStarCount: 0,
+  redClumpVisibleStarCounts: [],
+  redClumpVolumeBounds: null,
   clusters: [],
   clusterStars: [],
   eclipsingBinaries: [],
@@ -1451,8 +1459,9 @@ scene.catalogStaticCtx = scene.catalogStaticCanvas.getContext("2d");
 scene.catalogStaticRenderer = createCatalogRenderer(catalogCanvas, { preserveDrawingBuffer: true });
 scene.catalogRenderer = scene.catalogStaticRenderer ? createCatalogRenderer(catalogDynamicCanvas) : null;
 if (!scene.catalogRenderer) scene.catalogStaticRenderer = null;
-scene.redClumpRenderer = createRedClumpLayerRenderer(redClumpCanvas);
-scene.redClumpStaticCtx = scene.redClumpRenderer ? null : scene.redClumpStaticCanvas.getContext("2d");
+scene.redClumpRenderer = RED_CLUMP_LAYER_ENABLED ? createRedClumpLayerRenderer(redClumpCanvas) : null;
+scene.redClumpStaticCtx =
+  RED_CLUMP_LAYER_ENABLED && !scene.redClumpRenderer ? scene.redClumpStaticCanvas.getContext("2d") : null;
 
 let renderQueued = false;
 let projectionDirty = true;
@@ -2426,7 +2435,7 @@ async function fetchRedClumpVolumePayload() {
     if (!response.ok) throw new Error(`Volume data request failed with ${response.status}`);
     return await response.json();
   } catch (error) {
-    console.warn("Red clump volume sidecar unavailable; using analytic fallback.", error);
+    console.warn("Oden red-clump volume sidecar unavailable; the RC layer will remain empty.", error);
     return null;
   }
 }
@@ -2453,12 +2462,14 @@ function updatePerfHud({ catalogMs, redClumpMs, animatedCatalog, staticCatalog }
 
   const totalCatalog = perfState.animatedCatalog + perfState.staticCatalog;
   const animatedPercent = totalCatalog > 0 ? (perfState.animatedCatalog / totalCatalog) * 100 : 0;
-  elements.perfHud.classList.remove("hidden");
-  elements.perfHud.replaceChildren(
+  const hudItems = [
     `project ${perfState.projectionMs.toFixed(2)} ms`,
     document.createElement("br"),
-    `red clump ${perfState.redClumpMs.toFixed(2)} ms`,
-    document.createElement("br"),
+  ];
+  if (RED_CLUMP_LAYER_ENABLED) {
+    hudItems.push(`red clump ${perfState.redClumpMs.toFixed(2)} ms`, document.createElement("br"));
+  }
+  hudItems.push(
     `catalog ${perfState.catalogMs.toFixed(2)} ms`,
     document.createElement("br"),
     `renderer ${scene.catalogRenderer && scene.catalogStaticRenderer ? "gpu" : "canvas"}`,
@@ -2469,6 +2480,8 @@ function updatePerfHud({ catalogMs, redClumpMs, animatedCatalog, staticCatalog }
     document.createElement("br"),
     `static ${formatInteger(perfState.staticCatalog)}`,
   );
+  elements.perfHud.classList.remove("hidden");
+  elements.perfHud.replaceChildren(...hudItems);
 }
 
 function formatMultiplierValue(value, digits) {
@@ -2988,13 +3001,15 @@ function skyGridBoundsFromPayload(payload) {
     galacticLatitudes.push(row[EB.galLatDeg]);
   }
 
-  for (const row of payload.datasets.redClump) {
-    const vector = vectorFromLonLat(row[RC.lon], row[RC.lat], 1);
-    const equatorial = equatorialFromGalacticVector(vector);
-    redClumpEquatorialLongitudes.push(equatorial.ra);
-    redClumpEquatorialLatitudes.push(equatorial.dec);
-    galacticLongitudes.push(row[RC.lon]);
-    galacticLatitudes.push(row[RC.lat]);
+  if (RED_CLUMP_LAYER_ENABLED) {
+    for (const row of payload.datasets.redClump || []) {
+      const vector = vectorFromLonLat(row[RC.lon], row[RC.lat], 1);
+      const equatorial = equatorialFromGalacticVector(vector);
+      redClumpEquatorialLongitudes.push(equatorial.ra);
+      redClumpEquatorialLatitudes.push(equatorial.dec);
+      galacticLongitudes.push(row[RC.lon]);
+      galacticLatitudes.push(row[RC.lat]);
+    }
   }
 
   if (equatorialLongitudes.length === 0) {
@@ -3043,9 +3058,25 @@ function rebuildCoordinateCache(reference = activeCoordinateReference()) {
   for (const point of scene.redClump) {
     point.activeCoordinates = coordinatesForReference(point, reference);
   }
+  const redClumpVolumeBounds = {
+    minX: Infinity,
+    maxX: -Infinity,
+    minY: Infinity,
+    maxY: -Infinity,
+    minZ: Infinity,
+    maxZ: -Infinity,
+  };
   for (const point of scene.redClumpVolume) {
     point.activeCoordinates = coordinatesForReference(point, reference);
+    const [x, y, z] = point.activeCoordinates;
+    redClumpVolumeBounds.minX = Math.min(redClumpVolumeBounds.minX, x);
+    redClumpVolumeBounds.maxX = Math.max(redClumpVolumeBounds.maxX, x);
+    redClumpVolumeBounds.minY = Math.min(redClumpVolumeBounds.minY, y);
+    redClumpVolumeBounds.maxY = Math.max(redClumpVolumeBounds.maxY, y);
+    redClumpVolumeBounds.minZ = Math.min(redClumpVolumeBounds.minZ, z);
+    redClumpVolumeBounds.maxZ = Math.max(redClumpVolumeBounds.maxZ, z);
   }
+  scene.redClumpVolumeBounds = Number.isFinite(redClumpVolumeBounds.minX) ? redClumpVolumeBounds : null;
   for (const point of scene.annotationTargets) {
     point.activeCoordinates = coordinatesForReference(point, reference);
   }
@@ -3675,8 +3706,12 @@ function setColorContrast(value) {
 }
 
 function rebuildRedClumpVolumeForSeed(seed) {
-  if (!RED_CLUMP_VOLUME_ANALYSIS_ENABLED || !scene.redClump.length) return;
   const clampedSeed = clampUncertaintySeed(seed);
+  if (Array.isArray(scene.redClumpVolumePayload?.voxels)) {
+    scene.redClumpVolumeSeed = clampedSeed;
+    return;
+  }
+  if (!RED_CLUMP_VOLUME_ANALYSIS_ENABLED || !scene.redClump.length) return;
   scene.redClumpVolume = buildRedClumpVolume(scene.redClump, scene.redClumpVolumePayload, clampedSeed);
   scene.redClumpVolumeSeed = clampedSeed;
   markRedClumpLayerDirty();
@@ -6311,7 +6346,11 @@ function createRedClumpVolumeProgram(gl) {
         ) * visible;
 
         gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
-        gl_PointSize = clamp(u_voxelSize * u_scale * perspective * u_dpr, 4.0 * u_dpr, 72.0 * u_dpr);
+        gl_PointSize = clamp(
+          u_voxelSize * u_scale * perspective * u_dpr,
+          3.0 * u_dpr,
+          ${RED_CLUMP_VOLUME_POINT_SIZE_MAX_PX.toFixed(1)} * u_dpr
+        );
         v_color = vec4(u_color * alpha, alpha);
       }
     `,
@@ -6328,8 +6367,8 @@ function createRedClumpVolumeProgram(gl) {
         vec2 uv = gl_PointCoord * 2.0 - 1.0;
         float radiusSquared = dot(uv, uv);
         if (radiusSquared > 1.0) discard;
-        float core = exp(-radiusSquared * 1.08);
-        float edge = 1.0 - smoothstep(0.78, 1.0, radiusSquared);
+        float core = exp(-radiusSquared * 2.0);
+        float edge = 1.0 - smoothstep(0.82, 1.0, radiusSquared);
         float alpha = core * edge;
         gl_FragColor = vec4(v_color.rgb * alpha, v_color.a * alpha);
       }
@@ -7108,21 +7147,26 @@ function createRedClumpLayerRenderer(canvasElement) {
     },
     updateRedClumpVolumeBuffer(volumeSource = redClumpRenderVolumeSource()) {
       if (!this.redClumpVolumeProgram || !this.redClumpVolumeBuffer) return false;
-      const data = this.ensureRedClumpVolumeCapacity(volumeSource.length);
+      const data = this.ensureRedClumpVolumeCapacity(volumeSource.length * RED_CLUMP_VOLUME_SUBSPLAT_COUNT);
+      const subsplatRadiusKpc = redClumpVoxelSizeKpc() * RED_CLUMP_VOLUME_SUBSPLAT_RADIUS_FRACTION;
       let offset = 0;
       let count = 0;
-      for (const vertex of volumeSource) {
+      for (let sourceIndex = 0; sourceIndex < volumeSource.length; sourceIndex += 1) {
+        const vertex = volumeSource[sourceIndex];
         const coordinates = vertex.activeCoordinates || coordinatesForPoint(vertex);
         if (!coordinates) continue;
-        data[offset] = coordinates[0];
-        data[offset + 1] = coordinates[1];
-        data[offset + 2] = coordinates[2];
-        data[offset + 3] = vertex.edgeAlpha;
-        data[offset + 4] = vertex.densityAlpha;
-        data[offset + 5] = vertex.sample;
-        data[offset + 6] = vertex.weight;
-        offset += RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS;
-        count += 1;
+        const subsplatOffsets = redClumpVolumeSubvoxelOffsets(sourceIndex, subsplatRadiusKpc);
+        for (const subsplatOffset of subsplatOffsets) {
+          data[offset] = coordinates[0] + subsplatOffset[0];
+          data[offset + 1] = coordinates[1] + subsplatOffset[1];
+          data[offset + 2] = coordinates[2] + subsplatOffset[2];
+          data[offset + 3] = vertex.edgeAlpha;
+          data[offset + 4] = vertex.densityAlpha;
+          data[offset + 5] = vertex.sample;
+          data[offset + 6] = vertex.weight / RED_CLUMP_VOLUME_SUBSPLAT_COUNT;
+          offset += RED_CLUMP_VOLUME_GPU_VERTEX_FLOATS;
+          count += 1;
+        }
       }
       this.redClumpVolumeCount = count;
       this.redClumpVolumeSourceCount = volumeSource.length;
@@ -7238,7 +7282,7 @@ function createRedClumpLayerRenderer(canvasElement) {
       this.gl.uniform1f(this.redClumpVolumeUniforms.dpr, scene.dpr);
       this.gl.uniform1f(
         this.redClumpVolumeUniforms.voxelSize,
-        RED_CLUMP_VOLUME_GRID_SPACING_KPC * RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE,
+        redClumpVoxelSizeKpc() * RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE,
       );
       this.gl.uniform1f(this.redClumpVolumeUniforms.alphaScale, RED_CLUMP_VOLUME_ALPHA_SCALE);
       this.gl.uniform1f(this.redClumpVolumeUniforms.alphaMax, RED_CLUMP_VOLUME_ALPHA_MAX);
@@ -7460,6 +7504,7 @@ function updateSceneLayout() {
   scene.centerX = base.centerX + state.panX;
   scene.centerY = base.centerY + state.panY;
   scene.scale = base.scale;
+  updateRedClumpReconstructionFilter();
   updateScaleBar();
 }
 
@@ -7978,7 +8023,7 @@ function isCatalogVisible(point) {
 }
 
 function isRedClumpVisible(point) {
-  return state.datasets.redclump && point.sample <= state.density;
+  return RED_CLUMP_LAYER_ENABLED && state.datasets.redclump && point.sample <= state.density;
 }
 
 function isClusterStarVisible(point) {
@@ -8138,6 +8183,22 @@ function updateStats(stats, depth) {
   stats.maxDepth = Math.max(stats.maxDepth, depth);
 }
 
+function projectedDepthBounds(bounds, transform) {
+  if (!bounds) return null;
+  let minDepth = Infinity;
+  let maxDepth = -Infinity;
+  for (const x of [bounds.minX, bounds.maxX]) {
+    for (const y of [bounds.minY, bounds.maxY]) {
+      for (const z of [bounds.minZ, bounds.maxZ]) {
+        const depth = projectOffsetWithTransform(x, y, z, transform).z;
+        minDepth = Math.min(minDepth, depth);
+        maxDepth = Math.max(maxDepth, depth);
+      }
+    }
+  }
+  return { minDepth, maxDepth };
+}
+
 function markProjectionDirty() {
   if (state.cameraLocked && state.cameraFollowsLockedTarget && state.locked) {
     updateSceneLayout();
@@ -8149,7 +8210,17 @@ function markProjectionDirty() {
 
 function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
   const projectionStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
+  const projectionTransform = makeProjectionTransform();
   const redStats = resetStats(scene.cachedStats.redClump);
+  if (redClumpVolumeEnabled() && state.datasets.redclump) {
+    const densityIndex = Math.trunc(clamp(state.density, 0, 100));
+    redStats.count = scene.redClumpVisibleStarCounts[densityIndex] || 0;
+    const depthBounds = projectedDepthBounds(scene.redClumpVolumeBounds, projectionTransform);
+    if (depthBounds) {
+      redStats.minDepth = depthBounds.minDepth;
+      redStats.maxDepth = depthBounds.maxDepth;
+    }
+  }
   const catalogStats = resetStats(scene.cachedStats.catalog);
   const ebStats = resetStats(scene.cachedStats.eclipsingBinaries);
   const redClumpDrawList = scene.redClumpDrawList;
@@ -8158,7 +8229,6 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
   const clusterTargetDrawList = scene.clusterTargetDrawList;
   const eclipsingBinaryDrawList = scene.eclipsingBinaryDrawList;
   const clusterStarRenderList = scene.activeClusterStarRenderList;
-  const projectionTransform = makeProjectionTransform();
   const redClumpProjectsInShader = Boolean(scene.redClumpRenderer?.projectsInShader);
   const clusterStarsProjectInShader = Boolean(scene.catalogStaticRenderer?.projectsClusterStarsInShader);
   const fastCatalogProjection = !forceCatalogProjection && catalogCanUseFastProjectionCache();
@@ -8192,7 +8262,7 @@ function rebuildProjectionCache({ forceCatalogProjection = false } = {}) {
   rebuildCoordinateCache();
   let clusterStarRenderBudgetRemaining = CLUSTER_STAR_RENDER_GLOBAL_BUDGET;
 
-  if (state.datasets.redclump) {
+  if (RED_CLUMP_LAYER_ENABLED && state.datasets.redclump) {
     for (const point of scene.activeRedClump) {
       const coordinates = point.activeCoordinates || coordinatesForPoint(point);
       const projected = project(point.projected, coordinates[0], coordinates[1], coordinates[2]);
@@ -9325,6 +9395,7 @@ function drawClusterGlows() {
 }
 
 function drawRedClumpGpu() {
+  if (!RED_CLUMP_LAYER_ENABLED) return false;
   const renderer = scene.redClumpRenderer;
   if (!renderer) return false;
 
@@ -9332,7 +9403,7 @@ function drawRedClumpGpu() {
 }
 
 function redClumpRenderVolumeSource() {
-  return RED_CLUMP_VOLUME_ANALYSIS_ENABLED ? scene.redClumpVolume : [];
+  return RED_CLUMP_LAYER_ENABLED && RED_CLUMP_VOLUME_ANALYSIS_ENABLED ? scene.redClumpVolume : [];
 }
 
 function redClumpRenderVolumeVertexCount() {
@@ -9371,28 +9442,40 @@ function drawRedClumpSurfaceToContext(context) {
     context.globalCompositeOperation = "source-over";
     const transform = makeProjectionTransform();
     const exposure = Math.max(0.02, redClumpRenderExposureValue() * 0.72);
-    const voxelRadiusKpc = RED_CLUMP_VOLUME_GRID_SPACING_KPC * RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE * 0.5;
+    const voxelRadiusKpc = redClumpVoxelSizeKpc() * RED_CLUMP_VOLUME_VOXEL_SCREEN_SCALE * 0.5;
 
-    for (const voxel of redClumpRenderVolumeSource()) {
+    const volumeSource = redClumpRenderVolumeSource();
+    const subsplatRadiusKpc = redClumpVoxelSizeKpc() * RED_CLUMP_VOLUME_SUBSPLAT_RADIUS_FRACTION;
+    for (let index = 0; index < volumeSource.length; index += 1) {
+      const voxel = volumeSource[index];
       if (voxel.sample > state.density) continue;
       const coordinates = voxel.activeCoordinates || coordinatesForPoint(voxel);
-      const projected = projectOffsetWithTransform(coordinates[0], coordinates[1], coordinates[2], transform);
-      projected.x += scene.centerX;
-      projected.y += scene.centerY;
-      const radius = clamp(voxelRadiusKpc * transform.scale * projected.perspective, 1.2, 30);
-      if (!withinViewport(projected, radius + 6)) continue;
       const alpha = clamp(
-        exposure * RED_CLUMP_VOLUME_ALPHA_SCALE * voxel.edgeAlpha * voxel.densityAlpha * voxel.weight,
+        (exposure * RED_CLUMP_VOLUME_ALPHA_SCALE * voxel.edgeAlpha * voxel.densityAlpha * voxel.weight) /
+          RED_CLUMP_VOLUME_SUBSPLAT_COUNT,
         0,
         RED_CLUMP_VOLUME_ALPHA_MAX,
       );
-      if (alpha <= 0.001) continue;
-      const gradient = context.createRadialGradient(projected.x, projected.y, 0, projected.x, projected.y, radius);
-      gradient.addColorStop(0, rgbaFromRgb(color, alpha));
-      gradient.addColorStop(0.72, rgbaFromRgb(color, alpha * 0.42));
-      gradient.addColorStop(1, rgbaFromRgb(color, 0));
-      context.fillStyle = gradient;
-      drawDiscOnContext(context, projected.x, projected.y, radius);
+      if (alpha <= 0.0005) continue;
+      for (const subsplatOffset of redClumpVolumeSubvoxelOffsets(index, subsplatRadiusKpc)) {
+        const projected = projectOffsetWithTransform(
+          coordinates[0] + subsplatOffset[0],
+          coordinates[1] + subsplatOffset[1],
+          coordinates[2] + subsplatOffset[2],
+          transform,
+        );
+        projected.x += scene.centerX;
+        projected.y += scene.centerY;
+        const radius = clamp(voxelRadiusKpc * transform.scale * projected.perspective, 1.2, 30);
+        if (!withinViewport(projected, radius + 6)) continue;
+        const gradient = context.createRadialGradient(projected.x, projected.y, 0, projected.x, projected.y, radius);
+        gradient.addColorStop(0, rgbaFromRgb(color, alpha));
+        gradient.addColorStop(0.45, rgbaFromRgb(color, alpha * 0.5));
+        gradient.addColorStop(0.78, rgbaFromRgb(color, alpha * 0.1));
+        gradient.addColorStop(1, rgbaFromRgb(color, 0));
+        context.fillStyle = gradient;
+        drawDiscOnContext(context, projected.x, projected.y, radius);
+      }
     }
   } else {
     context.globalCompositeOperation = "source-over";
@@ -9445,6 +9528,16 @@ function setRedClumpLayerOpacity(opacity) {
   redClumpCanvas.style.opacity = String(clamp(opacity, 0, 1));
 }
 
+function updateRedClumpReconstructionFilter() {
+  if (!redClumpCanvas) return;
+  const sigmaPx = clamp(
+    scene.scale * RED_CLUMP_VOLUME_RECONSTRUCTION_SIGMA_KPC,
+    RED_CLUMP_VOLUME_RECONSTRUCTION_BLUR_MIN_PX,
+    RED_CLUMP_VOLUME_RECONSTRUCTION_BLUR_MAX_PX,
+  );
+  redClumpCanvas.style.filter = `blur(${sigmaPx.toFixed(2)}px)`;
+}
+
 function drawRedClumpStaticLayer(opacity = 1) {
   if (scene.redClumpStaticCanvas === redClumpCanvas) return;
   if (scene.redClumpStaticCanvas.width <= 0 || scene.redClumpStaticCanvas.height <= 0) return;
@@ -9455,10 +9548,7 @@ function drawRedClumpStaticLayer(opacity = 1) {
 }
 
 function drawRedClump(forceDirect = false) {
-  const redClumpStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
-  const zoomFade = redClumpZoomFade();
-  setRedClumpLayerOpacity(zoomFade);
-  if (!state.datasets.redclump) {
+  if (!RED_CLUMP_LAYER_ENABLED || !state.datasets.redclump || redClumpSurfaceRenderCount() === 0) {
     if (scene.redClumpStaticSignature !== "disabled") {
       clearRedClumpStaticCanvas();
       scene.redClumpStaticSignature = "disabled";
@@ -9466,6 +9556,10 @@ function drawRedClump(forceDirect = false) {
     }
     return scene.cachedStats.redClump;
   }
+
+  const redClumpStartMs = PERF_HUD_ENABLED ? performance.now() : 0;
+  const zoomFade = redClumpZoomFade();
+  setRedClumpLayerOpacity(zoomFade);
 
   const signature = redClumpStaticSignature();
   if (forceDirect) {
@@ -11851,7 +11945,7 @@ function resetAppState() {
   state.uncertaintySeed = DEFAULT_UNCERTAINTY_SEED;
   state.datasetPreset = null;
   state.pulsatorPreset = null;
-  state.redClumpMode = RED_CLUMP_RENDER_MODE_SURFACE;
+  state.redClumpMode = RED_CLUMP_RENDER_MODE_VOLUME;
   state.datasets = {
     cepheids: true,
     rrlyrae: true,
@@ -14239,7 +14333,13 @@ function buildLegend() {
 
 function buildSources() {
   elements.sources.replaceChildren();
-  for (const source of scene.payload.sources) {
+  const sources = [...(scene.payload.sources || [])];
+  if (scene.redClumpVolumePayload?.source) sources.push(scene.redClumpVolumePayload.source);
+  const seen = new Set();
+  for (const source of sources) {
+    const sourceKey = `${source.name}|${source.url}`;
+    if (seen.has(sourceKey)) continue;
+    seen.add(sourceKey);
     const link = document.createElement("a");
     link.href = source.url;
     link.target = "_blank";
@@ -14628,6 +14728,117 @@ function depositRedClumpVolumeAnalyticComponents(
       realizationKey: `${point.gridKey}:fallback:${componentIndex}`,
     });
   }
+}
+
+function redClumpVoxelSizeKpc() {
+  return Number.isFinite(scene.redClumpVoxelSizeKpc) && scene.redClumpVoxelSizeKpc > 0
+    ? scene.redClumpVoxelSizeKpc
+    : RED_CLUMP_VOLUME_GRID_SPACING_KPC;
+}
+
+function ditheredRedClumpVoxelVector(galacticVector, voxelSizeKpc, index, jitterFraction) {
+  const halfExtent = voxelSizeKpc * jitterFraction;
+  return galacticVector.map((value, axis) => {
+    const offsetUnit = seededUnit32(`oden-rc-voxel:${index}:${axis}`) * 2 - 1;
+    return value + offsetUnit * halfExtent;
+  });
+}
+
+function redClumpVolumeSubvoxelOffsets(index, radiusKpc) {
+  // A rotated tetrahedron preserves the centroid and isotropic second moment of a uniform voxel.
+  const u1 = seededUnit32(`oden-rc-subsplat:${index}:rotation-1`);
+  const u2 = seededUnit32(`oden-rc-subsplat:${index}:rotation-2`);
+  const u3 = seededUnit32(`oden-rc-subsplat:${index}:rotation-3`);
+  const sqrtOneMinusU1 = Math.sqrt(1 - u1);
+  const sqrtU1 = Math.sqrt(u1);
+  const qx = sqrtOneMinusU1 * Math.sin(Math.PI * 2 * u2);
+  const qy = sqrtOneMinusU1 * Math.cos(Math.PI * 2 * u2);
+  const qz = sqrtU1 * Math.sin(Math.PI * 2 * u3);
+  const qw = sqrtU1 * Math.cos(Math.PI * 2 * u3);
+  const inverseSqrtThree = 1 / Math.sqrt(3);
+  const vertices = [
+    [1, 1, 1],
+    [1, -1, -1],
+    [-1, 1, -1],
+    [-1, -1, 1],
+  ];
+
+  return vertices.map(([xBase, yBase, zBase]) => {
+    const x = xBase * inverseSqrtThree;
+    const y = yBase * inverseSqrtThree;
+    const z = zBase * inverseSqrtThree;
+    const tx = 2 * (qy * z - qz * y);
+    const ty = 2 * (qz * x - qx * z);
+    const tz = 2 * (qx * y - qy * x);
+    return [
+      (x + qw * tx + qy * tz - qz * ty) * radiusKpc,
+      (y + qw * ty + qz * tx - qx * tz) * radiusKpc,
+      (z + qw * tz + qx * ty - qy * tx) * radiusKpc,
+    ];
+  });
+}
+
+async function buildRedClumpVolumeFromVoxelPayload(payload) {
+  const rows = payload?.voxels;
+  const fields = indexFieldsByName(payload?.fields?.voxels);
+  const sourceCountField = Number.isInteger(fields?.sourceStarCount) ? fields.sourceStarCount : fields?.starCount;
+  const likelihoodCountField = Number.isInteger(fields?.likelihoodStarCount)
+    ? fields.likelihoodStarCount
+    : fields?.smoothedStarCount;
+  const requiredIndexes = [
+    fields?.galacticXKpc,
+    fields?.galacticYKpc,
+    fields?.galacticZKpc,
+    sourceCountField,
+    likelihoodCountField,
+    fields?.densityUnit,
+  ];
+  if (!Array.isArray(rows) || !fields || requiredIndexes.some((index) => !Number.isInteger(index))) {
+    throw new Error("Oden RC volume sidecar has an unsupported voxel schema");
+  }
+
+  scene.redClumpVoxelSizeKpc = Number(payload?.meta?.voxelSizeKpc) || RED_CLUMP_VOLUME_GRID_SPACING_KPC;
+  const requestedJitterFraction = Number(payload?.meta?.displayJitterFraction);
+  scene.redClumpDisplayJitterFraction = Number.isFinite(requestedJitterFraction)
+    ? clamp(requestedJitterFraction, 0, 0.49)
+    : RED_CLUMP_VOLUME_SUBVOXEL_JITTER_FRACTION;
+  scene.redClumpSourceStarCount = Number(payload?.meta?.sourceStarCount) || 0;
+  const voxelSizeKpc = scene.redClumpVoxelSizeKpc;
+  const volume = await mapWithLoadingProgress(
+    rows,
+    (row, index) => {
+      const galacticVector = [
+        Number(row[fields.galacticXKpc]),
+        Number(row[fields.galacticYKpc]),
+        Number(row[fields.galacticZKpc]),
+      ];
+      if (galacticVector.some((value) => !Number.isFinite(value))) return null;
+      const displayVector = ditheredRedClumpVoxelVector(
+        galacticVector,
+        voxelSizeKpc,
+        index,
+        scene.redClumpDisplayJitterFraction,
+      );
+      const densityUnit = clamp(Number(row[fields.densityUnit]) || 0, 0, 1);
+      return {
+        kind: "redclumpVolumeVoxel",
+        coordinates: coordinatesFromGalacticVector(displayVector),
+        activeCoordinates: null,
+        edgeAlpha: 1,
+        densityAlpha: densityUnit ** 0.6,
+        weight: 0.35 + 0.65 * Math.sqrt(densityUnit),
+        sample: hashString(`oden-rc-volume-${index}`) % 100,
+        densityCount: Number(row[sourceCountField]) || 0,
+        smoothedDensityCount: Number(row[likelihoodCountField]) || 0,
+      };
+    },
+    {
+      start: LOADING_PROGRESS.binariesDone,
+      end: LOADING_PROGRESS.redClumpVolumeDone,
+      message: "Building red-clump likelihood volume",
+    },
+  );
+  return volume.filter(Boolean);
 }
 
 function buildRedClumpVolume(points, volumePayload = null, seed = DEFAULT_UNCERTAINTY_SEED) {
@@ -15067,46 +15278,22 @@ async function preparePoints(payload, redClumpVolumePayload = null) {
     };
     return point;
   });
-  await advanceLoadingStage("Building red-clump cells", LOADING_PROGRESS.binariesDone);
-  const redClumpRows = payload.datasets.redClump || [];
-  const redClumpEdgeFactors = redClumpEdgeWeights(redClumpRows);
-  scene.redClump = await mapWithLoadingProgress(redClumpRows, (row, index) => {
-    const grid = redClumpGridPosition(row);
-    const projected = { x: 0, y: 0, z: 0, perspective: 1 };
-    const point = {
-      kind: "redclump",
-      row,
-      grid,
-      gridKey: redClumpGridKey(grid.x, grid.y),
-      coordinates: redClumpCoordinates(row),
-      activeCoordinates: null,
-      projected,
-      activeProjected: null,
-      sample: hashString(`rc-${index}`) % 100,
-      edgeAlpha: redClumpEdgeFactors[index],
-      densityAlpha: redClumpDensityAlpha(row[RC.densityUnit]),
-    };
-    point.drawItem = {
-      point,
-      projected,
-      radius: 0,
-      alphaUnit: 0,
-      edgeAlpha: point.edgeAlpha,
-    };
-    return point;
-  }, {
-    start: LOADING_PROGRESS.binariesDone,
-    end: LOADING_PROGRESS.redClumpCellsDone,
-    message: "Building red-clump cells",
-  });
-  await advanceLoadingStage("Building red-clump surface", LOADING_PROGRESS.redClumpCellsDone);
-  smoothRedClumpDensities(scene.redClump);
-  scene.redClumpSurface = buildRedClumpSurface(scene.redClump);
   scene.redClumpVolumeSeed = clampUncertaintySeed(state.uncertaintySeed);
+  scene.redClump = [];
+  scene.redClumpSurface = [];
   scene.redClumpVolume = [];
-  if (RED_CLUMP_VOLUME_ANALYSIS_ENABLED) {
-    await advanceLoadingStage("Building red-clump volume", LOADING_PROGRESS.redClumpSurfaceDone);
-    scene.redClumpVolume = buildRedClumpVolume(scene.redClump, redClumpVolumePayload, scene.redClumpVolumeSeed);
+  scene.redClumpVoxelSizeKpc = RED_CLUMP_VOLUME_GRID_SPACING_KPC;
+  scene.redClumpSourceStarCount = 0;
+  scene.redClumpVisibleStarCounts = [];
+  scene.redClumpVolumeBounds = null;
+  if (RED_CLUMP_LAYER_ENABLED && RED_CLUMP_VOLUME_ANALYSIS_ENABLED && redClumpVolumePayload) {
+    scene.redClumpVolume = await buildRedClumpVolumeFromVoxelPayload(redClumpVolumePayload);
+    const sampleCounts = new Array(101).fill(0);
+    for (const voxel of scene.redClumpVolume) {
+      sampleCounts[Math.trunc(clamp(voxel.sample, 0, 100))] += voxel.densityCount;
+    }
+    for (let index = 1; index < sampleCounts.length; index += 1) sampleCounts[index] += sampleCounts[index - 1];
+    scene.redClumpVisibleStarCounts = sampleCounts;
   }
   if (state.uncertaintySeed !== DEFAULT_UNCERTAINTY_SEED) {
     applyUncertaintyRealization({ updateTarget: false });
@@ -15123,7 +15310,17 @@ async function preparePoints(payload, redClumpVolumePayload = null) {
     outputs.miraCount.textContent = formatInteger(payload.counts.miras || 0);
   }
   if (outputs.rcCount) {
-    outputs.rcCount.textContent = RED_CLUMP_SOURCE_STAR_COUNT_LABEL;
+    const sourceCount = scene.redClumpSourceStarCount;
+    outputs.rcCount.textContent = sourceCount
+      ? sourceCount >= 1000000
+        ? `${(sourceCount / 1000000).toFixed(1)}M`
+        : formatInteger(sourceCount)
+      : RED_CLUMP_SOURCE_STAR_COUNT_LABEL;
+    if (sourceCount) {
+      const exactCountLabel = `${formatInteger(sourceCount)} red clump stars`;
+      outputs.rcCount.title = exactCountLabel;
+      outputs.rcCount.setAttribute("aria-label", exactCountLabel);
+    }
   }
   if (outputs.clusterCount) {
     outputs.clusterCount.textContent = formatInteger(payload.counts.clusters || 0);
