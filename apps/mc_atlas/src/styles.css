@@ -895,8 +895,89 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.mobileTargetPreview {
+.lowerLeftHud {
+  position: fixed;
+  right: 390px;
+  bottom: 18px;
+  left: 22px;
+  z-index: 4;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  pointer-events: none;
+}
+
+.targetPreview {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 248px;
+  max-width: 100%;
+  border: 1px solid rgba(229, 229, 229, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 14, 27, 0.78);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.42);
+  padding: 8px;
+  pointer-events: none;
+  backdrop-filter: blur(14px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.targetPreview[hidden] {
   display: none;
+}
+
+.targetPreviewName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cream);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targetPreviewPlot {
+  display: grid;
+  min-width: 0;
+}
+
+.targetPreviewLink {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.targetPreview .lightcurveInset {
+  width: min(214px, 100%);
+  background: rgba(8, 14, 27, 0.56);
+  padding: 4px;
+}
+
+.targetPreview .lightcurveInset.miraLightcurveInset {
+  width: min(232px, 100%);
+}
+
+.targetPreview .lightcurveInset svg {
+  height: 58px;
+}
+
+.targetPreview .lightcurveInset.miraLightcurveInset svg {
+  height: 62px;
+}
+
+.targetPreview .clusterHrDiagram {
+  width: min(232px, 100%);
+  margin-top: 0;
+  background: rgba(8, 14, 27, 0.56);
+  padding: 4px;
 }
 
 .target dd.withLightcurve {
@@ -1037,14 +1118,13 @@ h2 {
 }
 
 .coordinateHud {
-  position: fixed;
-  left: 22px;
-  right: 390px;
-  bottom: 18px;
-  z-index: 2;
+  position: static;
+  z-index: 1;
   display: grid;
   gap: 6px;
   align-items: start;
+  width: 100%;
+  pointer-events: auto;
 }
 
 .coordinateDock {
@@ -1675,81 +1755,20 @@ h2 {
     transform: translateY(-8px);
   }
 
-  .mobileTargetPreview {
+  .targetPreview {
     position: fixed;
+    right: auto;
     bottom: max(12px, env(safe-area-inset-bottom));
     left: max(12px, env(safe-area-inset-left));
     z-index: 5;
-    display: grid;
-    gap: 6px;
-    box-sizing: border-box;
     max-width: min(248px, calc(100vw - 90px));
-    border: 1px solid rgba(229, 229, 229, 0.18);
-    border-radius: 8px;
-    background: rgba(8, 14, 27, 0.78);
-    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.42);
-    padding: 8px;
-    pointer-events: none;
-    backdrop-filter: blur(14px);
-    transition:
-      opacity 160ms ease,
-      transform 160ms ease;
   }
 
-  .mobileTargetPreview[hidden] {
-    display: none;
-  }
-
-  .mobileTargetPreviewName {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--cream);
-    font-size: 0.78rem;
-    font-weight: 800;
-    line-height: 1.15;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .mobileTargetPreviewPlot {
-    display: grid;
-    min-width: 0;
-  }
-
-  .mobileTargetPreviewLink {
-    display: block;
-    color: inherit;
-    text-decoration: none;
-    pointer-events: auto;
-    touch-action: manipulation;
-  }
-
-  .mobileTargetPreview .lightcurveInset {
+  .targetPreview .lightcurveInset {
     width: min(190px, 100%);
-    background: rgba(8, 14, 27, 0.56);
-    padding: 4px;
   }
 
-  .mobileTargetPreview .lightcurveInset.miraLightcurveInset {
-    width: min(232px, 100%);
-  }
-
-  .mobileTargetPreview .lightcurveInset svg {
-    height: 56px;
-  }
-
-  .mobileTargetPreview .lightcurveInset.miraLightcurveInset svg {
-    height: 62px;
-  }
-
-  .mobileTargetPreview .clusterHrDiagram {
-    width: min(232px, 100%);
-    margin-top: 0;
-    background: rgba(8, 14, 27, 0.56);
-    padding: 4px;
-  }
-
-  .mobile-controls-open .mobileTargetPreview {
+  .mobile-controls-open .targetPreview {
     opacity: 0;
     transform: translateY(8px);
   }
@@ -1840,6 +1859,7 @@ h2 {
   }
 
   .coordinateHud {
+    position: fixed;
     top: calc(12px + env(safe-area-inset-top));
     right: 10px;
     bottom: auto;
@@ -1853,6 +1873,11 @@ h2 {
     transition:
       opacity 160ms ease,
       transform 160ms ease;
+  }
+
+  .lowerLeftHud {
+    position: static;
+    display: contents;
   }
 
   .mobile-controls-open .coordinateHud {
@@ -1955,7 +1980,7 @@ h2 {
 .overlays-hidden .coordinateHud,
 .overlays-hidden .mobileControlsToggle,
 .overlays-hidden .mobilePresetToggle,
-.overlays-hidden .mobileTargetPreview,
+.overlays-hidden .targetPreview,
 .overlays-hidden .mobileControlsBackdrop,
 .overlays-hidden .loading:not(.error),
 .overlays-hidden .perfHud {

@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Magellanic Cloud Atlas</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000000'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23e5e5e5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23fca311'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./src/styles.css?v=20260807-oden-author-rc-volume-v10" />
+    <link rel="stylesheet" href="./src/styles.css?v=20260807-target-lightcurve-lower-left-v1" />
   </head>
   <body>
     <main class="atlas" aria-label="Interactive Magellanic Cloud atlas">
@@ -46,11 +46,6 @@
         </svg>
       </button>
       <button id="mobileControlsBackdrop" class="mobileControlsBackdrop" type="button" aria-label="Close atlas controls" hidden></button>
-      <div id="mobileTargetPreview" class="mobileTargetPreview" aria-live="polite" hidden>
-        <strong id="mobileTargetPreviewName" class="mobileTargetPreviewName"></strong>
-        <div id="mobileTargetPreviewPlot" class="mobileTargetPreviewPlot"></div>
-      </div>
-
       <aside id="atlasControls" class="panel" aria-label="Atlas controls">
         <div class="mobilePanelHeader">
           <span class="mobilePanelTitle">Atlas Controls</span>
@@ -226,36 +221,43 @@
         </section>
       </aside>
 
-      <div class="coordinateHud" aria-label="Coordinate controls">
-        <div class="coordinateDock">
-          <div class="coordinateDockRow">
-            <div class="coordinateDockHeader">Center</div>
-            <div id="coordinateCenterControls" class="coordinateCenterControls coordinateRadioGroup"></div>
-            <div class="coordinateActionRow" aria-label="View options">
-              <button id="faceView" type="button">Face</button>
-              <button id="edgeView" type="button">Edge</button>
-              <button id="annotationToggle" type="button" aria-label="Show atlas-fit wireframes" aria-pressed="false" title="Show atlas-fit wireframes">Wire</button>
-              <button id="featureAnnotationToggle" type="button" aria-label="Show literature feature labels" aria-pressed="false" title="Show literature feature labels">Labels</button>
-            </div>
-          </div>
+      <div class="lowerLeftHud">
+        <div id="targetPreview" class="targetPreview" aria-live="polite" hidden>
+          <strong id="targetPreviewName" class="targetPreviewName"></strong>
+          <div id="targetPreviewPlot" class="targetPreviewPlot"></div>
         </div>
-        <div id="coordinateReadout" class="coordinateReadout">
-          <div class="coordinateSkyRow">
-            <div class="coordinateReadoutGroup">
-              <label class="coordinateGridToggle" title="Show RA/Dec grid lines"><input id="equatorialGrid" data-sky-grid="equatorial" type="checkbox" aria-label="Show RA/Dec grid lines" /><span>ECS</span></label>
-              <span class="skyCoordinate"><b>RA</b><strong>0.000°</strong></span>
-              <span class="skyCoordinate"><b>Dec</b><strong>0.000°</strong></span>
-            </div>
-            <div class="coordinateReadoutGroup">
-              <label class="coordinateGridToggle" title="Show Galactic coordinate grid lines"><input id="galacticGrid" data-sky-grid="galactic" type="checkbox" aria-label="Show Galactic coordinate grid lines" /><span>GCS</span></label>
-              <span class="skyCoordinate"><b>l</b><strong>0.000°</strong></span>
-              <span class="skyCoordinate"><b>b</b><strong>0.000°</strong></span>
+
+        <div class="coordinateHud" aria-label="Coordinate controls">
+          <div class="coordinateDock">
+            <div class="coordinateDockRow">
+              <div class="coordinateDockHeader">Center</div>
+              <div id="coordinateCenterControls" class="coordinateCenterControls coordinateRadioGroup"></div>
+              <div class="coordinateActionRow" aria-label="View options">
+                <button id="faceView" type="button">Face</button>
+                <button id="edgeView" type="button">Edge</button>
+                <button id="annotationToggle" type="button" aria-label="Show atlas-fit wireframes" aria-pressed="false" title="Show atlas-fit wireframes">Wire</button>
+                <button id="featureAnnotationToggle" type="button" aria-label="Show literature feature labels" aria-pressed="false" title="Show literature feature labels">Labels</button>
+              </div>
             </div>
           </div>
-          <div class="coordinateLocalRow">
-            <span class="localCoordinate"><b>x</b> east <strong>0.0 kpc</strong></span>
-            <span class="localCoordinate"><b>y</b> north <strong>0.0 kpc</strong></span>
-            <span class="localCoordinate"><b>d</b> from Sun <strong></strong></span>
+          <div id="coordinateReadout" class="coordinateReadout">
+            <div class="coordinateSkyRow">
+              <div class="coordinateReadoutGroup">
+                <label class="coordinateGridToggle" title="Show RA/Dec grid lines"><input id="equatorialGrid" data-sky-grid="equatorial" type="checkbox" aria-label="Show RA/Dec grid lines" /><span>ECS</span></label>
+                <span class="skyCoordinate"><b>RA</b><strong>0.000°</strong></span>
+                <span class="skyCoordinate"><b>Dec</b><strong>0.000°</strong></span>
+              </div>
+              <div class="coordinateReadoutGroup">
+                <label class="coordinateGridToggle" title="Show Galactic coordinate grid lines"><input id="galacticGrid" data-sky-grid="galactic" type="checkbox" aria-label="Show Galactic coordinate grid lines" /><span>GCS</span></label>
+                <span class="skyCoordinate"><b>l</b><strong>0.000°</strong></span>
+                <span class="skyCoordinate"><b>b</b><strong>0.000°</strong></span>
+              </div>
+            </div>
+            <div class="coordinateLocalRow">
+              <span class="localCoordinate"><b>x</b> east <strong>0.0 kpc</strong></span>
+              <span class="localCoordinate"><b>y</b> north <strong>0.0 kpc</strong></span>
+              <span class="localCoordinate"><b>d</b> from Sun <strong></strong></span>
+            </div>
           </div>
         </div>
       </div>
@@ -277,6 +279,6 @@
       </div>
     </main>
 
-    <script type="module" src="./src/app.js?v=20260807-oden-author-rc-volume-v10"></script>
+    <script type="module" src="./src/app.js?v=20260807-target-lightcurve-overlay-landscape-resize-v1"></script>
   </body>
 </html>

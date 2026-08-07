@@ -1,4 +1,4 @@
-const DATA_VERSION = "20260807-oden-author-rc-volume-v10";
+const DATA_VERSION = "20260807-target-lightcurve-overlay-v1";
 const DATA_URL = `./public/data/magellanic-clouds.json?v=${DATA_VERSION}`;
 const RED_CLUMP_VOLUME_DATA_URL = `./public/data/oden-author-red-clump-volume-v2.json?v=${DATA_VERSION}`;
 const RED_CLUMP_LAYER_ENABLED = true;
@@ -1198,9 +1198,9 @@ const elements = {
   mobileControlsToggle: document.querySelector("#mobileControlsToggle"),
   mobileControlsBackdrop: document.querySelector("#mobileControlsBackdrop"),
   mobileControlsClose: document.querySelector("#mobileControlsClose"),
-  mobileTargetPreview: document.querySelector("#mobileTargetPreview"),
-  mobileTargetPreviewName: document.querySelector("#mobileTargetPreviewName"),
-  mobileTargetPreviewPlot: document.querySelector("#mobileTargetPreviewPlot"),
+  targetPreview: document.querySelector("#targetPreview"),
+  targetPreviewName: document.querySelector("#targetPreviewName"),
+  targetPreviewPlot: document.querySelector("#targetPreviewPlot"),
   mobilePanelHeader: document.querySelector(".mobilePanelHeader"),
   shortcutHelp: document.querySelector("#shortcutHelp"),
   shortcutHelpList: document.querySelector("#shortcutHelpList"),
@@ -1464,6 +1464,9 @@ scene.redClumpStaticCtx =
   RED_CLUMP_LAYER_ENABLED && !scene.redClumpRenderer ? scene.redClumpStaticCanvas.getContext("2d") : null;
 
 let renderQueued = false;
+let canvasResizeFrame = 0;
+let canvasResizeFollowUpFrames = 0;
+let canvasResizeObserver = null;
 let projectionDirty = true;
 let dragging = false;
 let dragStart = null;
@@ -6581,8 +6584,6 @@ function createCatalogRenderer(canvasElement, options = {}) {
       const height = Math.round(scene.height * scene.dpr);
       if (this.canvas.width !== width) this.canvas.width = width;
       if (this.canvas.height !== height) this.canvas.height = height;
-      this.canvas.style.width = `${scene.width}px`;
-      this.canvas.style.height = `${scene.height}px`;
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     },
     disableUnusedAttributes(keepLocations) {
@@ -7107,8 +7108,6 @@ function createRedClumpLayerRenderer(canvasElement) {
       const height = Math.round(scene.height * scene.dpr);
       if (this.canvas.width !== width) this.canvas.width = width;
       if (this.canvas.height !== height) this.canvas.height = height;
-      this.canvas.style.width = `${scene.width}px`;
-      this.canvas.style.height = `${scene.height}px`;
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     },
     clear() {
@@ -7405,8 +7404,6 @@ function resizeRedClumpStaticCanvas() {
     scene.redClumpStaticCanvas.height = canvas.height;
     markRedClumpLayerDirty();
   }
-  scene.redClumpStaticCanvas.style.width = `${scene.width}px`;
-  scene.redClumpStaticCanvas.style.height = `${scene.height}px`;
   if (scene.redClumpRenderer) {
     scene.redClumpRenderer.resize();
     return;
@@ -7437,8 +7434,6 @@ function resizeSelectionCanvas() {
   if (!selectionCanvas || !selectionCtx) return;
   selectionCanvas.width = canvas.width;
   selectionCanvas.height = canvas.height;
-  selectionCanvas.style.width = `${scene.width}px`;
-  selectionCanvas.style.height = `${scene.height}px`;
   selectionCtx.setTransform(scene.dpr, 0, 0, scene.dpr, 0, 0);
 }
 
@@ -7450,13 +7445,13 @@ function clearSelectionOverlay() {
 }
 
 function resizeCanvas() {
-  scene.width = window.innerWidth;
-  scene.height = window.innerHeight;
+  const root = document.documentElement;
+  const bounds = canvas.getBoundingClientRect();
+  scene.width = Math.max(1, Math.round(bounds.width) || root.clientWidth || window.innerWidth || 1);
+  scene.height = Math.max(1, Math.round(bounds.height) || root.clientHeight || window.innerHeight || 1);
   scene.dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(scene.width * scene.dpr);
   canvas.height = Math.round(scene.height * scene.dpr);
-  canvas.style.width = `${scene.width}px`;
-  canvas.style.height = `${scene.height}px`;
   ctx.setTransform(scene.dpr, 0, 0, scene.dpr, 0, 0);
   resizeCatalogStaticCanvas();
   resizeRedClumpStaticCanvas();
@@ -7468,6 +7463,37 @@ function resizeCanvas() {
   if (scene.catalogRenderer) scene.catalogRenderer.resize();
   updateSceneLayout();
   markProjectionDirty();
+}
+
+function runScheduledCanvasResize() {
+  canvasResizeFrame = 0;
+  resizeCanvas();
+  if (canvasResizeFollowUpFrames <= 0) return;
+  canvasResizeFollowUpFrames -= 1;
+  canvasResizeFrame = window.requestAnimationFrame(runScheduledCanvasResize);
+}
+
+function scheduleCanvasResize({ settle = false } = {}) {
+  if (settle) canvasResizeFollowUpFrames = Math.max(canvasResizeFollowUpFrames, 1);
+  if (canvasResizeFrame) return;
+  canvasResizeFrame = window.requestAnimationFrame(runScheduledCanvasResize);
+}
+
+function scheduleSettledCanvasResize() {
+  scheduleCanvasResize({ settle: true });
+}
+
+function bindCanvasResizeEvents() {
+  window.addEventListener("resize", scheduleCanvasResize);
+  window.visualViewport?.addEventListener("resize", scheduleCanvasResize);
+  window.addEventListener("orientationchange", scheduleSettledCanvasResize);
+  window.screen?.orientation?.addEventListener?.("change", scheduleSettledCanvasResize);
+  document.addEventListener("fullscreenchange", scheduleSettledCanvasResize);
+  document.addEventListener("webkitfullscreenchange", scheduleSettledCanvasResize);
+  if (typeof ResizeObserver === "function") {
+    canvasResizeObserver = new ResizeObserver(scheduleCanvasResize);
+    canvasResizeObserver.observe(canvas);
+  }
 }
 
 function baseSceneScaleForZoom(zoom = state.zoom) {
@@ -12518,7 +12544,7 @@ function renderNoTargetState() {
   elements.target.append(strong);
 }
 
-function mobileTargetPreviewName(target) {
+function targetPreviewName(target) {
   if (target?.kind === "catalog") return String(target.row[IDX.id]);
   if (target?.kind === "cluster") return String(target.row[CL.name]);
   if (target?.kind === "eb") return String(target.row[EB.id]);
@@ -12530,41 +12556,41 @@ function mobileTargetPreviewName(target) {
   return "XMC surface cell";
 }
 
-function createMobileTargetPreviewPlot(target) {
-  if (target?.kind === "cluster") return createClusterHrDiagram(target);
+function createTargetPreviewPlot(target) {
+  if (MOBILE_CONTROLS_MEDIA.matches && target?.kind === "cluster") return createClusterHrDiagram(target);
   if (target?.kind === "eb" && target.lightCurve?.samples?.length) return createEclipsingBinaryLightCurveInset(target);
   if (target?.lightCurve?.waveform?.length) {
     const plot = createLightCurveInset(target);
     if (target.kind !== "catalog") return plot;
     const link = document.createElement("a");
-    link.className = "mobileTargetPreviewLink";
+    link.className = "targetPreviewLink";
     link.href = ogleObjectUrl(target.row);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.setAttribute("aria-label", `Open ${mobileTargetPreviewName(target)} in OGLE`);
+    link.setAttribute("aria-label", `Open ${targetPreviewName(target)} in OGLE`);
     link.append(plot);
     return link;
   }
   return null;
 }
 
-function renderMobileTargetPreview(target) {
-  if (!elements.mobileTargetPreview || !elements.mobileTargetPreviewName || !elements.mobileTargetPreviewPlot) return;
+function renderTargetPreview(target) {
+  if (!elements.targetPreview || !elements.targetPreviewName || !elements.targetPreviewPlot) return;
 
-  elements.mobileTargetPreview.hidden = true;
-  elements.mobileTargetPreviewName.textContent = "";
-  elements.mobileTargetPreviewPlot.replaceChildren();
+  elements.targetPreview.hidden = true;
+  elements.targetPreviewName.textContent = "";
+  elements.targetPreviewPlot.replaceChildren();
 
-  if (!MOBILE_CONTROLS_MEDIA.matches || !target || target !== state.locked) return;
+  if (!target || target !== state.locked) return;
 
-  const plot = createMobileTargetPreviewPlot(target);
+  const plot = createTargetPreviewPlot(target);
   if (!plot) return;
 
-  const name = mobileTargetPreviewName(target);
-  elements.mobileTargetPreviewName.textContent = name;
-  elements.mobileTargetPreview.setAttribute("aria-label", `${name} target preview`);
-  elements.mobileTargetPreviewPlot.append(plot);
-  elements.mobileTargetPreview.hidden = false;
+  const name = targetPreviewName(target);
+  elements.targetPreviewName.textContent = name;
+  elements.targetPreview.setAttribute("aria-label", `${name} target preview`);
+  elements.targetPreviewPlot.append(plot);
+  elements.targetPreview.hidden = false;
 }
 
 function handleTargetSearchInput() {
@@ -12700,7 +12726,7 @@ function setTarget(target, { markCatalogDirty = true } = {}) {
   elements.target.replaceChildren();
 
   if (!current) {
-    renderMobileTargetPreview(null);
+    renderTargetPreview(null);
     renderNoTargetState();
     updateCoordinateReadout();
     return;
@@ -12783,12 +12809,17 @@ function setTarget(target, { markCatalogDirty = true } = {}) {
     const dt = document.createElement("dt");
     const dd = document.createElement("dd");
     dt.textContent = label;
-    if (current.kind === "catalog" && label === "Period") {
+    if (MOBILE_CONTROLS_MEDIA.matches && current.kind === "catalog" && label === "Period") {
       const periodValue = document.createElement("span");
       periodValue.textContent = value;
       dd.className = "withLightcurve";
       dd.append(periodValue, createLightCurveInset(current));
-    } else if (current.kind === "eb" && label === "Period" && current.lightCurve?.samples?.length) {
+    } else if (
+      MOBILE_CONTROLS_MEDIA.matches &&
+      current.kind === "eb" &&
+      label === "Period" &&
+      current.lightCurve?.samples?.length
+    ) {
       const periodValue = document.createElement("span");
       periodValue.textContent = value;
       dd.className = "withLightcurve";
@@ -12799,7 +12830,7 @@ function setTarget(target, { markCatalogDirty = true } = {}) {
     dl.append(dt, dd);
   }
   elements.target.append(dl);
-  renderMobileTargetPreview(current);
+  renderTargetPreview(current);
   updateCoordinateReadout();
 }
 
@@ -13911,7 +13942,7 @@ function syncMobileControlsVisibility() {
 
 function handleMobileControlsMediaChange() {
   syncMobileControlsVisibility();
-  renderMobileTargetPreview(state.locked || state.hovered);
+  setTarget(state.locked || state.hovered, { markCatalogDirty: false });
 }
 
 function setMobileControlsOpen(open, { restoreFocus = false, focusClose = true } = {}) {
@@ -14288,7 +14319,7 @@ function bindControls() {
   );
 
   window.addEventListener("keydown", handleViewportKeydown);
-  window.addEventListener("resize", resizeCanvas);
+  bindCanvasResizeEvents();
 }
 
 function buildLegend() {
