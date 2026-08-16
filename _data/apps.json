@@ -115,5 +115,21 @@
         "social-preview.png"
       ]
     }
+  },
+  {
+    "order": 70,
+    "slug": "hrd-live",
+    "name": "HRD Live 2026",
+    "description": "Explore a synthetic stellar population as its stars pulsate, flicker, flare, and eclipse in real time.",
+    "href": "/apps/hrd-live/",
+    "repo": "earlbellinger/hrd-live",
+    "branch": "main",
+    "sync": {
+      "commands": [
+        ["npm", "ci"],
+        ["npm", "run", "check:github"]
+      ],
+      "artifact_path": "dist/github"
+    }
   }
 ]

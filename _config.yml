@@ -5,6 +5,8 @@ baseurl: /
 
 # Build settings
 markdown: kramdown
+include:
+  - apps/hrd-live/_next
 sass:
   sass_dir: _sass
   style: compressed
