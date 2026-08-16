@@ -1,0 +1,854 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live-hr.example/schema/population-v1.schema.json",
+  "title": "PopulationTransportPayload (raw live-HR exporter asset)",
+  "description": "Versioned transport payload emitted by Python. The browser adapter converts this raw shape into the distinct normalized TypeScript PopulationManifest contract.",
+  "type": "object",
+  "required": ["schemaVersion", "population", "density", "components", "binaries", "mechanisms"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "population": {
+      "type": "object",
+      "required": ["id", "label", "kind", "formedMassMsun"],
+      "properties": {
+        "id": {"type": "string"},
+        "label": {"type": "string"},
+        "kind": {"enum": ["composite", "ssp"]},
+        "formedMassMsun": {"type": "number", "exclusiveMinimum": 0},
+        "fixedAgeGyr": {"type": ["number", "null"]},
+        "fixedMetallicityZRel": {"type": ["number", "null"]},
+        "starFormationHistory": {"type": "string", "minLength": 1},
+        "starFormationHistoryModelId": {"type": "string", "minLength": 1},
+        "ageMetallicityRelation": {"type": "string", "minLength": 1},
+        "ageMetallicityRelationModelId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "density": {
+      "type": "object",
+      "required": ["logTeffEdges", "logLuminosityEdges", "weights", "shape", "order"],
+      "properties": {
+        "logTeffEdges": {"type": "array", "minItems": 513, "maxItems": 513, "items": {"type": "number"}},
+        "logLuminosityEdges": {"type": "array", "minItems": 513, "maxItems": 513, "items": {"type": "number"}},
+        "weights": {"type": "array", "minItems": 262144, "maxItems": 262144, "items": {"type": "number", "minimum": 0}},
+        "shape": {"const": [512, 512]},
+        "order": {"const": "C"},
+        "sourceWeightSum": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "components": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/component"}
+    },
+    "mechanisms": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/mechanism"}
+    },
+    "binaries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/binary"}
+    },
+    "observations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/observation"}
+    },
+    "observedCatalog": {"$ref": "#/$defs/observedCatalog"},
+    "surveySelection": {
+      "type": "object",
+      "required": [
+        "schemaVersion", "passband", "magnitudeSystem", "selectionQuantity",
+        "defaultMagnitudeLimit", "minimumMagnitudeLimit", "maximumMagnitudeLimit",
+        "sliderStepMagnitude", "densityStepMagnitude", "modelIds",
+        "magnitudeDensity", "limitations"
+      ],
+      "properties": {
+        "schemaVersion": {"const": "1.0.0"},
+        "passband": {"const": "Gaia_G_EDR3"},
+        "magnitudeSystem": {"const": "Vega"},
+        "selectionQuantity": {"const": "mean unresolved system apparent magnitude"},
+        "defaultMagnitudeLimit": {"type": "number", "minimum": 8, "maximum": 22},
+        "minimumMagnitudeLimit": {"const": 8.0},
+        "maximumMagnitudeLimit": {"const": 22.0},
+        "sliderStepMagnitude": {"const": 0.1},
+        "densityStepMagnitude": {"const": 0.1},
+        "modelIds": {"type": "array", "minItems": 4, "items": {"type": "string", "minLength": 1}},
+        "limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "magnitudeDensity": {
+          "type": "object",
+          "required": [
+            "schemaVersion", "magnitudeThresholds", "logTeffEdges", "logLuminosityEdges",
+            "shape", "encoding", "order", "nonzeroCellCount", "file",
+            "transportEncoding", "sha256", "plainSha256", "bytes", "semantics",
+            "defaultSelectedSourceWeightSum", "photometricComponentCountWithinMaximumLimit"
+          ],
+          "properties": {
+            "schemaVersion": {"const": "1.0.0"},
+            "magnitudeThresholds": {"type": "array", "minItems": 141, "maxItems": 141, "items": {"type": "number"}},
+            "logTeffEdges": {"type": "array", "minItems": 513, "maxItems": 513, "items": {"type": "number"}},
+            "logLuminosityEdges": {"type": "array", "minItems": 513, "maxItems": 513, "items": {"type": "number"}},
+            "shape": {"const": [141, 512, 512]},
+            "encoding": {"const": "live-hr-magnitude-density-v1-little-endian"},
+            "order": {"const": "magnitude-bin sparse rows; HR cell=x*512+y"},
+            "nonzeroCellCount": {"type": "integer", "minimum": 0},
+            "file": {"type": "string", "minLength": 1},
+            "transportEncoding": {"const": "gzip"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "plainSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "bytes": {"type": "integer", "minimum": 1},
+            "semantics": {"type": "string", "minLength": 1},
+            "defaultSelectedSourceWeightSum": {"type": "number", "minimum": 0},
+            "photometricComponentCountWithinMaximumLimit": {"type": "integer", "minimum": 0},
+            "defaultSelectedComponentRealizationWeightSum": {"type": "number", "minimum": 0},
+            "photometricComponentRealizationCountWithinMaximumLimit": {"type": "integer", "minimum": 0},
+            "prototypeSemantics": {"type": "string", "minLength": 1},
+            "baselinePlacementDrawCount": {"type": "integer", "minimum": 1},
+            "rareModelPlacementDrawCount": {"type": "integer", "minimum": 1},
+            "systemSelectedRealizationWeightByMagnitudeThreshold": {"type": "array", "minItems": 141, "maxItems": 141, "items": {"type": "number", "minimum": 0}},
+            "defaultSelectedSystemRealizationWeightSum": {"type": "number", "minimum": 0},
+            "completePhotometricSystemPrototypeWeightSum": {"type": "number", "minimum": 0},
+            "unavailableSystemPrototypeWeightSum": {"type": "number", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "dependentSchemas": {
+    "surveySelection": {
+      "oneOf": [
+        {"required": ["observations"]},
+        {"required": ["observedCatalog"]}
+      ]
+    },
+    "observations": {"required": ["surveySelection"]},
+    "observedCatalog": {
+      "required": ["surveySelection"],
+      "properties": {
+        "surveySelection": {
+          "properties": {
+            "magnitudeDensity": {
+              "required": [
+                "defaultSelectedComponentRealizationWeightSum",
+                "photometricComponentRealizationCountWithinMaximumLimit",
+                "prototypeSemantics", "baselinePlacementDrawCount",
+                "rareModelPlacementDrawCount",
+                "systemSelectedRealizationWeightByMagnitudeThreshold",
+                "defaultSelectedSystemRealizationWeightSum",
+                "completePhotometricSystemPrototypeWeightSum",
+                "unavailableSystemPrototypeWeightSum"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "observedCatalog": {
+      "title": "ObservedCatalogTransportPayload",
+      "type": "object",
+      "required": ["schemaVersion", "sampling", "components", "binaries", "mechanisms", "observations"],
+      "properties": {
+        "schemaVersion": {"const": "1.0.0"},
+        "sampling": {
+          "type": "object",
+          "required": [
+            "modelId", "modelVersion", "referenceKeys", "placementDrawCount",
+            "rarePlacementDrawCount", "intrinsicComponentBudget",
+            "observedComponentBudget", "rareClassReservePerModel",
+            "overlaySemantics", "weightSemantics", "limitations", "assumptionFlags"
+          ],
+          "properties": {
+            "modelId": {"const": "weighted-observed-realization-pps-v1"},
+            "modelVersion": {"const": "1.0.0"},
+            "referenceKeys": {"const": ["skinner2016"]},
+            "placementDrawCount": {"type": "integer", "minimum": 1},
+            "rarePlacementDrawCount": {"type": "integer", "minimum": 1},
+            "intrinsicComponentBudget": {"type": "integer", "minimum": 0},
+            "observedComponentBudget": {"type": "integer", "minimum": 1},
+            "rareClassReservePerModel": {"type": "integer", "minimum": 1},
+            "overlaySemantics": {"const": "noninferential_visual_exemplars"},
+            "weightSemantics": {"type": "string", "minLength": 1},
+            "limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "assumptionFlags": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+          },
+          "additionalProperties": false
+        },
+        "components": {"type": "array", "items": {"$ref": "#/$defs/observedComponent"}},
+        "binaries": {"type": "array", "items": {"$ref": "#/$defs/observedBinary"}},
+        "mechanisms": {"type": "array", "items": {"$ref": "#/$defs/mechanism"}},
+        "observations": {"type": "array", "items": {"$ref": "#/$defs/observedObservation"}}
+      },
+      "additionalProperties": false
+    },
+    "observedRealization": {
+      "type": "object",
+      "required": [
+        "realizationSystemId", "sourcePrototypeSystemId",
+        "sourcePrototypeNumericSystemId", "realizationIndex",
+        "placementDrawIndex", "prototypeSourceWeight",
+        "realizationMeasureWeight", "visualizationCalibrationWeight",
+        "overlayRole", "overlayStratum"
+      ],
+      "properties": {
+        "realizationSystemId": {"type": "integer", "minimum": 0},
+        "sourcePrototypeSystemId": {"type": "string", "minLength": 1},
+        "sourcePrototypeNumericSystemId": {"type": "integer", "minimum": 0},
+        "realizationIndex": {"type": "integer", "minimum": 0},
+        "placementDrawIndex": {"type": "integer", "minimum": 0},
+        "prototypeSourceWeight": {"type": "number", "exclusiveMinimum": 0},
+        "realizationMeasureWeight": {"type": "number", "exclusiveMinimum": 0},
+        "visualizationCalibrationWeight": {"type": "number", "exclusiveMinimum": 0},
+        "overlayRole": {"enum": ["weighted_draw", "rare_model_reserve"]},
+        "overlayStratum": {"type": "string", "minLength": 1}
+      }
+    },
+    "observedComponent": {
+      "allOf": [
+        {"$ref": "#/$defs/component"},
+        {"$ref": "#/$defs/observedRealization"},
+        {
+          "type": "object",
+          "required": ["sourcePrototypeComponentId", "weightSemantics"],
+          "properties": {
+            "sourcePrototypeComponentId": {"type": "string", "minLength": 1},
+            "weightSemantics": {"const": "noninferential_visualization_calibration"}
+          }
+        }
+      ]
+    },
+    "observedBinary": {
+      "allOf": [
+        {"$ref": "#/$defs/binary"},
+        {"$ref": "#/$defs/observedRealization"},
+        {
+          "type": "object",
+          "required": ["sourcePrototypeBinaryId"],
+          "properties": {
+            "sourcePrototypeBinaryId": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "observedObservation": {
+      "allOf": [
+        {"$ref": "#/$defs/observation"},
+        {"$ref": "#/$defs/observedRealization"}
+      ]
+    },
+    "mechanism": {
+      "title": "MechanismTransportRecord",
+      "oneOf": [
+        {"$ref": "#/$defs/cepheidMechanism"},
+        {"$ref": "#/$defs/rrLyraeMechanism"},
+        {"$ref": "#/$defs/deltaScutiMechanism"},
+        {"$ref": "#/$defs/gammaDorMechanism"},
+        {"$ref": "#/$defs/spbMechanism"},
+        {"$ref": "#/$defs/betaCepheiMechanism"},
+        {"$ref": "#/$defs/solarLikeMechanism"},
+        {"$ref": "#/$defs/redGiantMechanism"},
+        {"$ref": "#/$defs/miraMechanism"},
+        {"$ref": "#/$defs/semiregularMechanism"},
+        {"$ref": "#/$defs/davMechanism"},
+        {"$ref": "#/$defs/dbvMechanism"},
+        {"$ref": "#/$defs/gwVirMechanism"},
+        {"$ref": "#/$defs/activityMechanism"},
+        {"$ref": "#/$defs/hotStarSlfMechanism"},
+        {"$ref": "#/$defs/microvariabilityMechanism"}
+      ]
+    },
+    "mechanismEnvelope": {
+      "type": "object",
+      "required": ["id", "componentId", "kind", "modelId", "modelVersion", "referenceKeys", "confidence", "assumptionFlags", "parameters"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "componentId": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "modelId": {"type": "string", "minLength": 1},
+        "modelVersion": {"type": "string", "minLength": 1},
+        "referenceKeys": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "confidence": {"enum": ["high", "medium", "low", "very-low"]},
+        "assumptionFlags": {"type": "array", "items": {"type": "string"}},
+        "parameters": {"type": "object"},
+        "citations": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "cepheidMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "cepheid"},
+          "modelId": {"const": "cepheid-radial-v1"},
+          "modelVersion": {"const": "1.1.0"},
+          "referenceKeys": {"const": ["anderson2016", "desomma2022", "smolec2026", "pejcha2012"]},
+          "confidence": {"const": "medium"},
+          "parameters": {"$ref": "#/$defs/cepheidRadialParameters"}
+        }}
+      ]
+    },
+    "rrLyraeMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "rr_lyrae"},
+          "modelId": {"const": "rr-lyrae-radial-v1"},
+          "modelVersion": {"const": "1.1.0"},
+          "referenceKeys": {"const": ["marconi2015", "desomma2024", "medina2026"]},
+          "confidence": {"const": "medium"},
+          "parameters": {"$ref": "#/$defs/rrLyraeRadialParameters"}
+        }}
+      ]
+    },
+    "deltaScutiMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "delta_scuti"},
+          "modelId": {"const": "delta-scuti-multimode-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["murphy2022", "aerts2010"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/deltaMultimodeParameters"}
+        }}
+      ]
+    },
+    "gammaDorMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "gamma_dor"},
+          "modelId": {"const": "gamma-dor-multimode-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["aerts2010"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "spbMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "spb"},
+          "modelId": {"const": "spb-multimode-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["aerts2010"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "betaCepheiMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "beta_cephei"},
+          "modelId": {"const": "beta-cephei-multimode-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["aerts2010"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "solarLikeMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "solar_like"},
+          "modelId": {"const": "solar-like-stochastic-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["chaplin2011", "kallinger2014"]},
+          "confidence": {"const": "medium"},
+          "parameters": {"$ref": "#/$defs/asteroseismicParameters"}
+        }}
+      ]
+    },
+    "redGiantMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "red_giant"},
+          "modelId": {"const": "red-giant-stochastic-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["chaplin2011", "kallinger2014"]},
+          "confidence": {"const": "medium"},
+          "parameters": {"$ref": "#/$defs/asteroseismicParameters"}
+        }}
+      ]
+    },
+    "miraMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "mira"},
+          "modelId": {"const": "mira-radial-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["wood2000", "aerts2010"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/miraRadialParameters"}
+        }}
+      ]
+    },
+    "semiregularMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "semiregular"},
+          "modelId": {"const": "semiregular-multimode-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["wood2000", "aerts2010"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/stochasticMultimodeParameters"}
+        }}
+      ]
+    },
+    "davMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "dav"},
+          "modelId": {"const": "dav-white-dwarf-v1"},
+          "modelVersion": {"const": "1.1.0"},
+          "referenceKeys": {"const": ["corsico2020"]},
+          "confidence": {"const": "medium"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "dbvMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "dbv"},
+          "modelId": {"const": "dbv-white-dwarf-v1"},
+          "modelVersion": {"const": "1.1.0"},
+          "referenceKeys": {"const": ["corsico2020"]},
+          "confidence": {"const": "medium"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "gwVirMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "gw_vir"},
+          "modelId": {"const": "gwvir-white-dwarf-v1"},
+          "modelVersion": {"const": "1.1.0"},
+          "referenceKeys": {"const": ["corsico2020"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "activityMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "activity"},
+          "modelId": {"const": "cool-star-activity-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["mamajek2008", "pecaut2013", "wright2011", "vansaders2016", "mcquillan2014", "herbst2021", "giles2017", "reinhold2015", "davenport2014", "davenport2016", "namekata2017"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/activityParameters"}
+        }}
+      ]
+    },
+    "hotStarSlfMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "hot_slf"},
+          "modelId": {"const": "hot-star-slf-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["bowman2025"]},
+          "confidence": {"const": "low"},
+          "parameters": {"$ref": "#/$defs/stochasticMultimodeParameters"}
+        }}
+      ]
+    },
+    "microvariabilityMechanism": {
+      "allOf": [
+        {"$ref": "#/$defs/mechanismEnvelope"},
+        {"properties": {
+          "kind": {"const": "microvariability"},
+          "modelId": {"const": "microvariability-floor-v1"},
+          "modelVersion": {"const": "1.0.0"},
+          "referenceKeys": {"const": ["aerts2010"]},
+          "confidence": {"const": "very-low"},
+          "parameters": {"$ref": "#/$defs/deterministicMultimodeParameters"}
+        }}
+      ]
+    },
+    "seed32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "radialParameters": {
+      "type": "object",
+      "required": [
+        "seed", "periodD", "phaseRad", "radiusFundamentalFraction",
+        "temperatureFundamentalFraction", "temperatureLagRad", "radiusHarmonics",
+        "temperatureHarmonics", "radiusHarmonicPhasesRad",
+        "temperatureHarmonicPhasesRad", "luminosityMeanNormalization",
+        "amplitudeDefinition"
+      ],
+      "properties": {
+        "seed": {"$ref": "#/$defs/seed32"},
+        "periodD": {"type": "number", "exclusiveMinimum": 0},
+        "phaseRad": {"type": "number"},
+        "radiusFundamentalFraction": {"type": "number", "minimum": 0},
+        "temperatureFundamentalFraction": {"type": "number", "minimum": 0},
+        "temperatureLagRad": {"type": "number"},
+        "radiusHarmonics": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+        "temperatureHarmonics": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+        "radiusHarmonicPhasesRad": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+        "temperatureHarmonicPhasesRad": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+        "luminosityMeanNormalization": {"type": "number", "exclusiveMinimum": 0},
+        "amplitudeDefinition": {"const": "fractional semi-amplitude of the fundamental"},
+        "pulsationMode": {"enum": ["F", "1O", "RRab", "RRc"]},
+        "stripAmplitudeTaper": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "cepheidRadialParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/radialParameters"},
+        {"required": ["pulsationMode", "stripAmplitudeTaper"], "properties": {"pulsationMode": {"enum": ["F", "1O"]}}}
+      ]
+    },
+    "rrLyraeRadialParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/radialParameters"},
+        {"required": ["pulsationMode", "stripAmplitudeTaper"], "properties": {"pulsationMode": {"enum": ["RRab", "RRc"]}}}
+      ]
+    },
+    "miraRadialParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/radialParameters"},
+        {"not": {"anyOf": [{"required": ["pulsationMode"]}, {"required": ["stripAmplitudeTaper"]}]}}
+      ]
+    },
+    "multimodeParameters": {
+      "type": "object",
+      "required": ["seed", "periodsD", "luminositySemiAmplitudes", "phasesRad", "temperatureToLuminosityFraction", "amplitudeDefinition"],
+      "properties": {
+        "seed": {"$ref": "#/$defs/seed32"},
+        "periodsD": {"type": "array", "minItems": 1, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "luminositySemiAmplitudes": {"type": "array", "minItems": 1, "items": {"type": "number", "minimum": 0}},
+        "phasesRad": {"type": "array", "minItems": 1, "items": {"type": "number"}},
+        "temperatureToLuminosityFraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "amplitudeDefinition": {"const": "fractional luminosity semi-amplitude"},
+        "subclass": {"enum": ["delta_scuti", "sx_phe"]},
+        "modeLifetimesD": {"type": "array", "minItems": 1, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "stochasticPhaseRenewal": {"const": true},
+        "numaxMicroHz": {"type": "number", "exclusiveMinimum": 0},
+        "oscillationAmplitudePpm": {"type": "number", "exclusiveMinimum": 0},
+        "granulationTimescalesD": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "granulationRmsFractions": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0}},
+        "granulationSeed": {"$ref": "#/$defs/seed32"}
+      },
+      "additionalProperties": false
+    },
+    "deterministicMultimodeParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/multimodeParameters"},
+        {"not": {"anyOf": [
+          {"required": ["subclass"]}, {"required": ["modeLifetimesD"]},
+          {"required": ["stochasticPhaseRenewal"]}, {"required": ["numaxMicroHz"]},
+          {"required": ["oscillationAmplitudePpm"]}, {"required": ["granulationTimescalesD"]},
+          {"required": ["granulationRmsFractions"]}, {"required": ["granulationSeed"]}
+        ]}}
+      ]
+    },
+    "deltaMultimodeParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/multimodeParameters"},
+        {"required": ["subclass"], "not": {"anyOf": [
+          {"required": ["modeLifetimesD"]}, {"required": ["stochasticPhaseRenewal"]},
+          {"required": ["numaxMicroHz"]}, {"required": ["oscillationAmplitudePpm"]},
+          {"required": ["granulationTimescalesD"]}, {"required": ["granulationRmsFractions"]},
+          {"required": ["granulationSeed"]}
+        ]}}
+      ]
+    },
+    "stochasticMultimodeParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/multimodeParameters"},
+        {"required": ["modeLifetimesD", "stochasticPhaseRenewal"], "not": {"anyOf": [
+          {"required": ["subclass"]}, {"required": ["numaxMicroHz"]},
+          {"required": ["oscillationAmplitudePpm"]}, {"required": ["granulationTimescalesD"]},
+          {"required": ["granulationRmsFractions"]}, {"required": ["granulationSeed"]}
+        ]}}
+      ]
+    },
+    "asteroseismicParameters": {
+      "allOf": [
+        {"$ref": "#/$defs/multimodeParameters"},
+        {"required": [
+          "modeLifetimesD", "stochasticPhaseRenewal", "numaxMicroHz",
+          "oscillationAmplitudePpm", "granulationTimescalesD",
+          "granulationRmsFractions", "granulationSeed"
+        ], "not": {"required": ["subclass"]}}
+      ]
+    },
+    "activityParameters": {
+      "type": "object",
+      "required": [
+        "seed", "rotationPeriodD", "rotationSource", "convectiveTurnoverD", "rossby",
+        "spinInclinationRad", "spotTemperatureK", "spotAmplitudeBandPeakToPeak",
+        "spotAmplitudeBolometricPeakToPeak", "spotLifetimeD", "deltaOmegaRadPerD",
+        "spotLatitudesRad", "spotPeriodsD", "spotWeights", "spotPhasesRad",
+        "flareActive", "flarePowerFraction", "flareAlpha",
+        "flareEquivalentDurationMinS", "flareEquivalentDurationMaxS", "flareRatePerD",
+        "flareTemplateIntegral", "flareSeed", "amplitudeDefinition"
+      ],
+      "properties": {
+        "seed": {"$ref": "#/$defs/seed32"},
+        "rotationPeriodD": {"type": "number", "exclusiveMinimum": 0},
+        "rotationSource": {"enum": ["mamajek_hillenbrand_gyro", "broad_rotation_prior"]},
+        "convectiveTurnoverD": {"type": "number", "exclusiveMinimum": 0},
+        "rossby": {"type": "number", "exclusiveMinimum": 0},
+        "spinInclinationRad": {"type": "number", "minimum": 0, "maximum": 3.141592653589793},
+        "spotTemperatureK": {"type": "number", "exclusiveMinimum": 0},
+        "spotAmplitudeBandPeakToPeak": {"type": "number", "minimum": 0},
+        "spotAmplitudeBolometricPeakToPeak": {"type": "number", "minimum": 0},
+        "spotLifetimeD": {"type": "number", "exclusiveMinimum": 0},
+        "deltaOmegaRadPerD": {"type": "number", "minimum": 0},
+        "spotLatitudesRad": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}},
+        "spotPeriodsD": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "spotWeights": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0}},
+        "spotPhasesRad": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}},
+        "flareActive": {"type": "boolean"},
+        "flarePowerFraction": {"type": "number", "minimum": 0},
+        "flareAlpha": {"type": "number", "exclusiveMinimum": 0},
+        "flareEquivalentDurationMinS": {"type": "number", "exclusiveMinimum": 0},
+        "flareEquivalentDurationMaxS": {"type": "number", "exclusiveMinimum": 0},
+        "flareRatePerD": {"type": "number", "minimum": 0},
+        "flareTemplateIntegral": {"type": "number", "exclusiveMinimum": 0},
+        "flareSeed": {"$ref": "#/$defs/seed32"},
+        "amplitudeDefinition": {"const": "peak-to-peak disk-integrated fractional flux"}
+      },
+      "additionalProperties": false
+    },
+    "binaryGeometry": {
+      "type": "object",
+      "required": [
+        "periodD", "eccentricity", "inclinationRad", "argumentOfPeriastronRad",
+        "conjunctionEpochD", "modelId", "modelVersion", "referenceKeys",
+        "confidence", "assumptionFlags"
+      ],
+      "properties": {
+        "periodD": {"type": "number", "exclusiveMinimum": 0},
+        "eccentricity": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+        "inclinationRad": {"type": "number", "minimum": 0, "maximum": 1.5707963267948966},
+        "argumentOfPeriastronRad": {"type": "number", "minimum": 0, "maximum": 6.283185307179586},
+        "conjunctionEpochD": {"type": "number", "minimum": 0},
+        "semimajorAxisRsun": {"type": "number", "exclusiveMinimum": 0},
+        "periastronRsun": {"type": "number", "exclusiveMinimum": 0},
+        "seed": {"$ref": "#/$defs/seed32"},
+        "modelId": {"const": "binary-orbit-geometry-v1"},
+        "modelVersion": {"const": "1.0.0"},
+        "referenceKeys": {"const": ["mandel2002"]},
+        "confidence": {"const": "high"},
+        "assumptionFlags": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "component": {
+      "title": "ComponentTransportRecord",
+      "type": "object",
+      "required": [
+        "id", "populationId", "systemId", "component", "meanMassMsun", "meanTeffK",
+        "meanLuminosityLsun", "meanRadiusRsun", "ageGyr", "metallicity", "isBinary",
+        "sourceWeight", "inclusionProbability", "displayWeight", "terminalFrozen",
+        "modelFlags", "mechanisms", "label", "role", "massMsun", "ageMyr", "teffK",
+        "luminosityLsun", "radiusRsun", "metallicityMassFraction",
+        "birthMetallicityMassFraction", "metallicityFeH", "birthMetallicityFeH",
+        "mistFeH", "mistDuplicateInitialMass", "evolutionaryState", "mechanismIds"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[^:]+:[0-9]+:[12]$"},
+        "populationId": {"type": "string"},
+        "systemId": {"type": "integer", "minimum": 0},
+        "component": {"enum": ["primary", "secondary"]},
+        "meanMassMsun": {"type": "number", "exclusiveMinimum": 0},
+        "meanTeffK": {"type": "number", "exclusiveMinimum": 0},
+        "meanLuminosityLsun": {"type": "number", "exclusiveMinimum": 0},
+        "meanRadiusRsun": {"type": "number", "exclusiveMinimum": 0},
+        "initialMassMsun": {"type": "number", "exclusiveMinimum": 0},
+        "ageGyr": {"type": "number", "minimum": 0},
+        "metallicity": {"type": "number", "exclusiveMinimum": 0},
+        "metallicityBirth": {"type": "number", "exclusiveMinimum": 0},
+        "metallicityMassFraction": {"type": "number", "exclusiveMinimum": 0},
+        "birthMetallicityMassFraction": {"type": "number", "exclusiveMinimum": 0},
+        "state": {"type": ["string", "null"]},
+        "compactObjectType": {"type": ["string", "null"]},
+        "isBinary": {"type": "boolean"},
+        "sourceWeight": {"type": "number", "minimum": 0},
+        "inclusionProbability": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "displayWeight": {"type": "number", "minimum": 0},
+        "terminalFrozen": {"type": "boolean"},
+        "mistFeH": {"type": ["number", "null"]},
+        "mistEep": {"type": ["number", "null"]},
+        "mistPhase": {"type": ["number", "null"]},
+        "mistWdCoolingSequence": {"type": "boolean"},
+        "mistTerminalEep": {"type": "boolean"},
+        "mistSourcePhaseUnmapped": {"type": "boolean"},
+        "mistInterpolationCrossesPhase": {"type": "boolean"},
+        "mistDuplicateInitialMass": {"type": "boolean"},
+        "mistOutOfRangeReason": {"type": ["string", "null"]},
+        "trackMaxAgeGyr": {"type": ["number", "null"], "minimum": 0},
+        "stateEpoch": {"type": ["string", "null"]},
+        "modelFlags": {"type": "array", "items": {"type": "string"}},
+        "mechanisms": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mechanism"}},
+        "label": {"type": "string"},
+        "role": {"enum": ["primary", "secondary"]},
+        "massMsun": {"type": "number", "exclusiveMinimum": 0},
+        "ageMyr": {"type": "number", "minimum": 0},
+        "teffK": {"type": "number", "exclusiveMinimum": 0},
+        "luminosityLsun": {"type": "number", "exclusiveMinimum": 0},
+        "radiusRsun": {"type": "number", "exclusiveMinimum": 0},
+        "metallicityFeH": {"type": "number"},
+        "birthMetallicityFeH": {"type": "number"},
+        "evolutionaryState": {"type": ["string", "null"]},
+        "mechanismIds": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        ,"absoluteGaiaGMag": {"type": ["number", "null"]}
+        ,"gaiaPhotometryValid": {"type": "boolean"}
+        ,"gaiaPhotometryReason": {"type": ["string", "null"]}
+        ,"gaiaPhotometryModelId": {"const": "mist-v2.5-gaia-edr3-photometry-v1"}
+        ,"gaiaPhotometryModelVersion": {"const": "1.0.0"}
+        ,"magnitudeSelectionStratum": {"type": "string", "minLength": 1}
+        ,"observationFlags": {"type": "array", "items": {"type": "string"}}
+        ,"realizationSystemId": {"type": "integer", "minimum": 0}
+        ,"sourcePrototypeSystemId": {"type": "string", "minLength": 1}
+        ,"sourcePrototypeNumericSystemId": {"type": "integer", "minimum": 0}
+        ,"sourcePrototypeComponentId": {"type": "string", "minLength": 1}
+        ,"realizationIndex": {"type": "integer", "minimum": 0}
+        ,"placementDrawIndex": {"type": "integer", "minimum": 0}
+        ,"prototypeSourceWeight": {"type": "number", "exclusiveMinimum": 0}
+        ,"realizationMeasureWeight": {"type": "number", "exclusiveMinimum": 0}
+        ,"visualizationCalibrationWeight": {"type": "number", "exclusiveMinimum": 0}
+        ,"overlayRole": {"enum": ["weighted_draw", "rare_model_reserve"]}
+        ,"overlayStratum": {"type": "string", "minLength": 1}
+        ,"weightSemantics": {"const": "noninferential_visualization_calibration"}
+      },
+      "additionalProperties": true
+    },
+    "observation": {
+      "title": "SystemObservationTransportRecord",
+      "type": "object",
+      "required": [
+        "id", "populationId", "systemId", "componentIds",
+        "expectedComponentCount", "availableComponentCount", "distanceKpc",
+        "distanceModulusMag", "extinctionGaiaGMag", "absoluteGaiaGMag",
+        "meanApparentGaiaGMag", "photometryComplete", "magnitudeSelectionStratum",
+        "observabilityModelIds", "assumptionFlags"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "populationId": {"type": "string", "minLength": 1},
+        "systemId": {"type": "integer", "minimum": 0},
+        "componentIds": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string", "minLength": 1}},
+        "expectedComponentCount": {"type": "integer", "minimum": 1, "maximum": 2},
+        "availableComponentCount": {"type": "integer", "minimum": 1, "maximum": 2},
+        "distanceKpc": {"type": "number", "exclusiveMinimum": 0},
+        "distanceModulusMag": {"type": "number"},
+        "extinctionGaiaGMag": {"type": "number", "minimum": 0},
+        "absoluteGaiaGMag": {"type": ["number", "null"]},
+        "meanApparentGaiaGMag": {"type": ["number", "null"]},
+        "photometryComplete": {"type": "boolean"},
+        "magnitudeSelectionStratum": {"type": "string", "minLength": 1},
+        "observabilityModelIds": {"type": "array", "minItems": 4, "items": {"type": "string", "minLength": 1}},
+        "assumptionFlags": {"type": "array", "items": {"type": "string"}}
+        ,"realizationSystemId": {"type": "integer", "minimum": 0}
+        ,"sourcePrototypeSystemId": {"type": "string", "minLength": 1}
+        ,"sourcePrototypeNumericSystemId": {"type": "integer", "minimum": 0}
+        ,"realizationIndex": {"type": "integer", "minimum": 0}
+        ,"placementDrawIndex": {"type": "integer", "minimum": 0}
+        ,"prototypeSourceWeight": {"type": "number", "exclusiveMinimum": 0}
+        ,"realizationMeasureWeight": {"type": "number", "exclusiveMinimum": 0}
+        ,"visualizationCalibrationWeight": {"type": "number", "exclusiveMinimum": 0}
+        ,"overlayRole": {"enum": ["weighted_draw", "rare_model_reserve"]}
+        ,"overlayStratum": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "binary": {
+      "title": "BinarySystemTransportRecord",
+      "type": "object",
+      "required": [
+        "id", "populationId", "systemId", "componentIds", "periodD", "eccentricity",
+        "geometry", "interactionClass", "stateEpoch", "modelFlags",
+        "primaryComponentId", "secondaryComponentId", "orbitalPeriodDays", "inclinationRad",
+        "argumentOfPeriastronRad", "conjunctionEpochDays", "timeOfPeriastronDays",
+        "orbitalModelId", "eclipseModelId", "orbitalModulationModelId"
+      ],
+      "properties": {
+        "id": {"type": "string"},
+        "populationId": {"type": "string"},
+        "systemId": {"type": "integer", "minimum": 0},
+        "componentIds": {"type": "array", "items": {"type": "string"}},
+        "periodD": {"type": ["number", "null"]},
+        "eccentricity": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+        "geometry": {"$ref": "#/$defs/binaryGeometry"},
+        "interactionClass": {"type": ["string", "null"]},
+        "stateEpoch": {"type": ["string", "null"]},
+        "modelFlags": {"type": "array", "items": {"type": "string"}},
+        "primaryComponentId": {"type": "string"},
+        "secondaryComponentId": {"type": "string"},
+        "orbitalPeriodDays": {"type": "number", "exclusiveMinimum": 0},
+        "inclinationRad": {"type": "number", "minimum": 0, "maximum": 1.5707963267948966},
+        "argumentOfPeriastronRad": {"type": "number", "minimum": 0, "maximum": 6.283185307179586},
+        "conjunctionEpochDays": {"type": "number", "minimum": 0},
+        "timeOfPeriastronDays": {"type": "number", "minimum": 0},
+        "orbitalModelId": {"const": "binary-orbit-geometry-v1"},
+        "eclipseModelId": {"const": "binary-eclipse-linear-ld-v1"},
+        "orbitalModulationModelId": {"const": "binary-ellipsoidal-reflection-v1"}
+        ,"detachedFilterModelId": {"const": "binary.detached_roche_history"}
+        ,"detachedFilterModelVersion": {"const": "1.0.0"}
+        ,"detachedFilterThreshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+        ,"detachedFilterRetained": {"const": true}
+        ,"detachedHistoryCertified": {"const": true}
+        ,"detachedFilterReason": {"const": "retained_detached"}
+        ,"detachedFilterMethod": {"type": "string", "minLength": 1}
+        ,"historicalMaxFillPrimary": {"type": "number", "minimum": 0}
+        ,"historicalMaxFillSecondary": {"type": "number", "minimum": 0}
+        ,"historicalMaxFill": {"type": "number", "minimum": 0}
+        ,"historicalMaxOverlap": {"type": "number", "minimum": 0, "exclusiveMaximum": 1}
+        ,"historicalAgeAtMaxFillGyr": {"type": ["number", "null"], "minimum": 0}
+        ,"birthOrbitalPeriodDays": {"type": "number", "exclusiveMinimum": 0}
+        ,"birthEccentricity": {"type": "number", "minimum": 0, "exclusiveMaximum": 1}
+        ,"birthSemimajorAxisRsun": {"type": "number", "exclusiveMinimum": 0}
+        ,"birthPeriastronRsun": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"binaryEvolutionMode": {"const": "mist_detached_independent"}},
+            "required": ["binaryEvolutionMode"]
+          },
+          "then": {
+            "required": [
+              "detachedFilterModelId", "detachedFilterModelVersion",
+              "detachedFilterThreshold", "detachedFilterRetained",
+              "detachedHistoryCertified", "detachedFilterReason",
+              "detachedFilterMethod", "historicalMaxFillPrimary",
+              "historicalMaxFillSecondary", "historicalMaxFill",
+              "historicalMaxOverlap", "historicalAgeAtMaxFillGyr",
+              "birthOrbitalPeriodDays", "birthEccentricity",
+              "birthSemimajorAxisRsun", "birthPeriastronRsun"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,1 @@
+function e(e){return new Worker(`/apps/hrd-live/_next/static/live-hr.worker-BgL7fIUC.js`,{name:e?.name})}export{e as default};
