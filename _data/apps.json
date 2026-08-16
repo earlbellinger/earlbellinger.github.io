@@ -127,7 +127,7 @@
     "sync": {
       "commands": [
         ["npm", "ci"],
-        ["npm", "run", "check:github"]
+        ["npm", "run", "build:github"]
       ],
       "artifact_path": "dist/github"
     }
