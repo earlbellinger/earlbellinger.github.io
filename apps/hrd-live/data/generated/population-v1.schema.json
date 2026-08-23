@@ -361,7 +361,7 @@
         {"properties": {
           "kind": {"const": "solar_like"},
           "modelId": {"const": "solar-like-stochastic-v1"},
-          "modelVersion": {"const": "1.0.0"},
+          "modelVersion": {"const": "1.1.0"},
           "referenceKeys": {"const": ["chaplin2011", "kallinger2014"]},
           "confidence": {"const": "medium"},
           "parameters": {"$ref": "#/$defs/asteroseismicParameters"}
@@ -374,7 +374,7 @@
         {"properties": {
           "kind": {"const": "red_giant"},
           "modelId": {"const": "red-giant-stochastic-v1"},
-          "modelVersion": {"const": "1.0.0"},
+          "modelVersion": {"const": "1.1.0"},
           "referenceKeys": {"const": ["chaplin2011", "kallinger2014"]},
           "confidence": {"const": "medium"},
           "parameters": {"$ref": "#/$defs/asteroseismicParameters"}
